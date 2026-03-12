@@ -54,7 +54,13 @@ config :spark,
 config :kiroku,
   ecto_repos: [Kiroku.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Kiroku.Accounts],
+  ash_domains: [
+    Kiroku.Repository,
+    Kiroku.Accounts,
+    Kiroku.Content,
+    Kiroku.Access,
+    Kiroku.Analytics
+  ],
   ash_authentication: [return_error_on_invalid_magic_link_token?: true]
 
 # Configure the endpoint

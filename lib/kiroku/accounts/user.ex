@@ -89,11 +89,44 @@ defmodule Kiroku.Accounts.User do
 
       run AshAuthentication.Strategy.MagicLink.Request
     end
+
+    update :update_profile do
+      accept [:full_name, :external_id]
+    end
+
+    update :set_user_type do
+      accept [:user_type]
+    end
+
+    update :deactivate do
+      change set_attribute(:active, false)
+    end
   end
 
   policies do
     bypass AshAuthentication.Checks.AshAuthenticationInteraction do
       authorize_if always()
+    end
+
+    policy action_type(:read) do
+      authorize_if actor_attribute_equals(:user_type, :admin)
+      authorize_if actor_attribute_equals(:user_type, :superadmin)
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    policy action(:set_user_type) do
+      authorize_if actor_attribute_equals(:user_type, :admin)
+      authorize_if actor_attribute_equals(:user_type, :superadmin)
+    end
+
+    policy action(:update_profile) do
+      authorize_if expr(id == ^actor(:id))
+      authorize_if actor_attribute_equals(:user_type, :admin)
+    end
+
+    policy action(:deactivate) do
+      authorize_if actor_attribute_equals(:user_type, :admin)
+      authorize_if actor_attribute_equals(:user_type, :superadmin)
     end
   end
 
@@ -104,6 +137,31 @@ defmodule Kiroku.Accounts.User do
       allow_nil? false
       public? true
     end
+
+    attribute :full_name, :string, public?: true
+    attribute :external_id, :string, public?: true
+
+    attribute :user_type, :atom,
+      constraints: [one_of: [:member, :submitter, :reviewer, :admin, :superadmin]],
+      default: :member,
+      public?: true
+
+    attribute :active, :boolean, default: true, public?: true
+  end
+
+  relationships do
+    has_many :group_memberships, Kiroku.Accounts.GroupMembership, public?: true
+
+    many_to_many :groups, Kiroku.Accounts.Group do
+      through Kiroku.Accounts.GroupMembership
+      source_attribute_on_join_resource :user_id
+      destination_attribute_on_join_resource :group_id
+      public? true
+    end
+
+    has_many :submitted_items, Kiroku.Repository.Item,
+      destination_attribute: :submitter_id,
+      public?: true
   end
 
   identities do

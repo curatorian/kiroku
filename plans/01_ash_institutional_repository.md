@@ -2162,7 +2162,7 @@ defmodule InstitutionalRepositoryWeb.Router do
     scope "/", InstitutionalRepositoryWeb do
       pipe_through [:browser, :require_auth]
 
-      live "/mydspace",                MyDspaceLive.Dashboard
+      live "/mykiroku",                MyKirokuLive.Dashboard
       live "/items/:id/edit",          ItemLive.Edit
       live "/submit",                  SubmissionLive.SelectCollection
       live "/workspaceitems/:id",      SubmissionLive.Workspace

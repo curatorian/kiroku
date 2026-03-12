@@ -8,5 +8,7 @@ defmodule Kiroku.Accounts do
   resources do
     resource Kiroku.Accounts.Token
     resource Kiroku.Accounts.User
+    resource Kiroku.Accounts.Group
+    resource Kiroku.Accounts.GroupMembership
   end
 end
