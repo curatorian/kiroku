@@ -24,6 +24,16 @@ config :kiroku, KirokuWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
+  # MSSQL legacy read-only import database (import-time only)
+  config :kiroku, Kiroku.LegacyRepo,
+    adapter: Ecto.Adapters.Tds,
+    hostname: System.get_env("MSSQL_HOST"),
+    database: System.get_env("MSSQL_DB"),
+    username: System.get_env("MSSQL_USER"),
+    password: System.get_env("MSSQL_PASS"),
+    port: String.to_integer(System.get_env("MSSQL_PORT", "1433")),
+    pool_size: 2
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -67,11 +77,6 @@ if config_env() == :prod do
       ip: {0, 0, 0, 0, 0, 0, 0, 0}
     ],
     secret_key_base: secret_key_base
-
-  config :kiroku,
-    token_signing_secret:
-      System.get_env("TOKEN_SIGNING_SECRET") ||
-        raise("Missing environment variable `TOKEN_SIGNING_SECRET`!")
 
   # ## SSL Support
   #

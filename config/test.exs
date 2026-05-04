@@ -1,7 +1,4 @@
 import Config
-config :kiroku, token_signing_secret: "HMf6X/OWHGj6HpHIt3LRL/mj6mhIFTmm"
-config :bcrypt_elixir, log_rounds: 1
-config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 
 # Configure your database
 #
@@ -20,7 +17,7 @@ config :kiroku, Kiroku.Repo,
 # you can enable the server option below.
 config :kiroku, KirokuWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
-  secret_key_base: "tCemyYdzEW0PPvFqNCH+WRXRjV3gwQjO8wQm3xA6Ep1VUZ6xI2aLgR1cDjyoA0I9",
+  secret_key_base: "u73fgE2wWy70obycjsrcyR8y/G98+gsG9ueTqeTAMffBgJi6ib9j0hyQ99h9t5v+",
   server: false
 
 # In test we don't send emails
@@ -31,6 +28,9 @@ config :swoosh, :api_client, false
 
 # Print only warnings and errors during test
 config :logger, level: :warning
+
+# Oban: disable all queues and plugins in test
+config :kiroku, Oban, testing: :inline
 
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime

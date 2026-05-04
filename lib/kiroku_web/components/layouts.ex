@@ -35,37 +35,68 @@ defmodule KirokuWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
+    <header style="background: var(--color-grimoire); border-bottom: 1px solid rgba(155,126,200,0.12);">
+      <nav class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
+        <%!-- Wordmark --%>
+        <a href={~p"/"} class="flex items-center gap-2 group">
+          <span class="kiroku-kanji text-2xl leading-none">記</span>
+          <span class="kiroku-wordmark text-xl leading-none">Kiroku</span>
         </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
+
+        <%!-- Main nav --%>
+        <div
+          class="hidden md:flex items-center gap-6 text-sm font-medium"
+          style="color: var(--color-wisteria);"
+        >
+          <a href={~p"/communities"} class="hover:text-white transition-colors">Communities</a>
+          <a href={~p"/search"} class="hover:text-white transition-colors flex items-center gap-1">
+            <.icon name="hero-magnifying-glass" class="w-4 h-4" /> Search
+          </a>
+        </div>
+
+        <%!-- Right side --%>
+        <div class="flex items-center gap-3">
+          <%= if @current_scope do %>
+            <span class="text-sm" style="color: var(--color-dust);">{@current_scope.email}</span>
+            <a
+              href={~p"/my/items"}
+              class="text-sm px-3 py-1.5 rounded-lg transition-colors"
+              style="background: rgba(123,79,166,0.15); color: var(--color-lavender); border: 1px solid rgba(123,79,166,0.25);"
+            >
+              My Items
             </a>
-          </li>
-        </ul>
-      </div>
+            <.link
+              href={~p"/users/log_out"}
+              method="delete"
+              class="text-sm px-3 py-1.5 rounded-lg transition-colors"
+              style="color: var(--color-dust);"
+            >
+              Sign out
+            </.link>
+          <% else %>
+            <a
+              href={~p"/users/log_in"}
+              class="text-sm px-3 py-1.5 rounded-lg transition-colors"
+              style="color: var(--color-lavender);"
+            >
+              Sign in
+            </a>
+            <a
+              href={~p"/users/register"}
+              class="text-sm px-4 py-1.5 rounded-lg font-medium transition-colors"
+              style="background: var(--color-patchouli); color: white;"
+            >
+              Register
+            </a>
+          <% end %>
+        </div>
+      </nav>
+      <%!-- Ribbon tricolor line --%>
+      <div class="kiroku-ribbon"></div>
     </header>
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
-        {render_slot(@inner_block)}
-      </div>
+    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+      {render_slot(@inner_block)}
     </main>
 
     <.flash_group flash={@flash} />

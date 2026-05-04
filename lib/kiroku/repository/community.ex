@@ -1,87 +1,40 @@
 defmodule Kiroku.Repository.Community do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "communities"
-    repo Kiroku.Repo
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-  actions do
-    defaults [:read, :destroy]
+  schema "communities" do
+    field :name, :string
+    field :handle, :string
+    field :short_description, :string
+    field :description, :string
+    field :logo_bitstream_id, :binary_id
+    field :position, :integer, default: 0
+    field :is_active, :boolean, default: true
 
-    create :create do
-      accept [
-        :name,
-        :handle,
-        :short_description,
-        :description,
-        :logo_bitstream_id,
-        :position,
-        :parent_community_id,
-        :is_active
-      ]
-
-      validate present(:name)
-    end
-
-    update :update do
-      accept [
-        :name,
-        :handle,
-        :short_description,
-        :description,
-        :logo_bitstream_id,
-        :position,
-        :is_active
-      ]
-    end
-
-    read :by_handle do
-      argument :handle, :string, allow_nil?: false
-      filter expr(handle == ^arg(:handle))
-    end
-  end
-
-  policies do
-    policy action_type(:read) do
-      authorize_if always()
-    end
-
-    policy action_type([:create, :update, :destroy]) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :handle, :string, public?: true
-    attribute :short_description, :string, public?: true
-    attribute :description, :string, public?: true
-    attribute :logo_bitstream_id, :uuid, public?: true
-    attribute :position, :integer, default: 0, public?: true
-    attribute :is_active, :boolean, default: true, public?: true
+    belongs_to :parent_community, __MODULE__
+    has_many :subcommunities, __MODULE__, foreign_key: :parent_community_id
+    has_many :collections, Kiroku.Repository.Collection
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :parent_community, __MODULE__, public?: true
-
-    has_many :subcommunities, __MODULE__,
-      destination_attribute: :parent_community_id,
-      public?: true
-
-    has_many :collections, Kiroku.Repository.Collection, public?: true
-  end
-
-  identities do
-    identity :unique_handle, [:handle]
+  def changeset(community, attrs) do
+    community
+    |> cast(attrs, [
+      :name,
+      :handle,
+      :short_description,
+      :description,
+      :logo_bitstream_id,
+      :position,
+      :parent_community_id,
+      :is_active
+    ])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 1, max: 255)
+    |> unique_constraint(:handle)
   end
 end

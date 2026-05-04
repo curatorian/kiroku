@@ -1,9 +1,7 @@
 defmodule KirokuWeb.Router do
   use KirokuWeb, :router
 
-  use AshAuthentication.Phoenix.Router
-
-  import AshAuthentication.Plug.Helpers
+  import KirokuWeb.UserAuth
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -12,159 +10,125 @@ defmodule KirokuWeb.Router do
     plug :put_root_layout, html: {KirokuWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-    plug :load_from_session
+    plug :fetch_current_user
   end
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug :load_from_bearer
-    plug :set_actor, :user
   end
 
-  pipeline :xml do
-    plug :accepts, ["xml", "json"]
-  end
+  # ── Public routes (no auth required) ──────────────────────────────────────────
 
-  pipeline :require_auth do
-    plug KirokuWeb.Plugs.RequireAuth
-  end
-
-  pipeline :require_admin do
-    plug KirokuWeb.Plugs.RequireAdmin
-  end
-
-  # ── Authentication routes (magic link) ──────────────────────────────────────
-  scope "/", KirokuWeb do
-    pipe_through :browser
-
-    auth_routes AuthController, Kiroku.Accounts.User, path: "/auth"
-    sign_out_route AuthController
-
-    sign_in_route register_path: "/register",
-                  reset_path: "/reset",
-                  auth_routes_prefix: "/auth",
-                  on_mount: [{KirokuWeb.LiveUserAuth, :live_no_user}],
-                  overrides: [
-                    KirokuWeb.AuthOverrides,
-                    Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI
-                  ]
-
-    reset_route auth_routes_prefix: "/auth",
-                overrides: [
-                  KirokuWeb.AuthOverrides,
-                  Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI
-                ]
-
-    confirm_route Kiroku.Accounts.User, :confirm_new_user,
-      auth_routes_prefix: "/auth",
-      overrides: [KirokuWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI]
-
-    magic_sign_in_route(Kiroku.Accounts.User, :magic_link,
-      auth_routes_prefix: "/auth",
-      overrides: [KirokuWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI]
-    )
-  end
-
-  # ── Public routes ───────────────────────────────────────────────────────────
   scope "/", KirokuWeb do
     pipe_through :browser
 
     get "/", PageController, :home
 
-    # Handle resolver (DSpace-compatible)
-    get "/handle/:prefix/:suffix", HandleController, :resolve
-    get "/handle/:prefix/:suffix/statistics", HandleController, :statistics
+    # Repository browsing
+    get "/communities", CommunityController, :index
+    get "/communities/:handle", CommunityController, :show
+    get "/collections/:handle", CollectionController, :show
+    get "/items/:handle", ItemController, :show
 
-    # Bitstream download routes
-    get "/bitstream/handle/:prefix/:suffix/:filename",
-        BitstreamController,
-        :download_by_handle_filename
+    # Bitstream file access
+    get "/items/:item_id/bitstreams/:id", BitstreamController, :show
 
-    get "/bitstream/handle/:prefix/:suffix/:sequence/:filename",
-        BitstreamController,
-        :download_by_handle
+    # Search
+    get "/search", SearchController, :index
 
-    get "/bitstreams/:id/download", BitstreamController, :download
-
-    # Citation export
-    get "/items/:id/export.bib", CitationController, :bibtex
-    get "/items/:id/export.ris", CitationController, :ris
-    get "/items/:id/export.enw", CitationController, :endnote
+    # OAI-PMH endpoint
+    get "/oai", OaiController, :index
   end
 
-  # ── Public LiveView routes ──────────────────────────────────────────────────
+  # ── Auth routes (guest only) ───────────────────────────────────────────────────
+
   scope "/", KirokuWeb do
-    pipe_through :browser
+    pipe_through [:browser, :redirect_if_user_is_authenticated]
 
-    ash_authentication_live_session :public_routes,
-      on_mount: [{KirokuWeb.LiveUserAuth, :live_user_optional}] do
-      live "/items/:id", ItemLive.Show
-      live "/items/:id/full", ItemLive.ShowFull
-
-      live "/communities", CommunityLive.Index
-      live "/communities/:id", CommunityLive.Show
-
-      live "/collections/:id", CollectionLive.Show
-
-      live "/browse", BrowseLive.Index
-      live "/browse/author", BrowseLive.Author
-      live "/browse/title", BrowseLive.Title
-      live "/browse/dateissued", BrowseLive.Date
-      live "/browse/subject", BrowseLive.Subject
-
-      live "/search", SearchLive.Index
-
-      live "/statistics", StatisticsLive.Index
-      live "/statistics/items/:id", StatisticsLive.Item
-      live "/statistics/collections/:id", StatisticsLive.Collection
-
-      live "/info/about", InfoLive.About
-      live "/info/privacy", InfoLive.Privacy
-      live "/info/help", InfoLive.Help
+    live_session :guest,
+      on_mount: [{KirokuWeb.UserAuth, :redirect_if_user_is_authenticated}] do
+      live "/users/register", UserRegistrationLive, :new
+      live "/users/log_in", UserSessionLive, :new
+      live "/users/reset_password", UserResetPasswordLive, :new
+      live "/users/reset_password/:token", UserResetPasswordLive, :edit
     end
   end
 
-  # ── Authenticated routes ────────────────────────────────────────────────────
+  # ── Authenticated routes ───────────────────────────────────────────────────────
+
   scope "/", KirokuWeb do
-    pipe_through [:browser, :require_auth]
+    pipe_through [:browser, :require_authenticated_user]
 
-    ash_authentication_live_session :authenticated_routes,
-      on_mount: [{KirokuWeb.LiveUserAuth, :live_user_required}] do
-      live "/mykiroku", MyKirokuLive.Dashboard
-      live "/items/:id/edit", ItemLive.Edit
-      live "/submit", SubmissionLive.SelectCollection
-      live "/workspaceitems/:id", SubmissionLive.Workspace
-      live "/workspaceitems/:id/edit", SubmissionLive.Edit
-      live "/workflowitems/:id", WorkflowLive.Review
-      live "/profile", ProfileLive.Show
-      live "/profile/edit", ProfileLive.Edit
-      live "/collections/:id/submit", SubmissionLive.New
+    # Session delete still uses a controller (needs POST + redirect)
+    delete "/users/log_out", UserSessionController, :delete
+
+    live_session :authenticated,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      # Email confirmation
+      live "/users/confirm", UserConfirmationLive, :new
+      live "/users/confirm/:token", UserConfirmationLive, :edit
+
+      # User settings
+      live "/users/settings", UserSettingsLive, :edit
+      live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
+
+      # Submitter: own items
+      live "/my/items", MyItemLive.Index, :index
+      live "/my/items/new", MyItemLive.Index, :new
+      live "/my/items/:id/edit", MyItemLive.Index, :edit
+
+      # Submission form
+      live "/submit", SubmissionLive.New, :new
     end
   end
 
-  # ── Admin routes (AshAdmin + custom) ────────────────────────────────────────
-  scope "/admin", KirokuWeb do
-    pipe_through [:browser, :require_admin]
+  # ── Staff / Admin routes ───────────────────────────────────────────────────────
 
-    ash_authentication_live_session :admin_routes,
-      on_mount: [{KirokuWeb.LiveUserAuth, :live_user_required}] do
-      live "/embargo", Admin.EmbargoLive.Index
-      live "/batch-import", Admin.BatchImportLive.Index
+  scope "/admin", KirokuWeb.Admin do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      # Dashboard
+      live "/", DashboardLive, :index
+
+      # Community management
+      live "/communities", CommunityLive.Index, :index
+      live "/communities/new", CommunityLive.Index, :new
+      live "/communities/:id/edit", CommunityLive.Index, :edit
+      live "/communities/:id", CommunityLive.Show, :show
+
+      # Collection management
+      live "/collections", CollectionLive.Index, :index
+      live "/collections/new", CollectionLive.Index, :new
+      live "/collections/:id/edit", CollectionLive.Index, :edit
+      live "/collections/:id", CollectionLive.Show, :show
+
+      # Item review
+      live "/items", ItemLive.Index, :index
+      live "/items/:id", ItemLive.Show, :show
+      live "/items/:id/review", ItemLive.Review, :review
+
+      # User management
+      live "/users", UserLive.Index, :index
+      live "/users/:id", UserLive.Show, :show
+      live "/users/:id/edit", UserLive.Show, :edit
+
+      # Storage settings
+      live "/settings", SettingsLive, :index
     end
   end
 
-  # ── OAI-PMH ────────────────────────────────────────────────────────────────
-  scope "/server/oai", KirokuWeb do
-    pipe_through :xml
-    get "/request", OaiPmhController, :handle_request
+  # ── OAI-PMH API ───────────────────────────────────────────────────────────────
+
+  scope "/api", KirokuWeb.Api, as: :api do
+    pipe_through :api
+
+    get "/oai", OaiController, :index
   end
 
-  scope "/oai", KirokuWeb do
-    pipe_through :xml
-    get "/request", OaiPmhController, :handle_request
-  end
+  # ── Dev tools ─────────────────────────────────────────────────────────────────
 
-  # ── Dev routes ──────────────────────────────────────────────────────────────
   if Application.compile_env(:kiroku, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 
@@ -173,16 +137,6 @@ defmodule KirokuWeb.Router do
 
       live_dashboard "/dashboard", metrics: KirokuWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
-    end
-  end
-
-  if Application.compile_env(:kiroku, :dev_routes) do
-    import AshAdmin.Router
-
-    scope "/admin" do
-      pipe_through :browser
-
-      ash_admin "/"
     end
   end
 end

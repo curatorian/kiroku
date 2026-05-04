@@ -1,40 +1,27 @@
 defmodule Kiroku.Repository.ItemExaminer do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_examiners"
-    repo Kiroku.Repo
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-  actions do
-    defaults [:read, :destroy]
+  schema "item_examiners" do
+    field :examiner_name, :string
+    field :examiner_name_alt, :string
+    field :affiliation, :string
+    field :nidn, :string
+    field :sequence, :integer, default: 1
 
-    create :create do
-      accept [:examiner_name, :examiner_nip, :sequence, :item_id]
-      validate present(:examiner_name)
-    end
-
-    create :import do
-      accept [:examiner_name, :examiner_nip, :sequence, :item_id]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :examiner_name, :string, allow_nil?: false, public?: true
-    attribute :examiner_nip, :string, public?: true
-    attribute :sequence, :integer, default: 1, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(examiner, attrs) do
+    examiner
+    |> cast(attrs, [:examiner_name, :examiner_name_alt, :affiliation, :nidn, :sequence, :item_id])
+    |> validate_required([:examiner_name, :item_id])
+    |> validate_length(:examiner_name, min: 1, max: 255)
+    |> foreign_key_constraint(:item_id)
   end
 end

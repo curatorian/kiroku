@@ -1,8 +1,9 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
+@import url("https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
 @import "tailwindcss" source(none);
-@source "../../deps/ash_authentication_phoenix";
 @source "../css";
 @source "../js";
 @source "../../lib/kiroku_web";
@@ -23,72 +24,72 @@
   We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
   on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
 @plugin "../vendor/daisyui-theme" {
-  name: "dark";
-  default: false;
+  name: "kiroku-dark";
+  default: true;
   prefersdark: true;
   color-scheme: "dark";
-  --color-base-100: oklch(30.33% 0.016 252.42);
-  --color-base-200: oklch(25.26% 0.014 253.1);
-  --color-base-300: oklch(20.15% 0.012 254.09);
-  --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
-  --color-neutral: oklch(37% 0.044 257.287);
-  --color-neutral-content: oklch(98% 0.003 247.858);
-  --color-info: oklch(58% 0.158 241.966);
-  --color-info-content: oklch(97% 0.013 236.62);
-  --color-success: oklch(60% 0.118 184.704);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --color-base-100: oklch(10.5% 0.04 285);
+  --color-base-200: oklch(14.5% 0.05 285);
+  --color-base-300: oklch(20% 0.06 283);
+  --color-base-content: oklch(92% 0.03 285);
+  --color-primary: oklch(55% 0.18 290);
+  --color-primary-content: oklch(97% 0.01 285);
+  --color-secondary: oklch(68% 0.13 290);
+  --color-secondary-content: oklch(20% 0.03 285);
+  --color-accent: oklch(72% 0.14 55);
+  --color-accent-content: oklch(15% 0.03 55);
+  --color-neutral: oklch(30% 0.07 285);
+  --color-neutral-content: oklch(90% 0.02 285);
+  --color-info: oklch(60% 0.15 240);
+  --color-info-content: oklch(97% 0.01 240);
+  --color-success: oklch(62% 0.13 155);
+  --color-success-content: oklch(97% 0.01 155);
+  --color-warning: oklch(70% 0.17 55);
+  --color-warning-content: oklch(15% 0.03 55);
+  --color-error: oklch(60% 0.22 20);
+  --color-error-content: oklch(97% 0.01 20);
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.75rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
+  --border: 1px;
+  --depth: 0;
   --noise: 0;
 }
 
 @plugin "../vendor/daisyui-theme" {
-  name: "light";
-  default: true;
+  name: "kiroku-light";
+  default: false;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --color-base-100: oklch(97% 0.01 70);
+  --color-base-200: oklch(94% 0.015 70);
+  --color-base-300: oklch(90% 0.02 70);
+  --color-base-content: oklch(18% 0.02 285);
+  --color-primary: oklch(45% 0.18 290);
+  --color-primary-content: oklch(97% 0.01 285);
+  --color-secondary: oklch(55% 0.13 290);
+  --color-secondary-content: oklch(97% 0.01 285);
+  --color-accent: oklch(62% 0.16 55);
+  --color-accent-content: oklch(15% 0.03 55);
+  --color-neutral: oklch(55% 0.07 285);
+  --color-neutral-content: oklch(97% 0 0);
+  --color-info: oklch(55% 0.15 240);
+  --color-info-content: oklch(97% 0.01 240);
+  --color-success: oklch(55% 0.13 155);
+  --color-success-content: oklch(97% 0.01 155);
+  --color-warning: oklch(62% 0.17 55);
+  --color-warning-content: oklch(97% 0.01 55);
+  --color-error: oklch(55% 0.22 20);
+  --color-error-content: oklch(97% 0.01 20);
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.75rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
+  --border: 1px;
+  --depth: 0;
   --noise: 0;
 }
 
@@ -101,6 +102,207 @@
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 /* Make LiveView wrapper divs transparent for layout */
-[data-phx-session], [data-phx-teleported-src] { display: contents }
+[data-phx-session],
+[data-phx-teleported-src] {
+  display: contents;
+}
+
+/* ── Kiroku Design Tokens ────────────────────────────────────────────────── */
+
+:root {
+  /* Violet scale */
+  --color-void: #0d0817;
+  --color-grimoire: #1a1030;
+  --color-dusk: #2d1b69;
+  --color-patchouli: #7b4fa6;
+  --color-lavender: #9b7ec8;
+  --color-wisteria: #c4a8e0;
+  --color-lilac: #e8dff5;
+
+  /* Ribbon triad */
+  --color-ribbon-red: #c4415a;
+  --color-ribbon-crimson: #8b2340;
+  --color-ribbon-gold: #d4a017;
+  --color-ribbon-amber: #e8c547;
+  --color-ribbon-blue: #4a7bc4;
+  --color-ribbon-sky: #7aabd8;
+
+  /* Neutral */
+  --color-ink: #1c1420;
+  --color-quill: #6b5f78;
+  --color-dust: #9e93ab;
+  --color-parchment: #f5f0e8;
+  --color-vellum: #ede8dc;
+  --color-ivory: #faf7f2;
+
+  /* Semantic */
+  --color-success: #5a9e72;
+  --color-warning: var(--color-ribbon-gold);
+  --color-error: var(--color-ribbon-red);
+  --color-info: var(--color-ribbon-blue);
+
+  /* Typography */
+  --font-display: "IM Fell English", Georgia, serif;
+  --font-heading: "Cormorant Garamond", Georgia, serif;
+  --font-body: "Source Serif 4", Georgia, serif;
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Courier New", monospace;
+}
+
+/* ── Base Styles ─────────────────────────────────────────────────────────── */
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--color-void);
+  color: var(--color-lilac);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+.font-heading {
+  font-family: var(--font-heading);
+}
+.font-body {
+  font-family: var(--font-body);
+}
+.font-ui {
+  font-family: var(--font-ui);
+}
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── Kiroku Component Utilities ──────────────────────────────────────────── */
+
+/* Wordmark */
+.kiroku-wordmark {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--color-lilac);
+  letter-spacing: -0.01em;
+}
+.kiroku-kanji {
+  color: var(--color-patchouli);
+  font-family: var(--font-display);
+  font-style: normal;
+}
+
+/* Card surfaces */
+.kiroku-card {
+  background-color: var(--color-grimoire);
+  border: 1px solid rgba(155, 126, 200, 0.12);
+  border-radius: 0.75rem;
+}
+.kiroku-card-raised {
+  background-color: var(--color-dusk);
+  border: 1px solid rgba(155, 126, 200, 0.18);
+  border-radius: 0.75rem;
+}
+
+/* Item type badge */
+.badge-item-type {
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(155, 126, 200, 0.3);
+  background-color: rgba(123, 79, 166, 0.18);
+  color: var(--color-wisteria);
+}
+
+/* Status badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+}
+.status-badge.published {
+  background: rgba(90, 158, 114, 0.15);
+  color: #5a9e72;
+  border: 1px solid rgba(90, 158, 114, 0.3);
+}
+.status-badge.embargoed {
+  background: rgba(212, 160, 23, 0.15);
+  color: #d4a017;
+  border: 1px solid rgba(212, 160, 23, 0.3);
+}
+.status-badge.draft {
+  background: rgba(74, 123, 196, 0.15);
+  color: #7aabd8;
+  border: 1px solid rgba(74, 123, 196, 0.3);
+}
+.status-badge.withdrawn {
+  background: rgba(196, 65, 90, 0.12);
+  color: #c4415a;
+  border: 1px solid rgba(196, 65, 90, 0.3);
+}
+.status-badge.submitted {
+  background: rgba(155, 126, 200, 0.15);
+  color: #9b7ec8;
+  border: 1px solid rgba(155, 126, 200, 0.3);
+}
+.status-badge.under-review {
+  background: rgba(212, 160, 23, 0.12);
+  color: #d4a017;
+  border: 1px solid rgba(212, 160, 23, 0.3);
+}
+
+/* Ribbon tricolor line */
+.kiroku-ribbon {
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--color-ribbon-red) 0% 33.3%,
+    var(--color-ribbon-gold) 33.3% 66.6%,
+    var(--color-ribbon-blue) 66.6% 100%
+  );
+  border-radius: 9999px;
+}
+
+/* Handle / DOI monospace pill */
+.kiroku-handle {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-dust);
+  background: rgba(155, 126, 200, 0.06);
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+/* Search input */
+.kiroku-search-input {
+  background: var(--color-grimoire);
+  border: 1px solid rgba(155, 126, 200, 0.25);
+  border-radius: 0.5rem;
+  color: var(--color-lilac);
+  padding: 0.6rem 1rem;
+  font-family: var(--font-ui);
+  width: 100%;
+  transition: border-color 0.15s ease;
+}
+.kiroku-search-input:focus {
+  outline: none;
+  border-color: var(--color-patchouli);
+  box-shadow: 0 0 0 3px rgba(123, 79, 166, 0.2);
+}
 
 /* This file is for your main application CSS */

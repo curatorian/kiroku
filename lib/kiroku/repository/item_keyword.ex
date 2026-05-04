@@ -1,44 +1,25 @@
 defmodule Kiroku.Repository.ItemKeyword do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_keywords"
-    repo Kiroku.Repo
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-    custom_indexes do
-      index [:keyword]
-      index [:item_id]
-    end
-  end
+  schema "item_keywords" do
+    field :keyword, :string
+    field :language, Ecto.Enum, values: [:id, :en], default: :id
+    field :position, :integer, default: 0
 
-  actions do
-    defaults [:read, :destroy]
-
-    create :create do
-      accept [:keyword, :language, :item_id]
-      validate present(:keyword)
-    end
-
-    create :import do
-      accept [:keyword, :language, :item_id]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :keyword, :string, allow_nil?: false, public?: true
-    attribute :language, :string, default: "id", public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(keyword, attrs) do
+    keyword
+    |> cast(attrs, [:keyword, :language, :position, :item_id])
+    |> validate_required([:keyword, :item_id])
+    |> validate_length(:keyword, min: 1, max: 255)
+    |> foreign_key_constraint(:item_id)
   end
 end

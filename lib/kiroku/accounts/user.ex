@@ -1,170 +1,118 @@
 defmodule Kiroku.Accounts.User do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Accounts,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAuthentication]
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  authentication do
-    add_ons do
-      log_out_everywhere do
-        apply_on_password_change? true
-      end
-    end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-    tokens do
-      enabled? true
-      token_resource Kiroku.Accounts.Token
-      signing_secret Kiroku.Secrets
-      store_all_tokens? true
-      require_token_presence_for_authentication? true
-    end
+  @user_types ~w(submitter reviewer admin superadmin)a
 
-    strategies do
-      magic_link do
-        identity_field :email
-        registration_enabled? true
-        require_interaction? true
+  schema "users" do
+    field :email, :string
+    field :password, :string, virtual: true, redact: true
+    field :hashed_password, :string, redact: true
+    field :confirmed_at, :naive_datetime
 
-        sender Kiroku.Accounts.User.Senders.SendMagicLinkEmail
-      end
+    field :user_type, Ecto.Enum, values: @user_types, default: :submitter
+    field :display_name, :string
+    field :student_id, :string
+    field :faculty, :string
+    field :department, :string
+    field :avatar_url, :string
 
-      remember_me :remember_me
+    has_many :items, Kiroku.Repository.Item, foreign_key: :submitter_id
+    has_many :tokens, Kiroku.Accounts.UserToken
+
+    timestamps()
+  end
+
+  def registration_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email, :password, :display_name, :student_id, :faculty, :department])
+    |> validate_email(opts)
+    |> validate_password(opts)
+  end
+
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name, :student_id, :faculty, :department, :avatar_url])
+    |> validate_required([:display_name])
+    |> validate_length(:display_name, min: 1, max: 255)
+  end
+
+  def email_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email])
+    |> validate_email(opts)
+    |> case do
+      %{changes: %{email: _}} = changeset -> changeset
+      %{} = changeset -> add_error(changeset, :email, "did not change")
     end
   end
 
-  postgres do
-    table "users"
-    repo Kiroku.Repo
+  def password_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_confirmation(:password, message: "does not match password")
+    |> validate_password(opts)
   end
 
-  actions do
-    defaults [:read]
+  def confirm_changeset(user) do
+    now = NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+    change(user, confirmed_at: now)
+  end
 
-    read :get_by_subject do
-      description "Get a user by the subject claim in a JWT"
-      argument :subject, :string, allow_nil?: false
-      get? true
-      prepare AshAuthentication.Preparations.FilterBySubject
-    end
+  @doc """
+  Verifies the password.
+  If there is no user or the user doesn't have a password, we call
+  `Bcrypt.no_user_verify/0` to avoid timing attacks.
+  """
+  def valid_password?(%__MODULE__{hashed_password: hashed_password}, password)
+      when is_binary(hashed_password) and byte_size(password) > 0 do
+    Bcrypt.verify_pass(password, hashed_password)
+  end
 
-    read :get_by_email do
-      description "Looks up a user by their email"
-      get_by :email
-    end
+  def valid_password?(_, _) do
+    Bcrypt.no_user_verify()
+    false
+  end
 
-    create :sign_in_with_magic_link do
-      description "Sign in or register a user with magic link."
+  defp validate_email(changeset, opts) do
+    changeset
+    |> validate_required([:email])
+    |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must have the @ sign and no spaces")
+    |> validate_length(:email, max: 160)
+    |> maybe_validate_unique_email(opts)
+  end
 
-      argument :token, :string do
-        description "The token from the magic link that was sent to the user"
-        allow_nil? false
-      end
+  defp validate_password(changeset, opts) do
+    changeset
+    |> validate_required([:password])
+    |> validate_length(:password, min: 12, max: 72)
+    |> maybe_hash_password(opts)
+  end
 
-      argument :remember_me, :boolean do
-        description "Whether to generate a remember me token"
-        allow_nil? true
-      end
+  defp maybe_hash_password(changeset, opts) do
+    hash_password? = Keyword.get(opts, :hash_password, true)
+    password = get_change(changeset, :password)
 
-      upsert? true
-      upsert_identity :unique_email
-      upsert_fields [:email]
-
-      # Uses the information from the token to create or sign in the user
-      change AshAuthentication.Strategy.MagicLink.SignInChange
-
-      change {AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenChange,
-              strategy_name: :remember_me}
-
-      metadata :token, :string do
-        allow_nil? false
-      end
-    end
-
-    action :request_magic_link do
-      argument :email, :ci_string do
-        allow_nil? false
-      end
-
-      run AshAuthentication.Strategy.MagicLink.Request
-    end
-
-    update :update_profile do
-      accept [:full_name, :external_id]
-    end
-
-    update :set_user_type do
-      accept [:user_type]
-    end
-
-    update :deactivate do
-      change set_attribute(:active, false)
+    if hash_password? && password && changeset.valid? do
+      changeset
+      |> validate_length(:password, max: 72, count: :bytes)
+      |> put_change(:hashed_password, Bcrypt.hash_pwd_salt(password))
+      |> delete_change(:password)
+    else
+      changeset
     end
   end
 
-  policies do
-    bypass AshAuthentication.Checks.AshAuthenticationInteraction do
-      authorize_if always()
+  defp maybe_validate_unique_email(changeset, opts) do
+    if Keyword.get(opts, :validate_email, true) do
+      changeset
+      |> unsafe_validate_unique(:email, Kiroku.Repo)
+      |> unique_constraint(:email)
+    else
+      changeset
     end
-
-    policy action_type(:read) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-      authorize_if expr(id == ^actor(:id))
-    end
-
-    policy action(:set_user_type) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-    end
-
-    policy action(:update_profile) do
-      authorize_if expr(id == ^actor(:id))
-      authorize_if actor_attribute_equals(:user_type, :admin)
-    end
-
-    policy action(:deactivate) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :email, :ci_string do
-      allow_nil? false
-      public? true
-    end
-
-    attribute :full_name, :string, public?: true
-    attribute :external_id, :string, public?: true
-
-    attribute :user_type, :atom,
-      constraints: [one_of: [:member, :submitter, :reviewer, :admin, :superadmin]],
-      default: :member,
-      public?: true
-
-    attribute :active, :boolean, default: true, public?: true
-  end
-
-  relationships do
-    has_many :group_memberships, Kiroku.Accounts.GroupMembership, public?: true
-
-    many_to_many :groups, Kiroku.Accounts.Group do
-      through Kiroku.Accounts.GroupMembership
-      source_attribute_on_join_resource :user_id
-      destination_attribute_on_join_resource :group_id
-      public? true
-    end
-
-    has_many :submitted_items, Kiroku.Repository.Item,
-      destination_attribute: :submitter_id,
-      public?: true
-  end
-
-  identities do
-    identity :unique_email, [:email]
   end
 end

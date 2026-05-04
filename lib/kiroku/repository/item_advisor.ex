@@ -1,48 +1,38 @@
 defmodule Kiroku.Repository.ItemAdvisor do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_advisors"
-    repo Kiroku.Repo
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-  @advisor_roles ~w(main_advisor co_advisor external industry law_clinic curator promotor)a
+  @roles ~w(main_advisor co_advisor external industry law_clinic curator)a
 
-  actions do
-    defaults [:read, :destroy]
+  schema "item_advisors" do
+    field :advisor_name, :string
+    field :advisor_name_alt, :string
+    field :advisor_role, Ecto.Enum, values: @roles, default: :main_advisor
+    field :affiliation, :string
+    field :nidn, :string
+    field :sequence, :integer, default: 1
 
-    create :create do
-      accept [:advisor_name, :advisor_role, :advisor_nip, :sequence, :item_id]
-      validate present(:advisor_name)
-    end
-
-    create :import do
-      accept [:advisor_name, :advisor_role, :advisor_nip, :sequence, :item_id]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :advisor_name, :string, allow_nil?: false, public?: true
-
-    attribute :advisor_role, :atom,
-      constraints: [one_of: @advisor_roles],
-      default: :main_advisor,
-      public?: true
-
-    attribute :advisor_nip, :string, public?: true
-    attribute :sequence, :integer, default: 1, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(advisor, attrs) do
+    advisor
+    |> cast(attrs, [
+      :advisor_name,
+      :advisor_name_alt,
+      :advisor_role,
+      :affiliation,
+      :nidn,
+      :sequence,
+      :item_id
+    ])
+    |> validate_required([:advisor_name, :advisor_role, :item_id])
+    |> validate_length(:advisor_name, min: 1, max: 255)
+    |> foreign_key_constraint(:item_id)
   end
 end

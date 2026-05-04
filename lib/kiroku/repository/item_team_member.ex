@@ -1,42 +1,39 @@
 defmodule Kiroku.Repository.ItemTeamMember do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_team_members"
-    repo Kiroku.Repo
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-  actions do
-    defaults [:read, :destroy]
+  @roles ~w(lead_developer developer designer researcher tester
+            performer collaborator other)a
 
-    create :create do
-      accept [:member_name, :member_nim, :program_study, :role, :sequence, :item_id]
-      validate present(:member_name)
-    end
+  schema "item_team_members" do
+    field :member_name, :string
+    field :member_name_alt, :string
+    field :role, Ecto.Enum, values: @roles, default: :developer
+    field :student_id, :string
+    field :affiliation, :string
+    field :sequence, :integer, default: 1
 
-    create :import do
-      accept [:member_name, :member_nim, :program_study, :role, :sequence, :item_id]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :member_name, :string, allow_nil?: false, public?: true
-    attribute :member_nim, :string, public?: true
-    attribute :program_study, :string, public?: true
-    attribute :role, :string, public?: true
-    attribute :sequence, :integer, default: 1, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(member, attrs) do
+    member
+    |> cast(attrs, [
+      :member_name,
+      :member_name_alt,
+      :role,
+      :student_id,
+      :affiliation,
+      :sequence,
+      :item_id
+    ])
+    |> validate_required([:member_name, :item_id])
+    |> validate_length(:member_name, min: 1, max: 255)
+    |> foreign_key_constraint(:item_id)
   end
 end

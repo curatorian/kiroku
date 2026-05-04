@@ -1,146 +1,77 @@
 defmodule Kiroku.Content.Bitstream do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Content,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "bitstreams"
-    repo Kiroku.Repo
-
-    custom_indexes do
-      index [:bundle_name]
-      index [:item_id]
-    end
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
   @bundle_names ~w(ORIGINAL THUMBNAIL CHAPTER SUPPLEMENTAL ADMINISTRATIVE LICENSE MEDIA SOURCE)a
+  @access_values ~w(open inherit restricted closed)a
   @storage_types ~w(url s3 local)a
-  @access_levels ~w(inherit open restricted closed)a
 
-  actions do
-    defaults [:read, :destroy]
+  schema "bitstreams" do
+    field :filename, :string
+    field :bundle_name, Ecto.Enum, values: @bundle_names, default: :ORIGINAL
+    field :sequence, :integer, default: 1
+    field :description, :string
+    field :mime_type, :string
+    field :file_size, :integer
+    field :checksum, :string
+    field :checksum_algorithm, :string, default: "MD5"
 
-    create :create do
-      accept [
-        :filename,
-        :bundle_name,
-        :sequence,
-        :description,
-        :storage_type,
-        :storage_url,
-        :storage_path,
-        :storage_bucket,
-        :mime_type,
-        :size_bytes,
-        :checksum,
-        :checksum_algorithm,
-        :access_level,
-        :embargo_open_date,
-        :embargo_close_date,
-        :item_id
-      ]
-    end
+    field :storage_type, Ecto.Enum, values: @storage_types, default: :local
+    field :storage_url, :string
+    field :storage_path, :string
+    field :storage_bucket, :string
 
-    create :import do
-      accept [
-        :filename,
-        :bundle_name,
-        :sequence,
-        :description,
-        :storage_type,
-        :storage_url,
-        :storage_path,
-        :storage_bucket,
-        :mime_type,
-        :size_bytes,
-        :checksum,
-        :checksum_algorithm,
-        :access_level,
-        :embargo_open_date,
-        :embargo_close_date,
-        :item_id
-      ]
-    end
+    field :access_level, Ecto.Enum, values: @access_values, default: :inherit
+    field :embargo_open_date, :date
+    field :embargo_close_date, :date
 
-    update :update do
-      accept [:access_level, :embargo_open_date, :embargo_close_date, :description]
-      require_atomic? false
-    end
-
-    update :lift_embargo do
-      require_atomic? false
-      change set_attribute(:embargo_open_date, nil)
-    end
-  end
-
-  policies do
-    policy action_type(:read) do
-      authorize_if always()
-    end
-
-    policy action_type([:create, :update]) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-      authorize_if actor_attribute_equals(:user_type, :submitter)
-    end
-
-    policy action(:import) do
-      authorize_if always()
-    end
-
-    policy action_type(:destroy) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-    end
-  end
-
-  validations do
-    validate Kiroku.Content.Bitstream.Validations.StorageFields
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :filename, :string, allow_nil?: false, public?: true
-
-    attribute :bundle_name, :atom,
-      constraints: [one_of: @bundle_names],
-      default: :ORIGINAL,
-      public?: true
-
-    attribute :sequence, :integer, default: 0, public?: true
-    attribute :description, :string, public?: true
-
-    attribute :storage_type, :atom,
-      constraints: [one_of: @storage_types],
-      default: :url,
-      public?: true
-
-    attribute :storage_url, :string, public?: true
-    attribute :storage_path, :string, public?: true
-    attribute :storage_bucket, :string, public?: true
-
-    attribute :mime_type, :string, public?: true
-    attribute :size_bytes, :integer, default: 0, public?: true
-    attribute :checksum, :string, public?: true
-    attribute :checksum_algorithm, :string, default: "md5", public?: true
-
-    attribute :access_level, :atom,
-      constraints: [one_of: @access_levels],
-      default: :inherit,
-      public?: true
-
-    attribute :embargo_open_date, :date, public?: true
-    attribute :embargo_close_date, :date, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(bitstream, attrs) do
+    bitstream
+    |> cast(attrs, [
+      :filename,
+      :bundle_name,
+      :sequence,
+      :description,
+      :mime_type,
+      :file_size,
+      :checksum,
+      :checksum_algorithm,
+      :storage_type,
+      :storage_url,
+      :storage_path,
+      :storage_bucket,
+      :access_level,
+      :embargo_open_date,
+      :embargo_close_date,
+      :item_id
+    ])
+    |> validate_required([:filename, :bundle_name, :sequence, :storage_type, :item_id])
+    |> validate_length(:filename, min: 1, max: 500)
+    |> enforce_bundle_access_rules()
+    |> foreign_key_constraint(:item_id)
+  end
+
+  # Hard-coded access rules per plan Rule 4 and Rule 5.
+  # These override whatever access_level was passed in attrs — they cannot be
+  # changed via UI or import.
+  defp enforce_bundle_access_rules(changeset) do
+    case get_field(changeset, :bundle_name) do
+      :THUMBNAIL ->
+        put_change(changeset, :access_level, :open)
+
+      bundle when bundle in [:ADMINISTRATIVE, :LICENSE] ->
+        put_change(changeset, :access_level, :restricted)
+
+      _ ->
+        changeset
+    end
   end
 end

@@ -7,7 +7,7 @@ defmodule KirokuWeb.Endpoint do
   @session_options [
     store: :cookie,
     key: "_kiroku_key",
-    signing_salt: "MZk5x7vl",
+    signing_salt: "LKWJ/Pvt",
     same_site: "Lax"
   ]
 
@@ -27,13 +27,18 @@ defmodule KirokuWeb.Endpoint do
     only: KirokuWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
+  # Serve locally uploaded files (used when STORAGE_ADAPTER=local)
+  plug Plug.Static,
+    at: "/uploads",
+    from: {:kiroku, "priv/uploads"},
+    gzip: false
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
     socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
     plug Phoenix.LiveReloader
     plug Phoenix.CodeReloader
-    plug AshPhoenix.Plug.CheckCodegenStatus
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :kiroku
   end
 

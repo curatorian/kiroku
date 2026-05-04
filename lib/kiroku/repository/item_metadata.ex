@@ -1,65 +1,46 @@
 defmodule Kiroku.Repository.ItemMetadata do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_metadata"
-    repo Kiroku.Repo
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-    custom_indexes do
-      index [:field_schema, :field_element]
-    end
-  end
+  @doc """
+  Supplementary key-value metadata rows following Dublin Core / local qualifier
+  convention: "{field_schema}.{field_element}.{field_qualifier}".
 
-  actions do
-    defaults [:read, :destroy]
+  Examples:
+    - "dc.relation.uri"          → related URL / DOI
+    - "local.description.funding" → funding statement
+    - "local.identifier.scopus"  → Scopus article ID
+    - "local.subject.sdg"        → SDG goal number (multi-value)
+  """
+  schema "item_metadata_extras" do
+    field :field_schema, :string
+    field :field_element, :string
+    field :field_qualifier, :string
+    field :field_value, :string
+    field :language, :string
+    field :position, :integer, default: 0
 
-    create :create do
-      accept [
-        :field_schema,
-        :field_element,
-        :field_qualifier,
-        :field_value,
-        :language,
-        :confidence,
-        :place,
-        :item_id
-      ]
-    end
-
-    create :import do
-      accept [
-        :field_schema,
-        :field_element,
-        :field_qualifier,
-        :field_value,
-        :language,
-        :confidence,
-        :place,
-        :item_id
-      ]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :field_schema, :string, allow_nil?: false, public?: true
-    attribute :field_element, :string, allow_nil?: false, public?: true
-    attribute :field_qualifier, :string, public?: true
-    attribute :field_value, :string, allow_nil?: false, public?: true
-    attribute :language, :string, public?: true
-    attribute :confidence, :integer, default: 0, public?: true
-    attribute :place, :integer, default: 1, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(meta, attrs) do
+    meta
+    |> cast(attrs, [
+      :field_schema,
+      :field_element,
+      :field_qualifier,
+      :field_value,
+      :language,
+      :position,
+      :item_id
+    ])
+    |> validate_required([:field_schema, :field_element, :field_value, :item_id])
+    |> validate_length(:field_value, min: 1, max: 4000)
+    |> foreign_key_constraint(:item_id)
   end
 end

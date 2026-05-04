@@ -1,69 +1,23 @@
 defmodule Kiroku.Analytics.ViewEvent do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Analytics,
-    data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "view_events"
-    repo Kiroku.Repo
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-    custom_indexes do
-      index [:resource_type, :resource_id]
-      index [:inserted_at]
-    end
+  schema "view_events" do
+    field :item_id, :binary_id
+    field :user_id, :binary_id
+    field :ip_hash, :string
+    field :user_agent, :string
+    field :referer, :string
+
+    timestamps(updated_at: false)
   end
 
-  @resource_types ~w(Item Bitstream)a
-
-  actions do
-    defaults [:read]
-
-    create :track do
-      accept [
-        :resource_type,
-        :resource_id,
-        :ip_hash,
-        :user_agent,
-        :referrer,
-        :country_code,
-        :user_id
-      ]
-    end
-  end
-
-  policies do
-    policy action(:track) do
-      authorize_if always()
-    end
-
-    policy action_type(:read) do
-      authorize_if actor_attribute_equals(:user_type, :admin)
-      authorize_if actor_attribute_equals(:user_type, :superadmin)
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :resource_type, :atom,
-      constraints: [one_of: @resource_types],
-      allow_nil?: false,
-      public?: true
-
-    attribute :resource_id, :uuid, allow_nil?: false, public?: true
-    attribute :ip_hash, :string, public?: true
-    attribute :user_agent, :string, public?: true
-    attribute :referrer, :string, public?: true
-    attribute :country_code, :string, public?: true
-
-    create_timestamp :inserted_at
-  end
-
-  relationships do
-    belongs_to :user, Kiroku.Accounts.User,
-      allow_nil?: true,
-      public?: true
+  def changeset(event, attrs) do
+    event
+    |> cast(attrs, [:item_id, :user_id, :ip_hash, :user_agent, :referer])
+    |> validate_required([:item_id])
   end
 end

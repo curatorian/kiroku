@@ -1,42 +1,38 @@
 defmodule Kiroku.Repository.ItemAuthor do
-  use Ash.Resource,
-    otp_app: :kiroku,
-    domain: Kiroku.Repository,
-    data_layer: AshPostgres.DataLayer
+  use Ecto.Schema
+  import Ecto.Changeset
 
-  postgres do
-    table "item_authors"
-    repo Kiroku.Repo
-  end
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
-  actions do
-    defaults [:read, :destroy]
+  schema "item_authors" do
+    field :author_name, :string
+    field :author_name_alt, :string
+    field :affiliation, :string
+    field :email, :string
+    field :orcid, :string
+    field :scopus_author_id, :string
+    field :sequence, :integer, default: 1
 
-    create :create do
-      accept [:author_name, :author_email, :author_affiliation, :orcid_id, :sequence, :item_id]
-      validate present(:author_name)
-    end
-
-    create :import do
-      accept [:author_name, :author_email, :author_affiliation, :orcid_id, :sequence, :item_id]
-    end
-  end
-
-  attributes do
-    uuid_primary_key :id
-
-    attribute :author_name, :string, allow_nil?: false, public?: true
-    attribute :author_email, :string, public?: true
-    attribute :author_affiliation, :string, public?: true
-    attribute :orcid_id, :string, public?: true
-    attribute :sequence, :integer, default: 1, public?: true
+    belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
   end
 
-  relationships do
-    belongs_to :item, Kiroku.Repository.Item,
-      allow_nil?: false,
-      public?: true
+  def changeset(author, attrs) do
+    author
+    |> cast(attrs, [
+      :author_name,
+      :author_name_alt,
+      :affiliation,
+      :email,
+      :orcid,
+      :scopus_author_id,
+      :sequence,
+      :item_id
+    ])
+    |> validate_required([:author_name, :item_id])
+    |> validate_length(:author_name, min: 1, max: 255)
+    |> foreign_key_constraint(:item_id)
   end
 end

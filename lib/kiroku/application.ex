@@ -12,11 +12,9 @@ defmodule Kiroku.Application do
       Kiroku.Repo,
       {DNSCluster, query: Application.get_env(:kiroku, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Kiroku.PubSub},
-      # Start a worker by calling: Kiroku.Worker.start_link(arg)
-      # {Kiroku.Worker, arg},
-      # Start to serve requests, typically the last entry
-      KirokuWeb.Endpoint,
-      {AshAuthentication.Supervisor, [otp_app: :kiroku]}
+      {Oban, Application.fetch_env!(:kiroku, Oban)},
+      # LegacyRepo (MSSQL) is started manually in the import Mix task — NOT here
+      KirokuWeb.Endpoint
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

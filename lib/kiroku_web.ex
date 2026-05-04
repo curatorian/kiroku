@@ -87,6 +87,11 @@ defmodule KirokuWeb do
       # Core UI components
       import KirokuWeb.CoreComponents
 
+      # Kiroku custom components
+      import KirokuWeb.KirokuComponents
+      import KirokuWeb.KirokuDashboardComponents
+      import KirokuWeb.KirokuPublicComponents
+
       # Common modules used in templates
       alias Phoenix.LiveView.JS
       alias KirokuWeb.Layouts

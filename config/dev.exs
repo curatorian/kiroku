@@ -1,5 +1,4 @@
 import Config
-config :ash, policies: [show_policy_breakdowns?: true]
 
 # Configure your database
 config :kiroku, Kiroku.Repo,
@@ -24,7 +23,7 @@ config :kiroku, KirokuWeb.Endpoint,
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
-  secret_key_base: "t0cArKUqloHpj5+jmoeJji8cdxelqbGF3mHsDIWuHLj1Fn/EY0fxcGruF6FX+l16",
+  secret_key_base: "WEbwdgu/GmnQYeFOS/HE/xjxDs5rfvUWSKEsTN5hRzOgWm2n6pN8Plfg2Bd3068O",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:kiroku, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:kiroku, ~w(--watch)]}
@@ -69,7 +68,7 @@ config :kiroku, KirokuWeb.Endpoint,
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :kiroku, dev_routes: true, token_signing_secret: "Wp7Jjm9cRgNf1ld7f3REPAfr2qHlI6fr"
+config :kiroku, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
