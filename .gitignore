@@ -35,3 +35,6 @@ kiroku-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Language Server
+.elixir_ls/
+.expert

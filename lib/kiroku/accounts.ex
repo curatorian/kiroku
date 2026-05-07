@@ -12,6 +12,11 @@ defmodule Kiroku.Accounts do
     Repo.all(User)
   end
 
+  def list_users_with_policies do
+    import Ecto.Query
+    Repo.all(from u in User, order_by: [asc: u.user_type, asc: u.email])
+  end
+
   def list_admins do
     import Ecto.Query
     Repo.all(from u in User, where: u.user_type in [:admin, :superadmin])
@@ -21,7 +26,48 @@ defmodule Kiroku.Accounts do
     Repo.aggregate(User, :count, :id)
   end
 
+  def admin_create_user(attrs) do
+    %User{}
+    |> User.admin_changeset(attrs)
+    |> Ecto.Changeset.put_change(
+      :confirmed_at,
+      NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+    )
+    |> Repo.insert()
+  end
+
   def admin_update_user(%User{} = user, attrs) do
+    user
+    |> User.admin_changeset(attrs)
+    |> Repo.update()
+  end
+
+  def admin_set_password(%User{} = user, attrs) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.update(:user, User.admin_set_password_changeset(user, attrs))
+    |> Ecto.Multi.delete_all(
+      :tokens,
+      UserToken.by_user_and_contexts_query(user, :all)
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{user: user}} -> {:ok, user}
+      {:error, :user, changeset, _} -> {:error, changeset}
+    end
+  end
+
+  def admin_change_role(%User{} = user, attrs) do
+    user
+    |> User.role_changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_user(%User{} = user) do
+    Repo.delete(user)
+  end
+
+  # Legacy kept for compatibility — delegates to admin_update_user
+  def admin_update_user_profile(%User{} = user, attrs) do
     user
     |> User.profile_changeset(attrs)
     |> Repo.update()

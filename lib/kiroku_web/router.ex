@@ -11,6 +11,7 @@ defmodule KirokuWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_user
+    plug KirokuWeb.Plugs.Locale
   end
 
   pipeline :api do
@@ -24,26 +25,49 @@ defmodule KirokuWeb.Router do
 
     get "/", PageController, :home
 
-    # Repository browsing
-    get "/communities", CommunityController, :index
-    get "/communities/:handle", CommunityController, :show
-    get "/collections/:handle", CollectionController, :show
-    get "/items/:handle", ItemController, :show
+    # Handle resolver (DSpace legacy URLs)
+    get "/handle/*path", HandleController, :show
+
+    # Citation download — /citation/:id/format/:format
+    get "/citation/:id/format/:format", CitationController, :show
+
+    # OAI-PMH endpoint
+    get "/oai", OaiController, :index
 
     # Bitstream file access
     get "/items/:item_id/bitstreams/:id", BitstreamController, :show
 
-    # Search
-    get "/search", SearchController, :index
+    # Public repository browsing (LiveView, optional auth)
+    live_session :public,
+      on_mount: [{KirokuWeb.UserAuth, :mount_current_user}] do
+      live "/browse", BrowseLive, :index
+      live "/search", SearchLive, :index
+      live "/communities", CommunityLive.Index, :index
+      live "/communities/:handle", CommunityLive.Show, :show
+      live "/collections/:handle", CollectionLive.Show, :show
+      live "/items/:handle", ItemLive.Show, :show
+    end
+  end
 
-    # OAI-PMH endpoint
-    get "/oai", OaiController, :index
+  # ── REST API v1 ────────────────────────────────────────────────────────────────
+
+  scope "/api/v1", KirokuWeb.Api.V1 do
+    pipe_through :api
+
+    resources "/communities", CommunityController, only: [:index, :show]
+    resources "/collections", CollectionController, only: [:index, :show]
+
+    resources "/items", ItemController, only: [:index, :show] do
+      get "/bitstreams", ItemController, :bitstreams, as: :bitstreams
+    end
   end
 
   # ── Auth routes (guest only) ───────────────────────────────────────────────────
 
   scope "/", KirokuWeb do
     pipe_through [:browser, :redirect_if_user_is_authenticated]
+
+    post "/users/log_in", UserSessionController, :create
 
     live_session :guest,
       on_mount: [{KirokuWeb.UserAuth, :redirect_if_user_is_authenticated}] do
@@ -79,6 +103,7 @@ defmodule KirokuWeb.Router do
 
       # Submission form
       live "/submit", SubmissionLive.New, :new
+      live "/submit/:id/edit", SubmissionLive.Edit, :edit
     end
   end
 
@@ -106,13 +131,18 @@ defmodule KirokuWeb.Router do
 
       # Item review
       live "/items", ItemLive.Index, :index
+      live "/items/new", ItemLive.Index, :new
       live "/items/:id", ItemLive.Show, :show
       live "/items/:id/review", ItemLive.Review, :review
 
       # User management
       live "/users", UserLive.Index, :index
+      live "/users/new", UserLive.Index, :new
       live "/users/:id", UserLive.Show, :show
       live "/users/:id/edit", UserLive.Show, :edit
+      live "/users/:id/password", UserLive.Show, :password
+      live "/users/:id/policies/new", UserLive.Show, :new_policy
+      live "/users/:id/policies/:policy_id/edit", UserLive.Show, :edit_policy
 
       # Storage settings
       live "/settings", SettingsLive, :index

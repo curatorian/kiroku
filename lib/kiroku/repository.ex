@@ -28,6 +28,8 @@ defmodule Kiroku.Repository do
 
   def get_community!(id), do: Repo.get!(Community, id)
 
+  def get_community(id), do: Repo.get(Community, id)
+
   def get_community_by_handle!(handle), do: Repo.get_by!(Community, handle: handle)
 
   def get_community_by_handle(handle), do: Repo.get_by(Community, handle: handle)
@@ -62,6 +64,8 @@ defmodule Kiroku.Repository do
 
   def get_collection!(id), do: Repo.get!(Collection, id)
 
+  def get_collection(id), do: Repo.get(Collection, id)
+
   def get_collection_by_handle!(handle), do: Repo.get_by!(Collection, handle: handle)
 
   def get_collection_by_handle(handle), do: Repo.get_by(Collection, handle: handle)
@@ -83,6 +87,8 @@ defmodule Kiroku.Repository do
   # ── Items ────────────────────────────────────────────────────────────────────
 
   def get_item!(id), do: Repo.get!(Item, id)
+
+  def get_item(id), do: Repo.get(Item, id)
 
   def get_item_by_handle!(handle), do: Repo.get_by!(Item, handle: handle)
 

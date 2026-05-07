@@ -99,7 +99,7 @@
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
 /* Use the data attribute for dark mode  */
-@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+@custom-variant dark (&:where([data-theme=kiroku-dark], [data-theme=kiroku-dark] *));
 
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session],
@@ -110,7 +110,7 @@
 /* ── Kiroku Design Tokens ────────────────────────────────────────────────── */
 
 :root {
-  /* Violet scale */
+  /* Violet scale – dark defaults */
   --color-void: #0d0817;
   --color-grimoire: #1a1030;
   --color-dusk: #2d1b69;
@@ -147,6 +147,20 @@
   --font-body: "Source Serif 4", Georgia, serif;
   --font-ui: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Courier New", monospace;
+}
+
+/* ── Light theme overrides ──────────────────────────────────────────────── */
+
+[data-theme="kiroku-light"] {
+  /* Invert the violet scale to a warm parchment palette */
+  --color-void: #faf7f2;
+  --color-grimoire: #f5f0e8;
+  --color-dusk: #ede8dc;
+  --color-patchouli: #6b3f8f;
+  --color-lavender: #7b4fa6;
+  --color-wisteria: #52326e;
+  --color-lilac: #1c1420;
+  --color-dust: #6b5f78;
 }
 
 /* ── Base Styles ─────────────────────────────────────────────────────────── */
@@ -303,6 +317,108 @@ h6 {
   outline: none;
   border-color: var(--color-patchouli);
   box-shadow: 0 0 0 3px rgba(123, 79, 166, 0.2);
+}
+
+/* ── Admin Shell Layout ──────────────────────────────────────────────────── */
+
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-grimoire);
+  border-right: 1px solid rgba(155, 126, 200, 0.1);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.admin-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid rgba(155, 126, 200, 0.08);
+}
+
+.admin-sidebar-nav {
+  flex: 1;
+  padding: 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-family: var(--font-ui);
+  color: var(--color-dust);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  text-decoration: none;
+}
+
+.admin-nav-item:hover {
+  background-color: color-mix(in srgb, var(--color-patchouli) 10%, transparent);
+  color: var(--color-wisteria);
+}
+
+.admin-nav-item-active {
+  background-color: color-mix(in srgb, var(--color-patchouli) 18%, transparent);
+  color: var(--color-lavender);
+  font-weight: 500;
+  border-left: 2px solid var(--color-patchouli);
+}
+
+.admin-sidebar-divider {
+  height: 1px;
+  background: rgba(155, 126, 200, 0.08);
+  margin: 0.5rem 0.75rem;
+}
+
+.admin-sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem;
+  border-top: 1px solid rgba(155, 126, 200, 0.08);
+}
+
+.admin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background-color: var(--color-grimoire);
+  border-bottom: 1px solid rgba(155, 126, 200, 0.08);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.admin-content {
+  flex: 1;
+  padding: 1.5rem;
 }
 
 /* This file is for your main application CSS */

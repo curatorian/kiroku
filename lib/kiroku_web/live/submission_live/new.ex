@@ -1,13 +1,12 @@
 defmodule KirokuWeb.SubmissionLive.New do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.ItemForm
+
   alias Kiroku.{Repository, Content}
   alias Kiroku.Repository.Item
   alias Kiroku.Storage.Uploader
   alias Kiroku.Access.Authorization
-
-  @item_types ~w(skripsi memorandum_hukum studi_kasus laporan_proyek karya_kreatif
-    karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -16,9 +15,9 @@ defmodule KirokuWeb.SubmissionLive.New do
 
     socket =
       socket
-      |> assign(:item_types, @item_types)
       |> assign(:collections, collections)
-      |> assign(:form, to_form(Item.changeset(%Item{}, %{}), as: :item))
+      |> assign(:selected_type, "skripsi")
+      |> assign(:form, to_form(Item.changeset(%Item{}, %{item_type: :skripsi}), as: :item))
       |> allow_upload(:cover,
         accept: ~w(.jpg .jpeg .png),
         max_entries: 1,
@@ -76,7 +75,7 @@ defmodule KirokuWeb.SubmissionLive.New do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
-      <div class="max-w-3xl mx-auto px-4 py-8 space-y-8">
+      <div class="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <div>
           <.link
             navigate={~p"/my/items"}
@@ -100,139 +99,120 @@ defmodule KirokuWeb.SubmissionLive.New do
           phx-change="validate"
           class="space-y-6"
         >
-          <%!-- Metadata section --%>
-          <div id="metadata-section" class="kiroku-card p-6 space-y-5">
-            <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">Metadata</h2>
+          <%!-- 1. Identity & type --%>
+          <.identity_section form={@form} collections={@collections} />
 
-            <.input field={@form[:title]} type="text" label="Title" required />
-            <.input field={@form[:title_alt]} type="text" label="Title (Alternate Language)" />
+          <%!-- 2. Abstract --%>
+          <.abstract_section form={@form} />
 
-            <div>
-              <label class="block text-sm font-medium mb-1.5" style="color: var(--color-wisteria);">
-                Item Type
-              </label>
-              <select name="item[item_type]" id="item-type-select" class="kiroku-search-input w-full">
-                <option value="">Select type…</option>
-                <%= for type <- @item_types do %>
-                  <option value={type} selected={to_string(@form[:item_type].value) == type}>
-                    {type |> String.replace("_", " ") |> String.capitalize()}
-                  </option>
-                <% end %>
-              </select>
-            </div>
+          <%!-- 3. Contributor info — academic / thesis types only --%>
+          <.contributor_section :if={academic_type?(@selected_type)} form={@form} />
 
-            <div>
-              <label class="block text-sm font-medium mb-1.5" style="color: var(--color-wisteria);">
-                Collection <span class="text-red-400">*</span>
-              </label>
-              <select
-                name="item[collection_id]"
-                id="collection-select"
-                class="kiroku-search-input w-full"
-                required
-              >
-                <option value="">Select collection…</option>
-                <%= for collection <- @collections do %>
-                  <option
-                    value={collection.id}
-                    selected={to_string(@form[:collection_id].value) == to_string(collection.id)}
-                  >
-                    {collection.name}
-                  </option>
-                <% end %>
-              </select>
-            </div>
-
-            <.input field={@form[:abstract]} type="textarea" label="Abstract" />
-            <.input
-              field={@form[:abstract_alt]}
-              type="textarea"
-              label="Abstract (Alternate Language)"
-            />
-            <.input field={@form[:student_id]} type="text" label="Student ID (NIM/NPM)" />
-            <.input field={@form[:student_name]} type="text" label="Student Name" />
-            <.input field={@form[:faculty]} type="text" label="Faculty" />
-            <.input field={@form[:department]} type="text" label="Department / Program Study" />
-            <.input field={@form[:publication_year]} type="number" label="Publication Year" />
-          </div>
+          <%!-- 4. Type-specific detail fields --%>
+          <.type_section type={@selected_type} form={@form} />
 
           <%!-- File uploads section --%>
+          <%!-- 5. Files --%>
           <div id="files-section" class="kiroku-card p-6 space-y-6">
-            <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">Files</h2>
+            <div
+              class="flex items-center gap-3 pb-4 mb-1 border-b"
+              style="border-color: rgba(155,126,200,0.15);"
+            >
+              <div
+                class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                style="background: color-mix(in srgb, var(--color-patchouli) 14%, transparent); color: var(--color-patchouli);"
+              >
+                <.icon name="hero-paper-clip" class="w-5 h-5" />
+              </div>
+              <div>
+                <p
+                  class="font-heading font-semibold text-base leading-tight"
+                  style="color: var(--color-wisteria);"
+                >
+                  Berkas
+                </p>
+                <p class="text-xs leading-tight mt-0.5" style="color: var(--color-quill);">
+                  Lampirkan berkas karya sesuai jenisnya
+                </p>
+              </div>
+            </div>
 
             <.upload_field
               upload={@uploads.cover}
-              label="Cover Image"
+              label="Sampul / Cover"
               field_name="cover"
-              hint="JPG/PNG, max 5 MB"
+              hint="JPG/PNG, maks. 5 MB"
             />
             <.upload_field
               upload={@uploads.abstract}
-              label="Abstract PDF"
+              label="PDF Abstrak"
               field_name="abstract"
-              hint="PDF, max 20 MB"
+              hint="PDF, maks. 20 MB"
             />
             <.upload_field
               upload={@uploads.fulltext}
-              label="Full Text PDF"
+              label="Teks Lengkap (Full Text)"
               field_name="fulltext"
-              hint="PDF, max 100 MB"
+              hint="PDF, maks. 100 MB"
             />
             <.upload_field
               upload={@uploads.chapters}
-              label="Chapters (up to 6)"
+              label="Per-Bab (maks. 6 berkas)"
               field_name="chapters"
-              hint="PDF per chapter, max 50 MB each"
+              hint="PDF per bab, maks. 50 MB masing-masing"
             />
             <.upload_field
               upload={@uploads.supplemental}
-              label="Supplemental Files"
+              label="Berkas Suplemen"
               field_name="supplemental"
-              hint="PDF, DOCX, XLSX, CSV, ZIP, PPTX — max 50 MB each"
+              hint="PDF, DOCX, XLSX, CSV, ZIP, PPTX — maks. 50 MB"
             />
             <.upload_field
               upload={@uploads.media}
-              label="Media Files"
+              label="Berkas Media"
               field_name="media"
-              hint="MP3, MP4, MOV, images, ZIP — max 500 MB each"
+              hint="MP3, MP4, MOV, gambar, ZIP — maks. 500 MB"
             />
             <.upload_field
               upload={@uploads.source}
-              label="Source Files"
+              label="Berkas Sumber"
               field_name="source"
-              hint="ZIP, TAR, IPYNB, PDF — max 200 MB each"
+              hint="ZIP, TAR, IPYNB, PDF — maks. 200 MB"
             />
             <.upload_field
               upload={@uploads.administrative}
-              label="Administrative Documents"
+              label="Dokumen Administratif"
               field_name="administrative"
-              hint="PDF, max 20 MB — visible only to staff"
+              hint="PDF, maks. 20 MB — hanya terlihat oleh staf"
             />
           </div>
 
-          <div class="flex gap-3">
+          <%!-- 6. Submit actions --%>
+          <div class="kiroku-card p-5 flex flex-wrap items-center gap-3">
             <button
               type="submit"
-              phx-value-submit_as="draft"
-              class="px-5 py-2.5 rounded-lg font-semibold text-sm"
-              style="background: rgba(155,126,200,0.2); color: var(--color-wisteria);"
+              name="submit_as"
+              value="submitted"
+              class="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-sm transition-all hover:brightness-110 active:scale-95"
+              style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
             >
-              Save Draft
+              <.icon name="hero-paper-airplane" class="size-4" /> Kirim untuk Direview
             </button>
             <button
               type="submit"
-              phx-value-submit_as="submitted"
-              class="px-5 py-2.5 rounded-lg font-semibold text-sm"
-              style="background: var(--color-patchouli); color: white;"
+              name="submit_as"
+              value="draft"
+              class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all hover:brightness-110 active:scale-95"
+              style="background: color-mix(in srgb, var(--color-patchouli) 18%, transparent); color: var(--color-wisteria); border: 1px solid color-mix(in srgb, var(--color-patchouli) 30%, transparent);"
             >
-              Submit for Review
+              <.icon name="hero-bookmark" class="size-4" /> Simpan sebagai Draf
             </button>
             <.link
               navigate={~p"/my/items"}
               class="px-5 py-2.5 rounded-lg font-medium text-sm"
-              style="background: rgba(155,126,200,0.1); color: var(--color-quill);"
+              style="color: var(--color-quill);"
             >
-              Cancel
+              Batal
             </.link>
           </div>
         </.form>
@@ -295,13 +275,21 @@ defmodule KirokuWeb.SubmissionLive.New do
   end
 
   @impl true
+  def handle_event("type_changed", %{"item" => %{"item_type" => type}}, socket) do
+    {:noreply, assign(socket, :selected_type, type)}
+  end
+
+  @impl true
   def handle_event("validate", %{"item" => params}, socket) do
     changeset =
       %Item{}
       |> Item.changeset(params)
       |> Map.put(:action, :validate)
 
-    {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
+    {:noreply,
+     socket
+     |> assign(:selected_type, params["item_type"] || socket.assigns.selected_type)
+     |> assign(:form, to_form(changeset, as: :item))}
   end
 
   @impl true

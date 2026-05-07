@@ -13,13 +13,16 @@
       記
     </span>
     <div class="relative z-10 space-y-4 max-w-3xl mx-auto px-4">
-      <h1 class="kiroku-wordmark" style="font-size: 4rem;">記 Kiroku</h1>
+      <%= if @brand.logo_url do %>
+        <img src={@brand.logo_url} alt={@brand.name} class="h-20 w-auto mx-auto object-contain" />
+      <% else %>
+        <h1 class="kiroku-wordmark" style="font-size: 4rem;">記 {@brand.name}</h1>
+      <% end %>
       <p class="font-body text-xl" style="color: var(--color-wisteria);">
-        Every work recorded. Every scholar remembered.
+        {@brand.tagline}
       </p>
       <p class="font-body text-base max-w-xl mx-auto" style="color: var(--color-quill);">
-        The institutional repository for scholarly works — theses, legal memoranda,
-        creative works, and research by the academic community.
+        {@brand.description}
       </p>
       <form action={~p"/search"} method="get" class="mt-8 flex gap-2 max-w-lg mx-auto">
         <input

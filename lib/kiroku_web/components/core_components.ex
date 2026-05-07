@@ -495,4 +495,135 @@ defmodule KirokuWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  # ── Theme toggle ─────────────────────────────────────────────────────────────
+
+  @doc """
+  Renders a three-state theme toggle (system / light / dark).
+
+  The active state is driven by `data-theme-pref` on the `<html>` element, which
+  is set by the JS theme handler in `app.js`. No assigns required.
+
+  ## Examples
+
+      <.theme_toggle />
+  """
+  def theme_toggle(assigns) do
+    ~H"""
+    <div
+      class="relative flex flex-row items-center rounded-full border border-base-content/20 bg-base-300 p-0.5"
+      title="Toggle theme"
+    >
+      <%!-- Sliding active indicator --%>
+      <div class="absolute w-1/3 h-[calc(100%-4px)] rounded-full bg-base-100 shadow-md ring-1 ring-base-content/15
+        left-0
+        [[data-theme-pref=light]_&]:left-1/3
+        [[data-theme-pref=dark]_&]:left-2/3
+        transition-[left] duration-200 ease-in-out" />
+      <button
+        class="flex p-1.5 cursor-pointer w-1/3 justify-center relative z-10"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="system"
+        aria-label="Use system theme"
+      >
+        <.icon
+          name="hero-computer-desktop-micro"
+          class="size-4 opacity-60 hover:opacity-100 transition-opacity"
+        />
+      </button>
+      <button
+        class="flex p-1.5 cursor-pointer w-1/3 justify-center relative z-10"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="light"
+        aria-label="Use light theme"
+      >
+        <.icon name="hero-sun-micro" class="size-4 opacity-60 hover:opacity-100 transition-opacity" />
+      </button>
+      <button
+        class="flex p-1.5 cursor-pointer w-1/3 justify-center relative z-10"
+        phx-click={JS.dispatch("phx:set-theme")}
+        data-phx-theme="dark"
+        aria-label="Use dark theme"
+      >
+        <.icon name="hero-moon-micro" class="size-4 opacity-60 hover:opacity-100 transition-opacity" />
+      </button>
+    </div>
+    """
+  end
+
+  # ── Locale switcher ───────────────────────────────────────────────────────────
+
+  @doc """
+  Renders a locale/language switcher dropdown.
+
+  Clicking a locale navigates to `current_path?locale=<code>`, which the
+  `KirokuWeb.Plugs.Locale` plug picks up and stores in the session.
+
+  ## Examples
+
+      <.locale_switcher current_locale={@locale} current_path="/" />
+  """
+  attr :current_locale, :string, default: "id"
+  attr :current_path, :string, default: "/"
+  attr :dropdown_id, :string, default: "locale-dropdown"
+
+  def locale_switcher(assigns) do
+    ~H"""
+    <div class="relative">
+      <button
+        phx-click={JS.toggle(to: "##{@dropdown_id}")}
+        class="flex items-center px-2 py-1.5 rounded-lg transition-colors hover:bg-base-300 cursor-pointer"
+        aria-haspopup="listbox"
+        aria-label="Switch language"
+      >
+        <span class="text-base leading-none">{KirokuWeb.Utils.Locale.flag(@current_locale)}</span>
+      </button>
+
+      <div
+        id={@dropdown_id}
+        phx-click-away={JS.hide(to: "##{@dropdown_id}")}
+        class="hidden absolute right-0 mt-1 w-48 origin-top-right rounded-xl bg-base-200 shadow-lg ring-1 ring-base-300 z-50"
+        role="listbox"
+      >
+        <div class="py-1">
+          <a
+            :for={locale <- KirokuWeb.Utils.Locale.all_locales()}
+            href={KirokuWeb.CoreComponents.locale_query_path(@current_path, locale.code)}
+            class={[
+              "flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-base-300",
+              @current_locale == locale.code && "font-semibold bg-base-300"
+            ]}
+            role="option"
+            aria-selected={to_string(@current_locale == locale.code)}
+          >
+            <span class="text-lg">{locale.flag}</span>
+            <span>{locale.name}</span>
+            <.icon
+              :if={@current_locale == locale.code}
+              name="hero-check-mini"
+              class="size-4 ml-auto"
+            />
+          </a>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc false
+  def locale_query_path(path, locale_code) when is_binary(locale_code) do
+    base =
+      (path || "/")
+      |> String.trim()
+      |> case do
+        "" -> "/"
+        p -> p
+      end
+      |> String.split("?")
+      |> hd()
+      |> then(fn p -> if String.starts_with?(p, "/live"), do: "/", else: p end)
+
+    base = if base == "", do: "/", else: base
+    "#{base}?locale=#{URI.encode(locale_code)}"
+  end
 end

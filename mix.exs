@@ -75,6 +75,12 @@ defmodule Kiroku.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
 
+      # ── Elixir AWS SDK ───────────────────────────────────────────────────────
+      {:ex_aws, "~> 2.1"},
+      {:ex_aws_s3, "~> 2.0"},
+      {:hackney, "~> 1.9"},
+      {:sweet_xml, "~> 0.6"},
+
       # ── Shared ────────────────────────────────────────────────────────────
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},

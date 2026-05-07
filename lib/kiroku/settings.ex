@@ -121,6 +121,17 @@ defmodule Kiroku.Settings do
   end
 
   @doc """
+  Returns an explicit public base URL override for building file download links.
+  Only needed when the public-facing domain differs from the S3_ENDPOINT API host.
+  When S3_ENDPOINT is set (MinIO, R2, etc.), public URLs are derived automatically
+  as endpoint/bucket/key — set this only to override that behaviour.
+  Priority: DB setting → S3_PUBLIC_URL env var → nil.
+  """
+  def storage_public_url do
+    get("storage_public_url") || System.get_env("S3_PUBLIC_URL")
+  end
+
+  @doc """
   Returns a map of all current storage settings for the admin UI.
   """
   def storage_settings do
@@ -130,7 +141,51 @@ defmodule Kiroku.Settings do
       region: storage_region(),
       access_key_id: storage_access_key_id(),
       secret_access_key: storage_secret_access_key(),
-      endpoint: storage_endpoint()
+      endpoint: storage_endpoint(),
+      public_url: storage_public_url()
+    }
+  end
+
+  # ── Brand-specific helpers ─────────────────────────────────────────────────
+
+  @doc "Returns the brand/repository name."
+  def brand_name, do: get("brand_name") || "Kiroku"
+
+  @doc "Returns the brand tagline."
+  def brand_tagline,
+    do: get("brand_tagline") || "Every work recorded. Every scholar remembered."
+
+  @doc "Returns the brand description shown on the homepage."
+  def brand_description,
+    do:
+      get("brand_description") ||
+        "The institutional repository for scholarly works — theses, legal memoranda, creative works, and research by the academic community."
+
+  @doc "Returns the public contact e-mail address."
+  def brand_contact_email, do: get("brand_contact_email") || "curatorian@proton.me"
+
+  @doc "Returns the public contact phone number."
+  def brand_contact_phone, do: get("brand_contact_phone") || "08123456789"
+
+  @doc "Returns the URL of the brand logo image, or nil to use the text wordmark."
+  def brand_logo_url, do: get("brand_logo_url")
+
+  @doc """
+  Returns the primary brand color as a CSS hex string (e.g. \"#7B4FA6\").
+  This color overrides --color-patchouli site-wide.
+  """
+  def brand_primary_color, do: get("brand_primary_color") || "#7B4FA6"
+
+  @doc "Returns a map of all current brand settings for the admin UI."
+  def brand_settings do
+    %{
+      name: brand_name(),
+      tagline: brand_tagline(),
+      description: brand_description(),
+      contact_email: brand_contact_email(),
+      contact_phone: brand_contact_phone(),
+      logo_url: brand_logo_url(),
+      primary_color: brand_primary_color()
     }
   end
 end

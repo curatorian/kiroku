@@ -5,7 +5,7 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
 
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_user}>
+    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Items">
       <div class="max-w-4xl mx-auto space-y-6">
         <div class="flex items-center gap-4">
           <.link
@@ -91,7 +91,7 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
           </div>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.admin>
     """
   end
 

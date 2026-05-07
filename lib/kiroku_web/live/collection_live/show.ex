@@ -1,0 +1,115 @@
+defmodule KirokuWeb.CollectionLive.Show do
+  use KirokuWeb, :live_view
+
+  alias Kiroku.Repository
+
+  @impl true
+  def mount(%{"handle" => handle}, _session, socket) do
+    collection = Repository.get_collection_by_handle!(handle)
+    collection = Kiroku.Repo.preload(collection, :community)
+    items = Repository.list_items_for_collection(collection.id)
+    item_count = Repository.count_items_for_collection(collection.id)
+
+    {:ok,
+     socket
+     |> assign(:page_title, "#{collection.name} — Kiroku")
+     |> assign(:collection, collection)
+     |> assign(:items, items)
+     |> assign(:item_count, item_count)}
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} current_scope={@current_user}>
+      <div class="space-y-8">
+        <%!-- Breadcrumb --%>
+        <nav class="flex items-center gap-2 text-sm" style="color: var(--color-quill);">
+          <.link navigate={~p"/communities"} class="hover:text-white transition-colors">
+            Communities
+          </.link>
+          <span>/</span>
+          <.link
+            navigate={~p"/communities/#{@collection.community.handle}"}
+            class="hover:text-white transition-colors"
+          >
+            {@collection.community.name}
+          </.link>
+          <span>/</span>
+          <span style="color: var(--color-wisteria);">{@collection.name}</span>
+        </nav>
+
+        <%!-- Collection header --%>
+        <div class="kiroku-card-raised p-8">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h1 class="font-heading text-3xl font-semibold" style="color: var(--color-lilac);">
+                {@collection.name}
+              </h1>
+              <p class="kiroku-handle mt-1">/{@collection.handle}</p>
+              <%= if @collection.short_description do %>
+                <p class="mt-3 leading-relaxed" style="color: var(--color-wisteria);">
+                  {@collection.short_description}
+                </p>
+              <% end %>
+            </div>
+            <div class="text-right shrink-0">
+              <p class="text-3xl font-bold" style="color: var(--color-patchouli);">
+                {@item_count}
+              </p>
+              <p class="text-xs mt-0.5" style="color: var(--color-quill);">items</p>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Items list --%>
+        <div>
+          <h2 class="font-heading text-2xl mb-4" style="color: var(--color-lilac);">Items</h2>
+          <%= if @items == [] do %>
+            <div class="kiroku-card p-8 text-center">
+              <p style="color: var(--color-quill);">
+                No published items in this collection yet.
+              </p>
+            </div>
+          <% else %>
+            <div class="space-y-3">
+              <%= for item <- @items do %>
+                <.link
+                  navigate={~p"/items/#{item.handle}"}
+                  class="kiroku-card p-5 flex items-start gap-4 hover:border-purple-500/40 transition-colors group block"
+                >
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1.5">
+                      <span class="badge-item-type">{item.item_type}</span>
+                      <%= if item.publication_year do %>
+                        <span class="text-xs" style="color: var(--color-quill);">
+                          {item.publication_year}
+                        </span>
+                      <% end %>
+                    </div>
+                    <h3
+                      class="font-body text-base leading-snug group-hover:text-white transition-colors"
+                      style="color: var(--color-lilac);"
+                    >
+                      {item.title}
+                    </h3>
+                    <%= if item.department do %>
+                      <p class="text-xs mt-1" style="color: var(--color-quill);">
+                        {item.department}
+                      </p>
+                    <% end %>
+                  </div>
+                  <.icon
+                    name="hero-chevron-right"
+                    class="w-4 h-4 shrink-0 mt-1 text-[var(--color-quill)]"
+                  />
+                </.link>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </Layouts.app>
+    """
+  end
+end

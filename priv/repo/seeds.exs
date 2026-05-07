@@ -2,10 +2,70 @@
 #
 #     mix run priv/repo/seeds.exs
 #
-# Inside the script, you can read and write to any of your
-# repositories directly:
+# Credentials can be overridden via environment variables:
 #
-#     Kiroku.Repo.insert!(%Kiroku.SomeSchema{})
-#
-# We recommend using the bang functions (`insert!`, `update!`
-# and so on) as they will fail if something goes wrong.
+#     ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=secret123456 mix run priv/repo/seeds.exs
+
+import Ecto.Changeset
+alias Kiroku.Accounts.User
+alias Kiroku.Repo
+alias Kiroku.Settings
+
+# ── Admin seed ────────────────────────────────────────────────────────────────
+
+admin_email = System.get_env("ADMIN_EMAIL", "admin@kiroku.local")
+admin_password = System.get_env("ADMIN_PASSWORD", "kiroku_admin_2025!")
+admin_name = System.get_env("ADMIN_NAME", "Administrator")
+
+case Repo.get_by(User, email: admin_email) do
+  %User{} ->
+    IO.puts("  [seeds] Admin user #{admin_email} already exists, skipping.")
+
+  nil ->
+    now = NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+
+    %User{}
+    |> User.registration_changeset(%{
+      email: admin_email,
+      password: admin_password,
+      display_name: admin_name
+    })
+    |> put_change(:user_type, :superadmin)
+    |> put_change(:confirmed_at, now)
+    |> Repo.insert!()
+
+    IO.puts("  [seeds] Created admin user: #{admin_email}")
+    IO.puts("  [seeds] Password: #{admin_password}")
+    IO.puts("  [seeds] Change this password immediately after first login!")
+end
+
+# ── Brand settings seed ────────────────────────────────────────────────────
+
+brand_defaults = [
+  {"brand_name", "Kiroku", "Display name of the repository shown site-wide"},
+  {"brand_tagline", "Every work recorded. Every scholar remembered.",
+   "Short tagline shown on the homepage hero"},
+  {"brand_description",
+   "The institutional repository for scholarly works — theses, legal memoranda, creative works, and research by the academic community.",
+   "Longer description shown on the homepage hero"},
+  {"brand_contact_email", "curatorian@proton.me", "Public contact e-mail address"},
+  {"brand_contact_phone", "08123456789", "Public contact phone number"},
+  {"brand_logo_url", nil, "URL of the brand logo image (nil = use text wordmark)"},
+  {"brand_primary_color", "#7B4FA6",
+   "Primary brand colour (hex) — overrides the default Patchouli violet"}
+]
+
+Enum.each(brand_defaults, fn {key, value, description} ->
+  case Settings.get(key) do
+    nil ->
+      if value do
+        Settings.put(key, value, description)
+        IO.puts("  [seeds] Set brand setting: #{key} = #{value}")
+      else
+        IO.puts("  [seeds] Skipped brand setting: #{key} (no default value)")
+      end
+
+    _existing ->
+      IO.puts("  [seeds] Brand setting #{key} already exists, skipping.")
+  end
+end)

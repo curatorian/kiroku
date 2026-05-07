@@ -8,7 +8,20 @@
       {assigns[:page_title]}
     </.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <%!-- Brand primary colour override — must load after app.css --%>
+    <style>
+      :root, [data-theme] { --color-patchouli: <%= Kiroku.Settings.brand_primary_color() %>; }
+    </style>
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
+    </script>
+    <%!-- Apply saved theme before first paint to prevent flash of wrong theme --%>
+    <script>
+      (function(){
+        var p=localStorage.getItem("theme-pref");
+        var t=p==="light"?"kiroku-light":p==="dark"?"kiroku-dark":window.matchMedia("(prefers-color-scheme: dark)").matches?"kiroku-dark":"kiroku-light";
+        document.documentElement.setAttribute("data-theme",t);
+        if(p)document.documentElement.setAttribute("data-theme-pref",p);
+      })();
     </script>
   </head>
   <body

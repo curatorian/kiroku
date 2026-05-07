@@ -6,7 +6,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
 
   def render(%{live_action: action} = assigns) when action in [:new, :edit] do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_user}>
+    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Communities">
       <div class="max-w-2xl mx-auto space-y-6">
         <div>
           <.link
@@ -51,13 +51,13 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
           </.form>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.admin>
     """
   end
 
   def render(%{live_action: :index} = assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_user}>
+    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Communities">
       <div class="space-y-6">
         <div class="flex items-center justify-between">
           <h1 class="font-heading text-3xl" style="color: var(--color-lilac);">Communities</h1>
@@ -130,7 +130,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.admin>
     """
   end
 

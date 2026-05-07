@@ -10,8 +10,8 @@ import Config
 config :kiroku,
   ecto_repos: [Kiroku.Repo],
   generators: [timestamp_type: :utc_datetime],
-  institution_name: "Universitas Indonesia",
-  institution_domain: "ui.ac.id"
+  institution_name: "Universitas Padjadjaran",
+  institution_domain: "unpad.ac.id"
 
 # Oban background job processing
 config :kiroku, Oban,

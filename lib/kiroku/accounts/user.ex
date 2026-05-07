@@ -33,6 +33,38 @@ defmodule Kiroku.Accounts.User do
     |> validate_password(opts)
   end
 
+  @doc "Used by admins/superadmins to create or update a user — casts email and user_type."
+  def admin_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [
+      :email,
+      :password,
+      :display_name,
+      :user_type,
+      :student_id,
+      :faculty,
+      :department
+    ])
+    |> validate_email(opts)
+    |> maybe_validate_and_hash_password(attrs)
+  end
+
+  @doc "Used by admins/superadmins to forcefully set a new password without requiring the current one."
+  def admin_set_password_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_required([:password])
+    |> validate_confirmation(:password, message: "does not match password")
+    |> validate_password([])
+  end
+
+  @doc "Used by admins/superadmins to update role (user_type) only."
+  def role_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:user_type])
+    |> validate_required([:user_type])
+  end
+
   def profile_changeset(user, attrs) do
     user
     |> cast(attrs, [:display_name, :student_id, :faculty, :department, :avatar_url])
@@ -111,6 +143,16 @@ defmodule Kiroku.Accounts.User do
       changeset
       |> unsafe_validate_unique(:email, Kiroku.Repo)
       |> unique_constraint(:email)
+    else
+      changeset
+    end
+  end
+
+  # Validates and hashes password only when a password was provided in attrs
+  defp maybe_validate_and_hash_password(changeset, attrs) do
+    if Map.has_key?(attrs, "password") and attrs["password"] != "" do
+      changeset
+      |> validate_password([])
     else
       changeset
     end

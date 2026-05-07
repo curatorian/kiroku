@@ -10,7 +10,8 @@ defmodule KirokuWeb.PageController do
     render(conn, :home,
       communities: communities,
       recent_items: recent_items,
-      current_user: conn.assigns[:current_user]
+      current_user: conn.assigns[:current_user],
+      brand: Kiroku.Settings.brand_settings()
     )
   end
 end

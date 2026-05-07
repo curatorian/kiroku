@@ -5,7 +5,7 @@ defmodule KirokuWeb.Admin.DashboardLive do
 
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_user}>
+    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Dashboard">
       <div class="space-y-8">
         <%!-- Page Header --%>
         <div class="flex items-center justify-between">
@@ -326,7 +326,7 @@ defmodule KirokuWeb.Admin.DashboardLive do
           </div>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.admin>
     """
   end
 

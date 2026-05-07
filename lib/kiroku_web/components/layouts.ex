@@ -31,16 +31,29 @@ defmodule KirokuWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :current_path, :string, default: "/", doc: "current URL path for locale switcher links"
+
   slot :inner_block, required: true
 
   def app(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:locale, fn ->
+        Gettext.get_locale(KirokuWeb.Gettext) || "id"
+      end)
+      |> assign(:brand, Kiroku.Settings.brand_settings())
+
     ~H"""
     <header style="background: var(--color-grimoire); border-bottom: 1px solid rgba(155,126,200,0.12);">
       <nav class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
         <%!-- Wordmark --%>
         <a href={~p"/"} class="flex items-center gap-2 group">
-          <span class="kiroku-kanji text-2xl leading-none">記</span>
-          <span class="kiroku-wordmark text-xl leading-none">Kiroku</span>
+          <%= if @brand.logo_url do %>
+            <img src={@brand.logo_url} alt={@brand.name} class="h-8 w-auto object-contain" />
+          <% else %>
+            <span class="kiroku-kanji text-2xl leading-none">記</span>
+            <span class="kiroku-wordmark text-xl leading-none">{@brand.name}</span>
+          <% end %>
         </a>
 
         <%!-- Main nav --%>
@@ -48,31 +61,22 @@ defmodule KirokuWeb.Layouts do
           class="hidden md:flex items-center gap-6 text-sm font-medium"
           style="color: var(--color-wisteria);"
         >
-          <a href={~p"/communities"} class="hover:text-white transition-colors">Communities</a>
-          <a href={~p"/search"} class="hover:text-white transition-colors flex items-center gap-1">
-            <.icon name="hero-magnifying-glass" class="w-4 h-4" /> Search
+          <a
+            :for={item <- nav_items()}
+            href={item.href}
+            class="hover:text-patchouli transition-colors flex items-center gap-1"
+          >
+            <.icon :if={item.icon} name={item.icon} class="w-4 h-4" />
+            {item.label}
           </a>
         </div>
 
         <%!-- Right side --%>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <.theme_toggle />
+          <.locale_switcher current_locale={@locale} current_path={@current_path} />
           <%= if @current_scope do %>
-            <span class="text-sm" style="color: var(--color-dust);">{@current_scope.email}</span>
-            <a
-              href={~p"/my/items"}
-              class="text-sm px-3 py-1.5 rounded-lg transition-colors"
-              style="background: rgba(123,79,166,0.15); color: var(--color-lavender); border: 1px solid rgba(123,79,166,0.25);"
-            >
-              My Items
-            </a>
-            <.link
-              href={~p"/users/log_out"}
-              method="delete"
-              class="text-sm px-3 py-1.5 rounded-lg transition-colors"
-              style="color: var(--color-dust);"
-            >
-              Sign out
-            </.link>
+            <.user_menu current_scope={@current_scope} />
           <% else %>
             <a
               href={~p"/users/log_in"}
@@ -100,6 +104,260 @@ defmodule KirokuWeb.Layouts do
     </main>
 
     <.flash_group flash={@flash} />
+    """
+  end
+
+  @doc """
+  Renders the admin shell layout: a fixed sidebar with navigation and a
+  scrollable main content area. Use this for all `/admin/*` LiveViews.
+
+  ## Examples
+
+      <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Dashboard">
+        <h1>Content</h1>
+      </Layouts.admin>
+
+  """
+  attr :flash, :map, required: true
+  attr :current_scope, :map, default: nil
+  attr :page_title, :string, default: "Admin"
+  slot :inner_block, required: true
+
+  def admin(assigns) do
+    assigns = assign_new(assigns, :brand, fn -> Kiroku.Settings.brand_settings() end)
+
+    ~H"""
+    <div class="admin-shell">
+      <%!-- Sidebar --%>
+      <aside class="admin-sidebar">
+        <%!-- Wordmark --%>
+        <div class="admin-sidebar-header">
+          <a href={~p"/"} class="flex items-center gap-2 group">
+            <%= if @brand.logo_url do %>
+              <img src={@brand.logo_url} alt={@brand.name} class="h-6 w-auto object-contain" />
+            <% else %>
+              <span class="kiroku-kanji text-xl leading-none">記</span>
+              <span class="kiroku-wordmark text-base leading-none">{@brand.name}</span>
+            <% end %>
+          </a>
+          <span
+            class="ml-auto text-xs px-1.5 py-0.5 rounded font-ui font-semibold tracking-wide"
+            style="background: color-mix(in srgb, var(--color-patchouli) 25%, transparent); color: var(--color-wisteria); border: 1px solid color-mix(in srgb, var(--color-patchouli) 30%, transparent);"
+          >
+            Admin
+          </span>
+        </div>
+
+        <%!-- Nav --%>
+        <nav class="admin-sidebar-nav">
+          <.admin_nav_item
+            icon="hero-squares-2x2"
+            label="Dashboard"
+            href={~p"/admin"}
+            current_path={@page_title}
+            match="Dashboard"
+          />
+          <.admin_nav_item
+            icon="hero-document-text"
+            label="Items"
+            href={~p"/admin/items"}
+            current_path={@page_title}
+            match="Items"
+          />
+          <.admin_nav_item
+            icon="hero-building-library"
+            label="Communities"
+            href={~p"/admin/communities"}
+            current_path={@page_title}
+            match="Communities"
+          />
+          <.admin_nav_item
+            icon="hero-folder-open"
+            label="Collections"
+            href={~p"/admin/collections"}
+            current_path={@page_title}
+            match="Collections"
+          />
+          <.admin_nav_item
+            icon="hero-users"
+            label="Users"
+            href={~p"/admin/users"}
+            current_path={@page_title}
+            match="Users"
+          />
+          <div class="admin-sidebar-divider" />
+          <.admin_nav_item
+            icon="hero-cog-6-tooth"
+            label="Settings"
+            href={~p"/admin/settings"}
+            current_path={@page_title}
+            match="Settings"
+          />
+        </nav>
+
+        <%!-- Footer --%>
+        <div class="admin-sidebar-footer">
+          <%= if @current_scope do %>
+            <div class="flex items-center gap-2 min-w-0">
+              <div
+                class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                style="background: color-mix(in srgb, var(--color-patchouli) 30%, transparent); color: var(--color-lavender);"
+              >
+                {String.first(@current_scope.display_name || @current_scope.email)
+                |> String.upcase()}
+              </div>
+              <span class="text-xs truncate" style="color: var(--color-dust);">
+                {@current_scope.email}
+              </span>
+            </div>
+            <.link
+              href={~p"/users/log_out"}
+              method="delete"
+              class="flex-shrink-0 p-1.5 rounded-lg transition-colors hover:bg-base-300"
+              title="Sign out"
+            >
+              <.icon name="hero-arrow-right-on-rectangle" class="size-4 opacity-60" />
+            </.link>
+          <% end %>
+        </div>
+      </aside>
+
+      <%!-- Main content --%>
+      <div class="admin-main">
+        <%!-- Top bar --%>
+        <header class="admin-topbar">
+          <h1 class="font-heading text-xl" style="color: var(--color-lilac);">{@page_title}</h1>
+          <div class="flex items-center gap-3 ml-auto">
+            <.theme_toggle />
+            <.link
+              href={~p"/"}
+              class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors hover:bg-base-300"
+              style="color: var(--color-dust);"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="size-3.5" /> View site
+            </.link>
+          </div>
+        </header>
+
+        <%!-- Page content --%>
+        <main class="admin-content">
+          {render_slot(@inner_block)}
+        </main>
+      </div>
+    </div>
+
+    <.flash_group flash={@flash} />
+    """
+  end
+
+  # Nav items for the public top bar. Add, remove, or reorder entries here.
+  # Set icon: nil for items without an icon.
+  defp nav_items do
+    [
+      %{label: "Communities", href: ~p"/communities", icon: "hero-building-library"},
+      %{label: "Search", href: ~p"/search", icon: "hero-magnifying-glass"}
+    ]
+  end
+
+  # Private helper for the user avatar dropdown in the top nav
+  defp user_menu(assigns) do
+    ~H"""
+    <div class="relative">
+      <button
+        phx-click={JS.toggle(to: "#user-menu-dropdown")}
+        class="flex items-center justify-center size-8 rounded-full transition-all hover:ring-2 focus:outline-none focus:ring-2 cursor-pointer overflow-hidden"
+        style="background: color-mix(in srgb, var(--color-patchouli) 30%, transparent); color: var(--color-lavender); --tw-ring-color: var(--color-lavender);"
+        aria-haspopup="menu"
+        aria-label="User menu"
+      >
+        <%= if @current_scope.avatar_url do %>
+          <img src={@current_scope.avatar_url} alt="avatar" class="size-full object-cover" />
+        <% else %>
+          <span class="text-sm font-bold leading-none">
+            {(@current_scope.display_name || @current_scope.email)
+            |> String.first()
+            |> String.upcase()}
+          </span>
+        <% end %>
+      </button>
+
+      <div
+        id="user-menu-dropdown"
+        phx-click-away={JS.hide(to: "#user-menu-dropdown")}
+        class="hidden absolute right-0 mt-2 w-56 origin-top-right rounded-xl shadow-lg ring-1 z-50"
+        style="background: var(--color-grimoire); border-color: color-mix(in srgb, var(--color-patchouli) 18%, transparent);"
+        role="menu"
+      >
+        <%!-- User info header --%>
+        <div
+          class="px-4 py-3"
+          style="border-bottom: 1px solid color-mix(in srgb, var(--color-patchouli) 12%, transparent);"
+        >
+          <p class="text-sm font-medium truncate" style="color: var(--color-lilac);">
+            {@current_scope.display_name || @current_scope.email}
+          </p>
+          <%= if @current_scope.display_name do %>
+            <p class="text-xs truncate mt-0.5" style="color: var(--color-dust);">
+              {@current_scope.email}
+            </p>
+          <% end %>
+        </div>
+
+        <%!-- Menu items --%>
+        <div class="py-1">
+          <.link
+            navigate={~p"/my/items"}
+            class="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-base-300"
+            style="color: var(--color-wisteria);"
+            role="menuitem"
+          >
+            <.icon name="hero-folder-open" class="size-4 flex-shrink-0" /> My Items
+          </.link>
+          <%= if @current_scope.user_type in [:admin, :superadmin] do %>
+            <.link
+              navigate={~p"/admin"}
+              class="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-base-300"
+              style="color: var(--color-wisteria);"
+              role="menuitem"
+            >
+              <.icon name="hero-squares-2x2" class="size-4 flex-shrink-0" /> Admin
+            </.link>
+          <% end %>
+        </div>
+
+        <%!-- Sign out --%>
+        <div
+          class="py-1"
+          style="border-top: 1px solid color-mix(in srgb, var(--color-patchouli) 12%, transparent);"
+        >
+          <.link
+            href={~p"/users/log_out"}
+            method="delete"
+            class="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-base-300"
+            style="color: var(--color-dust);"
+            role="menuitem"
+          >
+            <.icon name="hero-arrow-right-on-rectangle" class="size-4 flex-shrink-0" /> Sign out
+          </.link>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Private helper for sidebar nav items
+  defp admin_nav_item(assigns) do
+    ~H"""
+    <.link
+      navigate={@href}
+      class={[
+        "admin-nav-item",
+        String.contains?(@current_path, @match) && "admin-nav-item-active"
+      ]}
+    >
+      <.icon name={@icon} class="size-4 flex-shrink-0" />
+      {@label}
+    </.link>
     """
   end
 
@@ -142,43 +400,6 @@ defmodule KirokuWeb.Layouts do
         {gettext("Attempting to reconnect")}
         <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
       </.flash>
-    </div>
-    """
-  end
-
-  @doc """
-  Provides dark vs light theme toggle based on themes defined in app.css.
-
-  See <head> in root.html.heex which applies the theme before page load.
-  """
-  def theme_toggle(assigns) do
-    ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="system"
-      >
-        <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="light"
-      >
-        <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="dark"
-      >
-        <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
     </div>
     """
   end

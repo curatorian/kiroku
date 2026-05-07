@@ -52,6 +52,8 @@ defmodule KirokuWeb do
     quote do
       use Phoenix.LiveView
 
+      on_mount {KirokuWeb.Plugs.Locale, :set_locale}
+
       unquote(html_helpers())
     end
   end
