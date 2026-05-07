@@ -17946,3 +17946,215 @@ Function: &:erlang.apply/2
 15:56:53.080 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
 
 15:56:53.080 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:03.747 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 1ms
+
+16:00:03.750 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 1ms
+
+16:00:03.750 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 3ms
+
+16:00:03.771 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 3ms
+
+16:00:03.774 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 5ms
+
+16:00:03.775 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/codeAction in 6ms
+
+16:00:03.787 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/formatting in 13ms
+
+16:00:03.798 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/formatting in 22ms
+
+16:00:03.818 instance_id=19E00E8E26D [debug] handled request client -> server textDocument/formatting in 41ms
+
+16:00:03.876 instance_id=19E00E8E26D [debug] handled notification client -> server textDocument/didSave in 1ms
+
+16:00:03.879 instance_id=19E00E8E26D [debug] handled notification client -> server textDocument/didSave in 2ms
+
+16:00:03.881 instance_id=19E00E8E26D [debug] handled notification client -> server textDocument/didSave in 1ms
+
+16:00:04.275 instance_id=19E00E8E26D [debug] handled notification client -> server workspace/didChangeWatchedFiles in 2ms
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.476 [info] Plugins found 0 results in 0.009 ms
+
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.476 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.477 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.477 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.477 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.692 [info] Plugins found 0 results in 0.011 ms
+
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.692 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.693 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.693 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.898 [info] Plugins found 0 results in 0.008 ms
+
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.898 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:04.950 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.949 [info] Building kiroku
+
+
+16:00:04.950 instance_id=19E00E8E26D [debug] sent request server -> client window/workDoneProgress/create
+
+16:00:04.951 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.950 [debug] sent request server -> client window/workDoneProgress/create
+
+
+16:00:04.952 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:04.954 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:04.954 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.952 [debug] sent notification server -> client $/progress
+
+
+16:00:04.955 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:04.954 [debug] sent notification server -> client $/progress
+
+
+16:00:05.092 instance_id=19E00E8E26D [debug] Node port message: Compiling 3 files (.ex)
+
+
+16:00:05.623 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.624 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.623 [debug] sent notification server -> client $/progress
+
+
+16:00:05.797 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.799 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.797 [debug] sent notification server -> client $/progress
+
+
+16:00:05.827 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.827 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.827 [debug] sent notification server -> client $/progress
+
+
+16:00:05.854 instance_id=19E00E8E26D [debug] Node port message: Generated kiroku app
+
+
+16:00:05.926 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.926 [info] Loading 0 modules
+
+
+16:00:05.930 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.930 [info] Compile completed with status ok Produced 0 diagnostics []
+
+
+16:00:05.930 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.930 instance_id=19E00E8E26D [debug] sent notification server -> client window/logMessage
+
+16:00:05.930 instance_id=19E00E8E26D [info] Compiled kiroku in 981 ms
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent request server -> client window/workDoneProgress/create
+
+16:00:05.931 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.930 [info] Plugins found 0 results in 0.006 ms
+
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.930 [debug] sent notification server -> client $/progress
+
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.931 [debug] sent request server -> client window/workDoneProgress/create
+
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.931 instance_id=19E00E8E26D [debug] sent notification server -> client textDocument/publishDiagnostics
+
+16:00:05.932 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.932 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.932 [debug] sent notification server -> client $/progress
+
+
+16:00:05.944 instance_id=19E00E8E26D [debug] sent notification server -> client $/progress
+
+16:00:05.945 instance_id=19E00E8E26D [debug] Node port message: 
+16:00:05.944 [debug] sent notification server -> client $/progress
+
