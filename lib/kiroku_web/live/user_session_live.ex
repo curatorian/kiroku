@@ -56,6 +56,14 @@ defmodule KirokuWeb.UserSessionLive do
             </button>
           </.form>
 
+          <.link
+            href="/auth/paus"
+            class="w-full inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 py-2.5 text-sm font-semibold transition hover:bg-white/10"
+            style="color: var(--color-lavender);"
+          >
+            Sign in with PAuS
+          </.link>
+
           <p class="text-center text-sm" style="color: var(--color-quill);">
             Don't have an account?
             <.link

@@ -68,6 +68,8 @@ defmodule KirokuWeb.Router do
     pipe_through [:browser, :redirect_if_user_is_authenticated]
 
     post "/users/log_in", UserSessionController, :create
+    get "/auth/paus", UserAuthPausController, :request
+    get "/auth/paus/callback", UserAuthPausController, :callback
 
     live_session :guest,
       on_mount: [{KirokuWeb.UserAuth, :redirect_if_user_is_authenticated}] do

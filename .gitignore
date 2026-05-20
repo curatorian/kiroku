@@ -38,3 +38,7 @@ npm-debug.log
 # Language Server
 .elixir_ls/
 .expert
+
+# Environment Variable
+.env
+.env.prod

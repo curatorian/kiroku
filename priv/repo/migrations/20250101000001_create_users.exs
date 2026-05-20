@@ -10,7 +10,7 @@ defmodule Kiroku.Repo.Migrations.CreateUsers do
 
       add :user_type, :string, null: false, default: "submitter"
       add :display_name, :string
-      add :student_id, :string
+      add :identifier, :string
       add :faculty, :string
       add :department, :string
       add :avatar_url, :string
@@ -19,6 +19,7 @@ defmodule Kiroku.Repo.Migrations.CreateUsers do
     end
 
     create unique_index(:users, [:email])
+    create unique_index(:users, [:identifier])
     create index(:users, [:user_type])
   end
 end
