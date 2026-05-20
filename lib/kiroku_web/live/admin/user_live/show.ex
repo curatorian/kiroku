@@ -75,12 +75,12 @@ defmodule KirokuWeb.Admin.UserLive.Show do
           </div>
 
           <div class="grid grid-cols-2 gap-x-8 gap-y-3 mt-6 text-sm">
-            <%= if @user.student_id do %>
+            <%= if @user.identifier do %>
               <div>
                 <span class="text-xs uppercase tracking-wide" style="color: var(--color-wisteria);">
-                  Student ID
+                  Identifier
                 </span>
-                <p style="color: var(--color-lilac);">{@user.student_id}</p>
+                <p style="color: var(--color-lilac);">{@user.identifier}</p>
               </div>
             <% end %>
             <%= if @user.faculty do %>
@@ -195,7 +195,7 @@ defmodule KirokuWeb.Admin.UserLive.Show do
           >
             <.input field={@form[:email]} type="email" label="Email" />
             <.input field={@form[:display_name]} type="text" label="Display Name" />
-            <.input field={@form[:student_id]} type="text" label="Student ID" />
+            <.input field={@form[:identifier]} type="text" label="Identifier" />
             <.input field={@form[:faculty]} type="text" label="Faculty" />
             <.input field={@form[:department]} type="text" label="Department" />
             <%= if can_change_role?(@current_user, @user) do %>

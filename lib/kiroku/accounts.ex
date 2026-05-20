@@ -36,6 +36,16 @@ defmodule Kiroku.Accounts do
     |> Repo.insert()
   end
 
+  def create_user_from_oauth(attrs) do
+    %User{}
+    |> User.oauth_changeset(attrs)
+    |> Ecto.Changeset.put_change(
+      :confirmed_at,
+      NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+    )
+    |> Repo.insert()
+  end
+
   def admin_update_user(%User{} = user, attrs) do
     user
     |> User.admin_changeset(attrs)

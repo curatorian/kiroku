@@ -15,7 +15,7 @@ defmodule Kiroku.Accounts.User do
 
     field :user_type, Ecto.Enum, values: @user_types, default: :submitter
     field :display_name, :string
-    field :student_id, :string
+    field :identifier, :string
     field :faculty, :string
     field :department, :string
     field :avatar_url, :string
@@ -28,7 +28,7 @@ defmodule Kiroku.Accounts.User do
 
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email, :password, :display_name, :student_id, :faculty, :department])
+    |> cast(attrs, [:email, :password, :display_name, :identifier, :faculty, :department])
     |> validate_email(opts)
     |> validate_password(opts)
   end
@@ -41,12 +41,23 @@ defmodule Kiroku.Accounts.User do
       :password,
       :display_name,
       :user_type,
-      :student_id,
+      :identifier,
       :faculty,
-      :department
+      :department,
+      :avatar_url
     ])
     |> validate_email(opts)
     |> maybe_validate_and_hash_password(attrs)
+    |> unique_identifier_constraint()
+  end
+
+  @doc "Used when creating a user from an OAuth provider without a local password."
+  def oauth_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email, :display_name, :identifier, :faculty, :department, :avatar_url])
+    |> validate_email(opts)
+    |> unique_identifier_constraint()
+    |> put_change(:hashed_password, random_hashed_password())
   end
 
   @doc "Used by admins/superadmins to forcefully set a new password without requiring the current one."
@@ -67,9 +78,10 @@ defmodule Kiroku.Accounts.User do
 
   def profile_changeset(user, attrs) do
     user
-    |> cast(attrs, [:display_name, :student_id, :faculty, :department, :avatar_url])
+    |> cast(attrs, [:display_name, :identifier, :faculty, :department, :avatar_url])
     |> validate_required([:display_name])
     |> validate_length(:display_name, min: 1, max: 255)
+    |> unique_identifier_constraint()
   end
 
   def email_changeset(user, attrs, opts \\ []) do
@@ -156,5 +168,15 @@ defmodule Kiroku.Accounts.User do
     else
       changeset
     end
+  end
+
+  defp unique_identifier_constraint(changeset) do
+    unique_constraint(changeset, :identifier)
+  end
+
+  defp random_hashed_password do
+    :crypto.strong_rand_bytes(32)
+    |> Base.url_encode64(padding: false)
+    |> Bcrypt.hash_pwd_salt()
   end
 end
