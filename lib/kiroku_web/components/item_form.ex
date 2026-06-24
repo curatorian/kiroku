@@ -12,7 +12,10 @@ defmodule KirokuWeb.ItemForm do
 
   def item_type_options do
     [
-      {"Skripsi / Tesis / Disertasi", "skripsi"},
+      {"Skripsi", "skripsi"},
+      {"Tesis", "tesis"},
+      {"Disertasi", "disertasi"},
+      {"Tugas Akhir", "tugas_akhir"},
       {"Memorandum Hukum", "memorandum_hukum"},
       {"Studi Kasus", "studi_kasus"},
       {"Laporan Proyek", "laporan_proyek"},
@@ -21,7 +24,7 @@ defmodule KirokuWeb.ItemForm do
       {"Artikel Jurnal Nasional", "jurnal_nasional"},
       {"Artikel Jurnal Internasional", "jurnal_internasional"},
       {"Prosiding Konferensi", "prosiding"},
-      {"Capstone / Tugas Akhir", "capstone"}
+      {"Capstone", "capstone"}
     ]
   end
 
@@ -472,7 +475,7 @@ defmodule KirokuWeb.ItemForm do
 
   def type_section(assigns) do
     ~H"""
-    <.skripsi_section :if={@type == "skripsi"} form={@form} />
+    <.skripsi_section :if={@type in ["skripsi", "tesis", "disertasi", "tugas_akhir"]} form={@form} />
     <.memorandum_hukum_section :if={@type == "memorandum_hukum"} form={@form} />
     <.studi_kasus_section :if={@type == "studi_kasus"} form={@form} />
     <.laporan_proyek_section :if={@type == "laporan_proyek"} form={@form} />

@@ -347,13 +347,14 @@ defmodule Kiroku.Repository.Item do
   @foreign_key_type :binary_id
 
   @item_types ~w(
-    skripsi memorandum_hukum studi_kasus laporan_proyek karya_kreatif
+    skripsi tesis disertasi tugas_akhir
+    memorandum_hukum studi_kasus laporan_proyek karya_kreatif
     karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone
   )a
 
   @status_values ~w(draft submitted under_review published embargoed withdrawn)a
   @access_values ~w(open restricted closed)a
-  @degree_values ~w(s1 s2 s3)a
+  @degree_values ~w(d3 d4 s1_terapan s1 s2 s3)a
   @language_values ~w(id en)a
 
   schema "items" do
@@ -1120,7 +1121,7 @@ defmodule Kiroku.Repository do
     %Item{}
     |> Item.import_changeset(attrs)
     |> Repo.insert(on_conflict: {:replace_all_except, [:id, :inserted_at]},
-                   conflict_target: :handle)
+                   conflict_target: :legacy_id)
   end
 end
 ```
@@ -1281,7 +1282,7 @@ defmodule Kiroku.Content do
 
   # Checks whether a specific bitstream is accessible given the item's embargo state.
   # The abstract (bundle: ORIGINAL, sequence: 1) is NEVER embargoed.
-  def accessible?(%Bitstream{} = bitstream, %{} = item, current_user \\ nil) do
+  def accessible?(%Bitstream{} = bitstream, current_user \\ nil, %{} = item) do
     cond do
       # THUMBNAIL is always accessible
       bitstream.bundle_name == :THUMBNAIL ->
@@ -1553,7 +1554,7 @@ defmodule KirokuWeb.BitstreamController do
     item = Repository.get_item!(bitstream.item_id)
     current_user = conn.assigns[:current_user]
 
-    if Content.accessible?(bitstream, item, current_user) do
+    if Content.accessible?(bitstream, current_user, item) do
       serve_bitstream(conn, bitstream)
     else
       conn
@@ -1815,17 +1816,30 @@ defmodule Kiroku.Embargo.LifterWorker do
 end
 ```
 
-Schedule it in your Oban config to run daily:
+Schedule it via `Oban.Plugins.Cron`. The cron expression is configurable
+at runtime via a System Setting (DB) or the `EMBARGO_CRON` env var, defaulting
+to daily at 02:00. Changes to the DB setting take effect on the next application
+restart. Admins can also trigger an immediate run from the admin settings page.
 
 ```elixir
 # config/config.exs
+embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+
 config :kiroku, Oban,
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Kiroku.Embargo.LifterWorker},  # Daily at 02:00
+       {embargo_cron, Kiroku.Embargo.LifterWorker},
      ]}
   ]
+```
+
+The `Kiroku.Settings` context exposes helpers for the admin UI:
+
+```elixir
+# lib/kiroku/settings.ex
+Settings.embargo_cron_schedule()  # → "0 2 * * *" (DB value, env var, or default)
+Settings.embargo_settings()       # → %{cron_schedule: "0 2 * * *"}
 ```
 
 ---

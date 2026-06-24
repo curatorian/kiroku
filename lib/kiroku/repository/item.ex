@@ -6,7 +6,8 @@ defmodule Kiroku.Repository.Item do
   @foreign_key_type :binary_id
 
   @item_types ~w(
-    skripsi memorandum_hukum studi_kasus laporan_proyek karya_kreatif
+    skripsi tesis disertasi tugas_akhir
+    memorandum_hukum studi_kasus laporan_proyek karya_kreatif
     karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone
   )a
 

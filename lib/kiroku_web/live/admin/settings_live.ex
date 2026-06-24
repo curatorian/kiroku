@@ -8,12 +8,15 @@ defmodule KirokuWeb.Admin.SettingsLive do
     storage = Settings.storage_settings()
     brand = Settings.brand_settings()
 
+    embargo = Settings.embargo_settings()
+
     socket =
       socket
       |> assign(:page_title, "System Settings")
       |> assign(:storage_adapter, storage.adapter)
       |> assign(:storage_form, to_form(storage_form_params(storage), as: :storage))
       |> assign(:brand_form, to_form(brand_form_params(brand), as: :brand))
+      |> assign(:embargo_form, to_form(embargo_form_params(embargo), as: :embargo))
 
     {:ok, socket}
   end
@@ -283,6 +286,56 @@ defmodule KirokuWeb.Admin.SettingsLive do
             </div>
           </.form>
         </div>
+
+        <%!-- Embargo scheduler settings --%>
+        <div id="embargo-settings" class="kiroku-card p-6 space-y-5">
+          <div>
+            <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">
+              Embargo Scheduler
+            </h2>
+            <p class="text-xs mt-1" style="color: var(--color-quill);">
+              Configure the cron schedule for automatic embargo lifting.
+              Changes take effect on the next application restart.
+            </p>
+          </div>
+
+          <.form
+            for={@embargo_form}
+            id="embargo-form"
+            phx-submit="save_embargo"
+            class="space-y-5"
+          >
+            <.input
+              field={@embargo_form[:cron_schedule]}
+              type="text"
+              label="Cron Schedule"
+              placeholder="0 2 * * *"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Standard 5-field cron format. Default <code>0 2 * * *</code>
+              runs daily at 02:00. Env var: <code>EMBARGO_CRON</code>.
+            </p>
+
+            <div class="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-150 hover:brightness-110 active:scale-95"
+                style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" /> Save Schedule
+              </button>
+
+              <button
+                type="button"
+                phx-click="run_embargo_lifter"
+                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all duration-150 hover:brightness-110 active:scale-95"
+                style="background: transparent; color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.4);"
+              >
+                <.icon name="hero-play" class="size-4" /> Run Now
+              </button>
+            </div>
+          </.form>
+        </div>
       </div>
     </Layouts.admin>
 
@@ -338,6 +391,42 @@ defmodule KirokuWeb.Admin.SettingsLive do
      socket
      |> assign(:brand_form, to_form(brand_form_params(brand), as: :brand))
      |> put_flash(:info, "Brand settings saved.")}
+  end
+
+  @impl true
+  def handle_event("save_embargo", %{"embargo" => params}, socket) do
+    cron = params["cron_schedule"] || ""
+    cron = String.trim(cron)
+
+    if cron != "" do
+      Settings.put("embargo_cron_schedule", cron)
+    end
+
+    embargo = Settings.embargo_settings()
+
+    {:noreply,
+     socket
+     |> assign(:embargo_form, to_form(embargo_form_params(embargo), as: :embargo))
+     |> put_flash(:info, "Embargo schedule saved. Restart the application for the new schedule to take effect.")}
+  end
+
+  @impl true
+  def handle_event("run_embargo_lifter", _params, socket) do
+    %{}
+    |> Kiroku.Embargo.LifterWorker.new()
+    |> Oban.insert()
+
+    {:noreply, put_flash(socket, :info, "Embargo lifter job enqueued. Check the Oban dashboard for results.")}
+  end
+
+  @impl true
+  def handle_event("storage_changed", %{"storage" => params}, socket) do
+    adapter = if params["adapter"] == "s3", do: :s3, else: :local
+
+    {:noreply,
+     socket
+     |> assign(:storage_adapter, adapter)
+     |> assign(:storage_form, to_form(params, as: :storage))}
   end
 
   @impl true
@@ -397,6 +486,12 @@ defmodule KirokuWeb.Admin.SettingsLive do
       "contact_phone" => brand.contact_phone || "",
       "logo_url" => brand.logo_url || "",
       "primary_color" => brand.primary_color || "#7B4FA6"
+    }
+  end
+
+  defp embargo_form_params(embargo) do
+    %{
+      "cron_schedule" => embargo.cron_schedule || ""
     }
   end
 end

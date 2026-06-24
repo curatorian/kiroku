@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+#  bin/sync_mssql
+#  Daily sync: pull tbtMhsUploadThesis records from MSSQL into Kiroku (Postgres)
+#
+#  Usage
+#  ─────────────#  Local dev / CI (plain mix):
+#    bin/sync_mssql
+#
+#  Mix release binary (set KIROKU_RELEASE=1 or KIROKU_RELEASE_BIN=/path/bin/kiroku):
+#    KIROKU_RELEASE=1 bin/sync_mssql
+#    KIROKU_RELEASE_BIN=/srv/kiroku/bin/kiroku bin/sync_mssql
+#
+#  Inside a running Podman / Docker container (set KIROKU_CONTAINER=container-name):
+#    KIROKU_CONTAINER=kiroku_app bin/sync_mssql
+#
+#  Extra flags are forwarded to the import task, e.g.:
+#    bin/sync_mssql --dry-run
+#    bin/sync_mssql --batch-size 500
+#    bin/sync_mssql --collection-id <uuid>
+#
+#  Required env vars (MSSQL credentials):
+#    MSSQL_HOST, MSSQL_DB, MSSQL_USER, MSSQL_PASS
+#  Optional:
+#    MSSQL_PORT          (default: 1433)
+#    IMPORT_COLLECTION   UUID to assign all imported items to a collection
+#    LOG_FILE            Append output here in addition to stdout
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+TASK="kiroku.import_from_mssql"
+EXTRA_ARGS=("$@")
+
+# Optionally append --collection-id if IMPORT_COLLECTION is set
+if [[ -n "${IMPORT_COLLECTION:-}" ]]; then
+  EXTRA_ARGS+=("--collection-id" "$IMPORT_COLLECTION")
+fi
+
+# ── Logging helper ────────────────────────────────────────────────────────────
+
+log() {
+  local ts
+  ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  local msg="[sync_mssql] ${ts}  $*"
+  echo "$msg"
+  if [[ -n "${LOG_FILE:-}" ]]; then
+    echo "$msg" >> "$LOG_FILE"
+  fi
+}
+
+# ── Credential check ──────────────────────────────────────────────────────────
+
+missing=()
+for var in MSSQL_HOST MSSQL_DB MSSQL_USER MSSQL_PASS; do
+  [[ -z "${!var:-}" ]] && missing+=("$var")
+done
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  log "ERROR: missing required environment variables: ${missing[*]}"
+  log "Set them in your shell or in a .env file before running this script."
+  exit 1
+fi
+
+# ── Execution mode ────────────────────────────────────────────────────────────
+
+log "Starting MSSQL → Kiroku sync…"
+log "  MSSQL_HOST=${MSSQL_HOST}  DB=${MSSQL_DB}  USER=${MSSQL_USER}"
+log "  Extra args: ${EXTRA_ARGS[*]:-<none>}"
+
+# ── Mode 1: Podman / Docker ───────────────────────────────────────────────────
+if [[ -n "${KIROKU_CONTAINER:-}" ]]; then
+  log "Mode: Podman/Docker container '${KIROKU_CONTAINER}'"
+
+  # Detect whether to use podman or docker
+  CONTAINER_CMD="docker"
+  command -v podman &>/dev/null && CONTAINER_CMD="podman"
+
+  $CONTAINER_CMD exec \
+    -e MSSQL_HOST="$MSSQL_HOST" \
+    -e MSSQL_DB="$MSSQL_DB" \
+    -e MSSQL_USER="$MSSQL_USER" \
+    -e MSSQL_PASS="$MSSQL_PASS" \
+    -e MSSQL_PORT="${MSSQL_PORT:-1433}" \
+    "$KIROKU_CONTAINER" \
+    /app/bin/kiroku eval "Mix.Task.run(\"${TASK}\", $(printf '%s\n' "${EXTRA_ARGS[@]:-}" | jq -R . | jq -s .))"
+
+  log "Done (container mode)."
+  exit 0
+fi
+
+# ── Mode 2: Mix release binary ────────────────────────────────────────────────
+if [[ -n "${KIROKU_RELEASE:-}" ]] || [[ -n "${KIROKU_RELEASE_BIN:-}" ]]; then
+  RELEASE_BIN="${KIROKU_RELEASE_BIN:-$(dirname "$0")/../bin/kiroku}"
+
+  if [[ ! -x "$RELEASE_BIN" ]]; then
+    log "ERROR: release binary not found or not executable: ${RELEASE_BIN}"
+    log "Set KIROKU_RELEASE_BIN=/path/to/bin/kiroku explicitly."
+    exit 1
+  fi
+
+  log "Mode: Mix release binary '${RELEASE_BIN}'"
+
+  # Build the Elixir list string for the eval call, e.g. ["--dry-run", "--batch-size", "500"]
+  ELIXIR_ARGS="["
+  for arg in "${EXTRA_ARGS[@]:-}"; do
+    ELIXIR_ARGS+="\"${arg}\","
+  done
+  ELIXIR_ARGS="${ELIXIR_ARGS%,}]"
+
+  MSSQL_HOST="$MSSQL_HOST" \
+  MSSQL_DB="$MSSQL_DB" \
+  MSSQL_USER="$MSSQL_USER" \
+  MSSQL_PASS="$MSSQL_PASS" \
+  MSSQL_PORT="${MSSQL_PORT:-1433}" \
+  "$RELEASE_BIN" eval "Mix.Task.run(\"${TASK}\", ${ELIXIR_ARGS})"
+
+  log "Done (release mode)."
+  exit 0
+fi
+
+# ── Mode 3: Plain mix (dev / CI) ──────────────────────────────────────────────
+log "Mode: mix (dev/CI)"
+
+MSSQL_HOST="$MSSQL_HOST" \
+MSSQL_DB="$MSSQL_DB" \
+MSSQL_USER="$MSSQL_USER" \
+MSSQL_PASS="$MSSQL_PASS" \
+MSSQL_PORT="${MSSQL_PORT:-1433}" \
+mix "$TASK" "${EXTRA_ARGS[@]:-}"
+
+log "Done (mix mode)."

@@ -74,7 +74,7 @@ end
 
 | MSSQL Column                              | Kiroku `Item` Field      | Transform                                                              |
 | ----------------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
-| `IDControl`                               | —                        | Used as `conflict_target` only; not stored                             |
+| `IDControl`                               | `legacy_id`              | Stored as `legacy_id`; used as `conflict_target` for idempotent upsert |
 | `MhsNPM`                                  | `student_id`             | Direct string copy                                                     |
 | `Judul`                                   | `title`                  | Prefer `JudulBersih` if non-empty, fallback to `Judul`                 |
 | `JudulBersih`                             | `title`                  | Preferred over `Judul` if present                                      |
@@ -466,7 +466,7 @@ def import_item(attrs) do
   |> Item.import_changeset(attrs)
   |> Repo.insert(
     on_conflict: {:replace_all_except, [:id, :inserted_at]},
-    conflict_target: :handle
+    conflict_target: :legacy_id
   )
 end
 ```

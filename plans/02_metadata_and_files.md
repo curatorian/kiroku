@@ -2,13 +2,13 @@
 
 ## Indonesian Institutional Repository — Complete Field & Bitstream Reference
 
-### Covers All 10 Item Types · Ecto Schema Mapping · Bitstream Storage Rules
+### Covers All 13 Item Types · Ecto Schema Mapping · Bitstream Storage Rules
 
 ---
 
 ## 0. How to Read This Document
 
-This document is the single source of truth for **what data to collect** and **what files to store** for each of the 10 tugas akhir types supported by the repository. It is organized for direct use by a coding agent building Ecto schemas and Phoenix context functions.
+This document is the single source of truth for **what data to collect** and **what files to store** for each of the 13 item types supported by the repository. It is organized for direct use by a coding agent building Ecto schemas and Phoenix context functions.
 
 For every section, field tiers are defined as:
 
@@ -32,22 +32,31 @@ File storage: every file becomes **one row** in the `bitstreams` table. Section 
 
 ## 1. Item Type Enum Values
 
-The `item_type` field on the `Item` schema uses `Ecto.Enum` with these values:
+The `item_type` field on the `Item` schema uses `Ecto.Enum` with these values.
+
+> **Design decision:** Thesis-like works are split into four distinct types
+> (`skripsi`, `tesis`, `disertasi`, `tugas_akhir`) instead of a single
+> `skripsi` type with `degree_level` distinguishing them. This lets end users
+> identify the exact work type from the `item_type` value alone. `degree_level`
+> is **kept** as an independent field for finer-grained classification and reporting.
 
 ```elixir
 # In Item Ecto schema:
 field :item_type, Ecto.Enum,
   values: [
-    :skripsi,            # 1 — S1/S2/S3 academic thesis
-    :memorandum_hukum,   # 2 — Legal memorandum (FH)
-    :studi_kasus,        # 3 — Case study (Bisnis/Kedokteran/Psikologi/Hukum)
-    :laporan_proyek,     # 4 — Project report (Teknik/Vokasi/Arsitektur)
-    :karya_kreatif,      # 5 — Creative work (Seni/Desain/Sastra/Musik/Film)
-    :karya_teknologi,    # 6 — Technological work (Informatika/Teknik Terapan)
-    :jurnal_nasional,    # 7 — Sinta-accredited national journal article
-    :jurnal_internasional, # 8 — Scopus/WoS international journal article
-    :prosiding,          # 9 — International conference proceedings
-    :capstone,           # 10 — Capstone / MBKM project
+    :skripsi,              # 1 — S1 academic thesis
+    :tesis,                # 2 — S2 academic thesis (magister)
+    :disertasi,            # 3 — S3 academic thesis (doctoral)
+    :tugas_akhir,          # 4 — Diploma / general final project (D3/D4/vocation)
+    :memorandum_hukum,     # 5 — Legal memorandum (FH)
+    :studi_kasus,          # 6 — Case study (Bisnis/Kedokteran/Psikologi/Hukum)
+    :laporan_proyek,       # 7 — Project report (Teknik/Vokasi/Arsitektur)
+    :karya_kreatif,        # 8 — Creative work (Seni/Desain/Sastra/Musik/Film)
+    :karya_teknologi,      # 9 — Technological work (Informatika/Teknik Terapan)
+    :jurnal_nasional,      # 10 — Sinta-accredited national journal article
+    :jurnal_internasional, # 11 — Scopus/WoS international journal article
+    :prosiding,            # 12 — International conference proceedings
+    :capstone,             # 13 — Capstone / MBKM project
   ],
   default: :skripsi
 ```
@@ -145,7 +154,7 @@ When inserting into the `bitstreams` table, populate these fields:
 
 ---
 
-## 3. Universal Fields & Files (All 10 Types)
+## 3. Universal Fields & Files (All 13 Types)
 
 These fields and files apply to **every item regardless of type**. They are defined as columns in the `Item` schema and as mandatory bitstreams in the `Bitstream` schema.
 
@@ -169,7 +178,7 @@ All mandatory. Map directly to `Item` schema fields.
 | `publication_year` | `:publication_year` | `:integer`  | —                                                                     | Tahun terbit / sidang                                            |
 | `access_level`     | `:access_level`     | `Ecto.Enum` | `values: [:open, :restricted, :closed]`                               | Default `:open`                                                  |
 | `status`           | `:status`           | `Ecto.Enum` | `values: [:draft, :submitted, :under_review, :published, :withdrawn]` | Default `:draft`                                                 |
-| `item_type`        | `:item_type`        | `Ecto.Enum` | `values: [10 types]`                                                  | Drives field visibility in the UI                                |
+| `item_type`        | `:item_type`        | `Ecto.Enum` | `values: [13 types]`                                                  | Drives field visibility in the UI                                |
 
 > **Keywords**: `keywords` and `keywords_alt` are **not** columns on `items`. Each keyword becomes one row in `item_keywords` with a `language` field (`:id` or `:en`). Minimum 3, maximum 5 keywords per language.
 
@@ -188,9 +197,12 @@ These 4 files are required for every single item regardless of type.
 
 ---
 
-## 4. Type 1 — Skripsi / Tesis / Disertasi
+## 4. Types 1–4 — Skripsi / Tesis / Disertasi / Tugas Akhir
 
-Standard academic thesis. S1 = Skripsi, S2 = Tesis, S3 = Disertasi.
+Standard academic theses and final projects. They share the same fields and files;
+`item_type` (`skripsi` / `tesis` / `disertasi` / `tugas_akhir`) plus
+`degree_level` distinguish them. Use the most specific type available — e.g. an S2
+thesis is `item_type: :tesis`, `degree_level: :s2`.
 
 ### 4.1 Metadata Fields
 
@@ -198,7 +210,7 @@ Standard academic thesis. S1 = Skripsi, S2 = Tesis, S3 = Disertasi.
 
 | Field           | Ecto Field       | Type        | Notes                                    |
 | --------------- | ---------------- | ----------- | ---------------------------------------- |
-| `degree_level`  | `:degree_level`  | `Ecto.Enum` | `values: [:s1, :s2, :s3]`                |
+| `degree_level`  | `:degree_level`  | `Ecto.Enum` | `values: [:d3, :d4, :s1_terapan, :s1, :s2, :s3]` |
 | `department`    | `:department`    | `:string`   | Departemen / Jurusan                     |
 | `date_issued`   | `:date_issued`   | `:date`     | Tanggal sidang / ujian                   |
 | `approval_date` | `:approval_date` | `:date`     | Tanggal lembar pengesahan ditandatangani |
@@ -520,7 +532,7 @@ Common in Teknik, Vokasi (D3/D4/Sarjana Terapan), and Arsitektur. Often the most
 
 ## 8. Type 5 — Karya Kreatif (Creative Work)
 
-Seni Rupa, Desain, Sastra, Musik, Film, Arsitektur, Kriya. Most varied file formats of all 10 types.
+Seni Rupa, Desain, Sastra, Musik, Film, Arsitektur, Kriya. Most varied file formats of all 13 types.
 
 ### 8.1 Metadata Fields
 
@@ -1136,7 +1148,8 @@ The submission wizard shows and hides fields based on `item_type`. Define this h
 # lib/kiroku_web/live/helpers/field_visibility.ex
 defmodule KirokuWeb.Live.Helpers.FieldVisibility do
 
-  @thesis_types ~w(skripsi memorandum_hukum studi_kasus laporan_proyek
+  @thesis_types ~w(skripsi tesis disertasi tugas_akhir
+                   memorandum_hukum studi_kasus laporan_proyek
                    karya_kreatif karya_teknologi capstone)a
   @journal_types ~w(jurnal_nasional jurnal_internasional prosiding)a
 
@@ -1180,8 +1193,10 @@ defmodule KirokuWeb.Live.Helpers.FieldVisibility do
   def abstract_label(:capstone), do: "Ringkasan Eksekutif"
   def abstract_label(_), do: "Abstrak"
 
-  # Returns the required advisor/examiner roles for a given type
-  def required_roles(:skripsi), do: [:main_advisor, :examiner]
+  # Returns the required advisor/examiner roles for a given type.
+  # :skripsi/:tesis/:disertasi/:tugas_akhir all require examiner; the rest follow below.
+  def required_roles(type) when type in [:skripsi, :tesis, :disertasi, :tugas_akhir],
+    do: [:main_advisor, :examiner]
   def required_roles(:memorandum_hukum), do: [:main_advisor, :examiner]
   def required_roles(:studi_kasus), do: [:main_advisor]
   def required_roles(:laporan_proyek), do: [:main_advisor]

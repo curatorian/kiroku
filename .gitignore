@@ -42,3 +42,6 @@ npm-debug.log
 # Environment Variable
 .env
 .env.prod
+
+# Sample Data
+sample_data_each_views.txt
