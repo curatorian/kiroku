@@ -39,6 +39,25 @@ case Repo.get_by(User, email: admin_email) do
     IO.puts("  [seeds] Change this password immediately after first login!")
 end
 
+setting_defaults = [
+  {"allow_user_submit", "false", "Let the user submit an item to the repository"}
+]
+
+Enum.each(setting_defaults, fn {key, value, description} ->
+  case Settings.get(key) do
+    nil ->
+      if value do
+        Settings.put(key, value, description)
+        IO.puts("  [seeds] Set default setting: #{key} = #{value}")
+      else
+        IO.puts("  [seeds] Skipped default setting: #{key} (no default value)")
+      end
+
+    _existing ->
+      IO.puts("  [seeds] Default setting #{key} already exists, skipping")
+  end
+end)
+
 # ── Brand settings seed ────────────────────────────────────────────────────
 
 brand_defaults = [

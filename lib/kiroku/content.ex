@@ -36,14 +36,20 @@ defmodule Kiroku.Content do
   def delete_bitstream(%Bitstream{} = bitstream), do: Repo.delete(bitstream)
 
   @doc """
-  Determines whether `user` may access `bitstream`.
+  Determines whether `user` may access `bitstream` belonging to `item`.
 
   Rules (evaluated in order):
   1. THUMBNAIL bundles → always accessible.
   2. ADMINISTRATIVE / LICENSE bundles → reviewer, admin, superadmin only.
-  3. ORIGINAL sequence == 1 (abstract PDF) → never embargoed; always accessible.
-  4. Everything else → accessible unless the parent item's files are embargoed.
-     While under embargo: reviewer/admin/superadmin may still access.
+  3. ORIGINAL sequence == 1 (abstract PDF) → never embargoed, but still
+     subject to the bitstream's own access_level.
+  4. Staff (reviewer/admin/superadmin) → always accessible (bypass embargo).
+  5. If the item's files are embargoed → not accessible.
+  6. Otherwise → evaluate the bitstream's own access_level:
+       :open       → accessible to everyone
+       :inherit    → use the parent item's access_level
+       :restricted → staff only
+       :closed     → no one (except staff, already handled above)
   """
   def accessible?(%Bitstream{bundle_name: :THUMBNAIL}, _user, _item), do: true
 
@@ -52,15 +58,31 @@ defmodule Kiroku.Content do
     user_is_staff?(user)
   end
 
-  def accessible?(%Bitstream{bundle_name: :ORIGINAL, sequence: 1}, _user, _item), do: true
-
-  def accessible?(%Bitstream{}, user, %Item{} = item) do
+  def accessible?(%Bitstream{} = bitstream, user, %Item{} = item) do
     cond do
-      user_is_staff?(user) -> true
-      Item.files_embargoed?(item) -> false
-      true -> true
+      user_is_staff?(user) ->
+        true
+
+      Item.files_embargoed?(item) and not abstract?(bitstream) ->
+        false
+
+      true ->
+        access_level_allows?(bitstream.access_level, item.access_level, user)
     end
   end
+
+  # ORIGINAL bundle, sequence 1 is the abstract PDF — exempt from embargo.
+  defp abstract?(%Bitstream{bundle_name: :ORIGINAL, sequence: 1}), do: true
+  defp abstract?(%Bitstream{}), do: false
+
+  defp access_level_allows?(:open, _item_level, _user), do: true
+
+  defp access_level_allows?(:inherit, item_level, user),
+    do: access_level_allows?(item_level, item_level, user)
+
+  defp access_level_allows?(:restricted, _item_level, user), do: user_is_staff?(user)
+
+  defp access_level_allows?(:closed, _item_level, _user), do: false
 
   defp user_is_staff?(%{user_type: type}), do: type in [:reviewer, :admin, :superadmin]
   defp user_is_staff?(_), do: false

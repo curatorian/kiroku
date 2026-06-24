@@ -1,45 +1,55 @@
-defmodule Kiroku.LegacyThesis do
+defmodule Kiroku.LegacyView do
   use Ecto.Schema
 
   @moduledoc """
-  Read-only Ecto.Schema for the tbtMhsUploadThesis table in the MSSQL legacy DB.
+  Read-only Ecto.Schema shared across all four MSSQL legacy views:
+    dbo.Skripsi, dbo.Tesis, dbo.Disertasi, dbo.Tugas-Akhir
+
+  All views expose the same column layout. Use the dynamic source syntax
+  at query time:
+
+      from(v in {"Skripsi", Kiroku.LegacyView}, ...)
+      from(v in {"Tesis",   Kiroku.LegacyView}, ...)
+
   This schema is used only during the import Mix task. Never written to.
-  Column names match the legacy MSSQL schema exactly — do not rename them.
+  Column names match the legacy MSSQL view schema exactly.
   """
 
-  @primary_key {:IDControl, :integer, autogenerate: false}
+  # NPM (student number) is unique within each view
+  @primary_key {:NPM, :string, autogenerate: false}
 
-  schema "tbtMhsUploadThesis" do
-    field :MhsNPM, :string
+  # The default schema name is overridden per-query; this is just a placeholder
+  schema "Skripsi" do
+    field :Nama, :string
+    field :Kode, :string
+    field :Program_Studi, :string
+    field :Jenjang, :string
+    field :Fakultas, :string
+    field :Jenis, :string
+    field :Tgl_Upload, :utc_datetime
     field :LinkPath, :string
-    field :FileCover, :string
-    field :FileAbstrak, :string
-    field :FileDaftarIsi, :string
     field :FileBab1, :string
     field :FileBab2, :string
     field :FileBab3, :string
     field :FileBab4, :string
     field :FileBab5, :string
     field :FileBab6, :string
+    field :FileCover, :string
+    field :FileAbstrak, :string
+    field :FileDaftarIsi, :string
     field :FileLampiran, :string
     field :FilePustaka, :string
     field :FileSurat, :string
     field :FileSuratIsi, :string
     field :FilePengesahan, :string
-    field :FilePresentasi, :string
-    field :FileFullText, :string
+    field :Lulus, :string
+    field :Verifikasi, :integer
+    # Validasi is VARCHAR in legacy — may hold integers or strings like "pustaka"
+    field :Validasi, :string
+    field :stPublikasi, :integer
+    field :TagPustaka, :string
+    field :idpustaka, :string
     field :Judul, :string
     field :Abstrak, :string
-    field :Bahasa, :string
-    field :Keywords, :string
-    field :UploadTgl, :utc_datetime
-    field :idpustaka, :string
-    field :TagPustaka, :string
-    field :stPublikasi, :integer
-    field :Verifikasi, :integer
-    field :Validasi, :integer
-    field :JudulBersih, :string
-    field :AbstrakBersih, :string
-    field :EmbargoDate, :date
   end
 end

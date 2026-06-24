@@ -113,9 +113,12 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
   end
 
   def handle_event("withdraw", _params, socket) do
-    case Repository.withdraw_item(socket.assigns.item) do
+    case Repository.withdraw_item_fsm(socket.assigns.item) do
       {:ok, item} ->
         {:noreply, socket |> put_flash(:info, "Item withdrawn.") |> assign(:item, item)}
+
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "Cannot withdraw from current status.")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to withdraw item.")}

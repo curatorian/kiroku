@@ -296,12 +296,6 @@ defmodule Kiroku.Repository do
     |> Repo.update()
   end
 
-  def withdraw_item(%Item{} = item) do
-    item
-    |> Ecto.Changeset.change(status: :withdrawn, withdrawn: true, discoverable: false)
-    |> Repo.update()
-  end
-
   def lift_embargo(%Item{} = item) do
     item
     |> Ecto.Changeset.change(status: :published, embargo_open_date: nil)
@@ -407,7 +401,7 @@ defmodule Kiroku.Repository do
   # ── Import (mix kiroku.import_from_mssql only) ──────────────────────────────
 
   @doc """
-  Upserts an item from the MSSQL import. Uses handle as the conflict target;
+  Upserts an item from the MSSQL import. Uses legacy_id as the conflict target;
   on conflict it replaces all fields except id and inserted_at.
   """
   def import_item(attrs) do

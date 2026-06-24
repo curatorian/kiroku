@@ -14,10 +14,18 @@ config :kiroku,
   institution_domain: "unpad.ac.id"
 
 # Oban background job processing
+embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+
 config :kiroku, Oban,
   repo: Kiroku.Repo,
   queues: [default: 10, embargo: 2, notifications: 5],
-  plugins: [{Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}]
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {embargo_cron, Kiroku.Embargo.LifterWorker}
+     ]}
+  ]
 
 # Configure the endpoint
 config :kiroku, KirokuWeb.Endpoint,

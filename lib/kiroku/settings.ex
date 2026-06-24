@@ -188,4 +188,26 @@ defmodule Kiroku.Settings do
       primary_color: brand_primary_color()
     }
   end
+
+  # ── Embargo scheduler helpers ──────────────────────────────────────────────
+
+  @default_embargo_cron "0 2 * * *"
+
+  @doc """
+  Returns the cron schedule for the embargo lifter worker.
+  Priority: DB setting → EMBARGO_CRON env var → default (daily at 02:00).
+  The cron value is read at application startup, so changes here take effect
+  on the next restart.
+  """
+  def embargo_cron_schedule do
+    get("embargo_cron_schedule") ||
+      System.get_env("EMBARGO_CRON", @default_embargo_cron)
+  end
+
+  @doc "Returns a map of embargo scheduler settings for the admin UI."
+  def embargo_settings do
+    %{
+      cron_schedule: embargo_cron_schedule()
+    }
+  end
 end
