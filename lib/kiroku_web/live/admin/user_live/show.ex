@@ -556,14 +556,16 @@ defmodule KirokuWeb.Admin.UserLive.Show do
   defp can_edit_user?(%{user_type: :superadmin}, _target), do: true
 
   defp can_edit_user?(%{user_type: :admin}, %{user_type: type})
-       when type in [:reviewer, :submitter], do: true
+       when type in [:reviewer, :submitter],
+       do: true
 
   defp can_edit_user?(_actor, _target), do: false
 
   defp can_change_role?(%{user_type: :superadmin}, _target), do: true
 
   defp can_change_role?(%{user_type: :admin}, %{user_type: type})
-       when type in [:reviewer, :submitter], do: true
+       when type in [:reviewer, :submitter],
+       do: true
 
   defp can_change_role?(_actor, _target), do: false
 

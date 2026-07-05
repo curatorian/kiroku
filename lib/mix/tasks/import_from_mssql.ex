@@ -17,21 +17,23 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
       dbo.Skripsi, dbo.Tesis, dbo.Disertasi, dbo.Tugas-Akhir
 
   Usage:
-      mix kiroku.import_from_mssql
-      mix kiroku.import_from_mssql --dry-run
-      mix kiroku.import_from_mssql --batch-size 500
-      mix kiroku.import_from_mssql --view Skripsi     (import one view only)
+       mix kiroku.import_from_mssql
+       mix kiroku.import_from_mssql --dry-run
+       mix kiroku.import_from_mssql --batch-size 500
+       mix kiroku.import_from_mssql --view Skripsi     (import one view only)
+       mix kiroku.import_from_mssql --incremental      (only sync changed records)
 
   Options:
-    --dry-run         Parse and validate but do not persist.
-    --batch-size N    Stream records in batches of N (default 100).
-    --view NAME       Import only this view (Skripsi / Tesis / Disertasi / Tugas-Akhir).
+     --dry-run         Parse and validate but do not persist.
+     --batch-size N    Stream records in batches of N (default 100).
+     --view NAME       Import only this view (Skripsi / Tesis / Disertasi / Tugas-Akhir).
+     --incremental     Only sync records that have changed since last sync.
   """
 
   import Ecto.Query
   require Logger
 
-  alias Kiroku.{Repo, Content}
+  alias Kiroku.{Repo, Content, Sync}
   alias Kiroku.LegacyRepo
   alias Kiroku.LegacyView
   alias Kiroku.Repository
@@ -56,6 +58,7 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
     opts = parse_opts(args)
     batch_size = Keyword.get(opts, :batch_size, 100)
     dry_run? = Keyword.get(opts, :dry_run, false)
+    incremental? = Keyword.get(opts, :incremental, false)
     only_view = Keyword.get(opts, :view)
 
     Mix.shell().info("Starting LegacyRepo…")
@@ -67,6 +70,7 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
     end
 
     if dry_run?, do: Mix.shell().info("[DRY RUN] — no database writes will occur")
+    if incremental?, do: Mix.shell().info("[INCREMENTAL] — only syncing changed records")
 
     views_to_run =
       case only_view do
@@ -86,10 +90,10 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
     {final_stats, _cache} =
       Enum.reduce(
         views_to_run,
-        {%{inserted: 0, skipped: 0, errors: 0}, %{}},
+        {%{inserted: 0, skipped: 0, updated: 0, errors: 0}, %{}},
         fn {view_name, _default_type}, {stats, cache} ->
           Mix.shell().info("\n── View: #{view_name} ──")
-          import_view(view_name, stats, cache, root, batch_size, dry_run?)
+          import_view(view_name, stats, cache, root, batch_size, dry_run?, incremental?)
         end
       )
 
@@ -97,6 +101,7 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
     Import complete.
       Inserted / updated : #{final_stats.inserted}
+      Updated (changed)  : #{final_stats.updated}
       Skipped            : #{final_stats.skipped}
       Errors             : #{final_stats.errors}
     """)
@@ -104,9 +109,18 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
   # ── Per-view import ────────────────────────────────────────────────────────
 
-  defp import_view(view_name, stats, cache, root, batch_size, dry_run?) do
+  defp import_view(view_name, stats, cache, root, batch_size, dry_run?, incremental?) do
     total = LegacyRepo.aggregate(from(v in {view_name, LegacyView}), :count, :NPM)
     Mix.shell().info("  #{total} records found")
+
+    # Create sync run for tracking
+    sync_run =
+      if dry_run? do
+        nil
+      else
+        {:ok, run} = Sync.start_sync_run(view_name)
+        run
+      end
 
     result =
       LegacyRepo.transaction(
@@ -114,16 +128,29 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
           from(v in {view_name, LegacyView})
           |> LegacyRepo.stream(max_rows: batch_size)
           |> Enum.reduce({stats, cache}, fn record, {inner_stats, inner_cache} ->
-            {status, new_cache} = import_record(record, inner_cache, root, dry_run?)
-
-            updated =
-              case status do
-                :inserted -> Map.update!(inner_stats, :inserted, &(&1 + 1))
-                :skipped -> Map.update!(inner_stats, :skipped, &(&1 + 1))
-                :error -> Map.update!(inner_stats, :errors, &(&1 + 1))
+            # For incremental sync, check if record needs syncing
+            should_sync? =
+              if incremental? do
+                Sync.should_sync_record?(record, view_name)
+              else
+                true
               end
 
-            {updated, new_cache}
+            if should_sync? do
+              {status, new_cache} = import_record(record, inner_cache, root, dry_run?, sync_run)
+
+              updated =
+                case status do
+                  :inserted -> Map.update!(inner_stats, :inserted, &(&1 + 1))
+                  :updated -> Map.update!(inner_stats, :updated, &(&1 + 1))
+                  :skipped -> Map.update!(inner_stats, :skipped, &(&1 + 1))
+                  :error -> Map.update!(inner_stats, :errors, &(&1 + 1))
+                end
+
+              {updated, new_cache}
+            else
+              {Map.update!(inner_stats, :skipped, &(&1 + 1)), inner_cache}
+            end
           end)
         end,
         timeout: :infinity
@@ -131,10 +158,29 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
     case result do
       {:ok, {new_stats, new_cache}} ->
-        Mix.shell().info("  Done — #{new_stats.inserted - stats.inserted} upserted")
+        # Complete sync run
+        if sync_run do
+          legacy_id = get_last_legacy_id(view_name)
+
+          Sync.complete_sync_run(sync_run, %{
+            processed: total,
+            inserted: new_stats.inserted,
+            updated: new_stats.updated,
+            failed: new_stats.errors,
+            last_synced_at: DateTime.utc_now(),
+            last_synced_legacy_id: legacy_id
+          })
+        end
+
+        upserted = new_stats.inserted + new_stats.updated
+        Mix.shell().info("  Done — #{upserted} upserted, #{new_stats.skipped} skipped")
         {new_stats, new_cache}
 
       {:error, reason} ->
+        if sync_run do
+          Sync.fail_sync_run(sync_run, inspect(reason))
+        end
+
         Mix.shell().error("  View #{view_name} failed: #{inspect(reason)}")
         {stats, cache}
     end
@@ -142,7 +188,7 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
   # ── Single record ──────────────────────────────────────────────────────────
 
-  defp import_record(r, cache, root, dry_run?) do
+  defp import_record(r, cache, root, dry_run?, sync_run) do
     judul = Map.get(r, :Judul)
 
     if is_nil(judul) or String.trim(judul || "") == "" do
@@ -157,6 +203,8 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
       item_type = map_item_type(Map.get(r, :Jenis))
       attrs = build_item_attrs(r, item_type, collection_id)
+      legacy_id = attrs.legacy_id
+      checksum = Sync.calculate_record_checksum(r)
 
       cond do
         dry_run? ->
@@ -165,14 +213,44 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
           {:skipped, new_cache}
 
         true ->
+          # Check if this is an update or insert
+          existing_item = Repository.get_item_by_handle(attrs.handle)
+          action = if existing_item, do: :updated, else: :inserted
+
           case Repository.import_item(attrs) do
             {:ok, item} ->
               create_bitstreams_for_record(item, r)
-              {:inserted, new_cache}
+
+              # Track the sync record
+              if sync_run do
+                Sync.create_record_tracking(%{
+                  sync_run_id: sync_run.id,
+                  legacy_id: legacy_id,
+                  item_id: item.id,
+                  action: to_string(action),
+                  synced_at: DateTime.utc_now(),
+                  checksum: checksum
+                })
+              end
+
+              {action, new_cache}
 
             {:error, changeset} ->
               npm = Map.get(r, :NPM)
               Logger.warning("Import failed NPM=#{npm}: #{inspect(changeset.errors)}")
+
+              # Track failed record
+              if sync_run do
+                Sync.create_record_tracking(%{
+                  sync_run_id: sync_run.id,
+                  legacy_id: legacy_id,
+                  action: "failed",
+                  synced_at: DateTime.utc_now(),
+                  error_message: inspect(changeset.errors),
+                  checksum: checksum
+                })
+              end
+
               {:error, new_cache}
           end
       end
@@ -470,9 +548,21 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
   defp parse_opts(args) do
     {opts, _, _} =
       OptionParser.parse(args,
-        strict: [batch_size: :integer, dry_run: :boolean, view: :string]
+        strict: [batch_size: :integer, dry_run: :boolean, view: :string, incremental: :boolean]
       )
 
     opts
+  end
+
+  defp get_last_legacy_id(view_name) do
+    record =
+      LegacyRepo.one(
+        from(v in {view_name, LegacyView},
+          order_by: [desc: :NPM],
+          limit: 1
+        )
+      )
+
+    if record, do: build_legacy_id(view_name, record["NPM"]), else: nil
   end
 end

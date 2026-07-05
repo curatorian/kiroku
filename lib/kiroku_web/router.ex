@@ -151,6 +151,13 @@ defmodule KirokuWeb.Router do
     end
   end
 
+  # MSSQL Sync management (outside admin scope to avoid aliasing issues)
+  scope "/admin", KirokuWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live "/sync", AdminSyncLive, :index
+  end
+
   # ── OAI-PMH API ───────────────────────────────────────────────────────────────
 
   scope "/api", KirokuWeb.Api, as: :api do

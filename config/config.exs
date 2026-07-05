@@ -15,15 +15,21 @@ config :kiroku,
 
 # Oban background job processing
 embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+# Every 6 hours
+sync_cron = System.get_env("SYNC_CRON", "0 */6 * * *")
 
 config :kiroku, Oban,
   repo: Kiroku.Repo,
-  queues: [default: 10, embargo: 2, notifications: 5],
+  queues: [default: 10, embargo: 2, notifications: 5, sync: 2, sync_retries: 1],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       {embargo_cron, Kiroku.Embargo.LifterWorker}
+       {embargo_cron, Kiroku.Embargo.LifterWorker},
+       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
+       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
+       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
+       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
      ]}
   ]
 

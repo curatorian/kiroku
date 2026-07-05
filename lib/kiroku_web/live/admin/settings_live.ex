@@ -407,7 +407,10 @@ defmodule KirokuWeb.Admin.SettingsLive do
     {:noreply,
      socket
      |> assign(:embargo_form, to_form(embargo_form_params(embargo), as: :embargo))
-     |> put_flash(:info, "Embargo schedule saved. Restart the application for the new schedule to take effect.")}
+     |> put_flash(
+       :info,
+       "Embargo schedule saved. Restart the application for the new schedule to take effect."
+     )}
   end
 
   @impl true
@@ -416,7 +419,12 @@ defmodule KirokuWeb.Admin.SettingsLive do
     |> Kiroku.Embargo.LifterWorker.new()
     |> Oban.insert()
 
-    {:noreply, put_flash(socket, :info, "Embargo lifter job enqueued. Check the Oban dashboard for results.")}
+    {:noreply,
+     put_flash(
+       socket,
+       :info,
+       "Embargo lifter job enqueued. Check the Oban dashboard for results."
+     )}
   end
 
   @impl true
