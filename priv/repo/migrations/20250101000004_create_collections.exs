@@ -14,7 +14,8 @@ defmodule Kiroku.Repo.Migrations.CreateCollections do
       add :is_active, :boolean, default: true, null: false
 
       add :community_id,
-          references(:communities, type: :binary_id, on_delete: :restrict), null: false
+          references(:communities, type: :binary_id, on_delete: :restrict),
+          null: false
 
       timestamps()
     end

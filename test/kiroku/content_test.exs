@@ -109,7 +109,12 @@ defmodule Kiroku.ContentTest do
           "status" => "embargoed"
         })
 
-      bs = create_bitstream(item, %{"bundle_name" => "ORIGINAL", "sequence" => 1, "access_level" => "open"})
+      bs =
+        create_bitstream(item, %{
+          "bundle_name" => "ORIGINAL",
+          "sequence" => 1,
+          "access_level" => "open"
+        })
 
       assert Item.files_embargoed?(item)
       assert Content.accessible?(bs, anonymous(), item)
@@ -118,7 +123,13 @@ defmodule Kiroku.ContentTest do
 
     test "respects access_level even though embargo-exempt" do
       item = create_item()
-      bs = create_bitstream(item, %{"bundle_name" => "ORIGINAL", "sequence" => 1, "access_level" => "restricted"})
+
+      bs =
+        create_bitstream(item, %{
+          "bundle_name" => "ORIGINAL",
+          "sequence" => 1,
+          "access_level" => "restricted"
+        })
 
       refute Content.accessible?(bs, anonymous(), item)
       assert Content.accessible?(bs, staff_user(), item)
@@ -137,7 +148,12 @@ defmodule Kiroku.ContentTest do
           "status" => "embargoed"
         })
 
-      bs = create_bitstream(item, %{"bundle_name" => "ORIGINAL", "sequence" => 2, "access_level" => "open"})
+      bs =
+        create_bitstream(item, %{
+          "bundle_name" => "ORIGINAL",
+          "sequence" => 2,
+          "access_level" => "open"
+        })
 
       assert Item.files_embargoed?(item)
       refute Content.accessible?(bs, anonymous(), item)
@@ -153,7 +169,12 @@ defmodule Kiroku.ContentTest do
           "status" => "embargoed"
         })
 
-      bs = create_bitstream(item, %{"bundle_name" => "ORIGINAL", "sequence" => 2, "access_level" => "open"})
+      bs =
+        create_bitstream(item, %{
+          "bundle_name" => "ORIGINAL",
+          "sequence" => 2,
+          "access_level" => "open"
+        })
 
       assert Content.accessible?(bs, staff_user(), item)
     end
@@ -212,7 +233,10 @@ defmodule Kiroku.ContentTest do
 
     test "true when embargo_open_date is in the future" do
       future = Date.add(Date.utc_today(), 30)
-      item = create_item(%{"embargo_open_date" => Date.to_iso8601(future), "status" => "embargoed"})
+
+      item =
+        create_item(%{"embargo_open_date" => Date.to_iso8601(future), "status" => "embargoed"})
+
       assert Item.files_embargoed?(item)
     end
 
