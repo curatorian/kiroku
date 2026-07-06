@@ -62,11 +62,12 @@ defmodule Kiroku.Sync do
     |> Repo.update()
   end
 
-  def start_sync_run(source_view) do
+  def start_sync_run(source_view, metadata \\ %{}) do
     create_sync_run(%{
       source_view: source_view,
       status: "running",
-      started_at: DateTime.utc_now()
+      started_at: DateTime.utc_now(),
+      metadata: metadata
     })
   end
 
@@ -150,21 +151,22 @@ defmodule Kiroku.Sync do
   end
 
   def calculate_record_checksum(record) do
-    # Create a checksum for the record to detect changes
+    # Create a checksum for the record to detect changes. Records are
+    # `Kiroku.LegacyView` structs (atom keys); field/2 tolerates string keys too.
     relevant_fields = [
-      record["Judul"],
-      record["Abstrak"],
-      record["Fakultas"],
-      record["Program_Studi"],
-      record["Jenjang"],
-      record["Nama"],
-      record["stPublikasi"],
-      record["Verifikasi"],
-      record["Validasi"],
-      record["LinkPath"],
-      record["FileCover"],
-      record["FileAbstrak"],
-      record["Tgl_Upload"]
+      field(record, :Judul),
+      field(record, :Abstrak),
+      field(record, :Fakultas),
+      field(record, :Program_Studi),
+      field(record, :Jenjang),
+      field(record, :Nama),
+      field(record, :stPublikasi),
+      field(record, :Verifikasi),
+      field(record, :Validasi),
+      field(record, :LinkPath),
+      field(record, :FileCover),
+      field(record, :FileAbstrak),
+      field(record, :Tgl_Upload)
     ]
 
     relevant_fields
@@ -208,18 +210,17 @@ defmodule Kiroku.Sync do
     # For incremental sync, check if record has changed since last sync
     position = get_sync_position(source_view)
     checksum = calculate_record_checksum(record)
-    legacy_id = build_legacy_id(record["Jenis"], record["NPM"])
+    legacy_id = build_legacy_id(field(record, :Jenis), field(record, :NPM))
 
     # Check if record is new or changed
     new_record? = is_nil(get_latest_record_tracking(legacy_id))
     changed_record? = record_changed?(legacy_id, checksum)
 
-    # Also check if upload date is after last sync (if available)
     upload_after_sync? =
-      if record["Tgl_Upload"] && position.last_synced_at do
-        DateTime.compare(record["Tgl_Upload"], position.last_synced_at) == :gt
-      else
-        true
+      case {field(record, :Tgl_Upload), position.last_synced_at} do
+        {nil, _} -> true
+        {_, nil} -> true
+        {tgl, last} -> DateTime.compare(tgl, last) == :gt
       end
 
     new_record? or changed_record? or upload_after_sync?
@@ -231,5 +232,11 @@ defmodule Kiroku.Sync do
   defp build_legacy_id(jenis, npm) do
     slug = (jenis || "unknown") |> String.downcase() |> String.replace(" ", "-")
     "#{slug}/#{npm}"
+  end
+
+  # Key-agnostic field accessor. Records arrive as `Kiroku.LegacyView` structs
+  # (atom keys from Ecto); string keys tolerated defensively.
+  defp field(record, key) when is_atom(key) do
+    Map.get(record, key) || Map.get(record, Atom.to_string(key))
   end
 end

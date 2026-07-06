@@ -26,6 +26,113 @@ defmodule Kiroku.Repository do
     Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
   end
 
+  @doc """
+  Returns top-level (root) communities — those without a parent.
+  """
+  def list_root_communities do
+    Repo.all(
+      from c in Community,
+        where: c.is_active == true and is_nil(c.parent_community_id),
+        order_by: c.position
+    )
+  end
+
+  @doc """
+  Returns the direct subcommunities of a given community.
+  """
+  def list_subcommunities(community_id) do
+    Repo.all(
+      from c in Community,
+        where: c.parent_community_id == ^community_id and c.is_active == true,
+        order_by: c.position
+    )
+  end
+
+  @doc """
+  Returns all active communities as a flat list annotated with a virtual
+  `depth` field, ordered in hierarchy traversal order (parents before
+  children). Used by the admin UI to render a tree with indentation.
+  """
+  def list_communities_tree do
+    communities =
+      Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
+
+    build_community_tree(communities, nil, 0)
+  end
+
+  defp build_community_tree(all, parent_id, depth) do
+    all
+    |> Enum.filter(fn %Community{parent_community_id: pid} ->
+      same_parent?(pid, parent_id)
+    end)
+    |> Enum.flat_map(fn community ->
+      community = %{community | depth: depth}
+      [community | build_community_tree(all, community.id, depth + 1)]
+    end)
+  end
+
+  defp same_parent?(nil, nil), do: true
+
+  defp same_parent?(pid, parent_id) when is_binary(pid) and is_binary(parent_id),
+    do: pid == parent_id
+
+  defp same_parent?(_, _), do: false
+
+  @doc """
+  Returns communities eligible to be set as the parent of `community`,
+  as a depth-annotated tree (parents before children, with indentation
+  depth set on each struct). Excludes the community itself and its
+  descendants to prevent cycles. Pass `nil` to list all active
+  communities.
+  """
+  def list_possible_parents_tree(community) do
+    raw =
+      Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
+
+    excluded = descendant_ids(raw, community && community.id)
+
+    build_community_tree(raw, nil, 0)
+    |> Enum.reject(fn %Community{id: id} -> id in excluded end)
+  end
+
+  # Returns the set of ids for `community_id` and all of its descendants.
+  defp descendant_ids(_communities, nil), do: MapSet.new()
+
+  defp descendant_ids(communities, community_id),
+    do: collect_descendants(communities, community_id, MapSet.new([community_id]))
+
+  defp collect_descendants(communities, community_id, acc) do
+    children =
+      communities
+      |> Enum.filter(fn %Community{parent_community_id: pid} -> pid == community_id end)
+      |> Enum.map(& &1.id)
+      |> Enum.reject(&MapSet.member?(acc, &1))
+
+    Enum.reduce(children, acc, fn child_id, set ->
+      collect_descendants(communities, child_id, MapSet.put(set, child_id))
+    end)
+  end
+
+  @doc """
+  Fetches a community with its parent and subcommunities preloaded.
+  """
+  def get_community_with_relations!(id) do
+    ordered_subq = from(c in Community, where: c.is_active == true, order_by: c.position)
+
+    Repo.get!(Community, id)
+    |> Repo.preload(parent_community: :parent_community, subcommunities: ordered_subq)
+  end
+
+  @doc """
+  Fetches a community by handle with its parent and subcommunities preloaded.
+  """
+  def get_community_with_relations_by_handle!(handle) do
+    ordered_subq = from(c in Community, where: c.is_active == true, order_by: c.position)
+
+    Repo.get_by!(Community, handle: handle)
+    |> Repo.preload(parent_community: :parent_community, subcommunities: ordered_subq)
+  end
+
   def get_community!(id), do: Repo.get!(Community, id)
 
   def get_community(id), do: Repo.get(Community, id)
@@ -37,13 +144,38 @@ defmodule Kiroku.Repository do
   def create_community(attrs) do
     %Community{}
     |> Community.changeset(attrs)
+    |> validate_parent_allowed(nil)
     |> Repo.insert()
   end
 
   def update_community(%Community{} = community, attrs) do
     community
     |> Community.changeset(attrs)
+    |> validate_parent_allowed(community.id)
     |> Repo.update()
+  end
+
+  # Prevents creating a cycle by ensuring the chosen parent is not the
+  # community itself or one of its descendants.
+  defp validate_parent_allowed(changeset, community_id) do
+    parent_id = Ecto.Changeset.get_field(changeset, :parent_community_id)
+
+    if parent_id do
+      communities =
+        Repo.all(
+          from c in Community, where: c.is_active == true, select: [:id, :parent_community_id]
+        )
+
+      excluded = descendant_ids(communities, community_id)
+
+      if parent_id in excluded do
+        Ecto.Changeset.add_error(changeset, :parent_community_id, "cannot be a descendant")
+      else
+        changeset
+      end
+    else
+      changeset
+    end
   end
 
   def delete_community(%Community{} = community), do: Repo.delete(community)

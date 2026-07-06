@@ -210,4 +210,67 @@ defmodule Kiroku.Settings do
       cron_schedule: embargo_cron_schedule()
     }
   end
+
+  # ── Mailer helpers ───────────────────────────────────────────────────────────
+
+  @doc """
+  Returns the mailer provider.
+  Priority: DB setting → MAILER_PROVIDER env var → "local" (dev/test, no sending).
+  """
+  def mailer_provider, do: get("mailer_provider") || System.get_env("MAILER_PROVIDER") || "local"
+
+  @doc "Returns the default From address for outgoing email."
+  def mailer_from,
+    do: get("mailer_from") || System.get_env("MAILER_FROM") || "noreply@kiroku.local"
+
+  @doc "Returns the SMTP host."
+  def mailer_smtp_host, do: get("smtp_host") || System.get_env("SMTP_HOST")
+
+  @doc "Returns the SMTP port as an integer, or nil."
+  def mailer_smtp_port do
+    case get("smtp_port") || System.get_env("SMTP_PORT") do
+      nil -> nil
+      v -> String.to_integer(v)
+    end
+  end
+
+  @doc "Returns the SMTP username."
+  def mailer_smtp_username, do: get("smtp_username") || System.get_env("SMTP_USERNAME")
+
+  @doc "Returns the SMTP password."
+  def mailer_smtp_password, do: get("smtp_password") || System.get_env("SMTP_PASSWORD")
+
+  @doc "Returns a map of all current mailer settings for the admin UI."
+  def mailer_settings do
+    %{
+      provider: mailer_provider(),
+      from: mailer_from(),
+      host: mailer_smtp_host(),
+      port: mailer_smtp_port(),
+      username: mailer_smtp_username(),
+      password: mailer_smtp_password()
+    }
+  end
+
+  # ── Onboarding helpers ───────────────────────────────────────────────────────
+
+  @setup_key "setup_complete"
+
+  @doc "Returns whether the first-run onboarding wizard has been completed."
+  def setup_complete?, do: get(@setup_key) == "true"
+
+  @doc "Marks the onboarding wizard as completed."
+  def mark_setup_complete do
+    put(@setup_key, "true", "Whether the first-run onboarding wizard has been completed")
+  end
+
+  # ── Submission toggle ────────────────────────────────────────────────────────
+
+  @doc """
+  Returns whether regular users are allowed to submit new items.
+
+  When `false`, only staff (admins/superadmins) can create items. Controlled by
+  the `allow_user_submit` setting, defaulting to `false`.
+  """
+  def allow_user_submit?, do: get("allow_user_submit", "false") == "true"
 end

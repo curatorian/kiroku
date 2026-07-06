@@ -291,6 +291,52 @@ defmodule KirokuWeb.Admin.DashboardLive do
               </div>
             </div>
 
+            <%!-- Sync Health ─────────────────────────────────────────────── --%>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
+                  Sync Health
+                </h2>
+                <.link
+                  navigate={~p"/admin/sync"}
+                  class="text-xs font-medium transition-colors hover:text-white"
+                  style="color: var(--color-lavender);"
+                >
+                  Manage →
+                </.link>
+              </div>
+              <.link
+                navigate={~p"/admin/sync"}
+                class="kiroku-card p-4 block transition-colors hover:border-purple-500/40"
+              >
+                <div class="space-y-2">
+                  <div :for={entry <- @sync_health.entries} class="flex items-center justify-between">
+                    <span class="text-xs" style="color: var(--color-quill);">
+                      {entry.view}
+                    </span>
+                    <span class="flex items-center gap-1.5">
+                      <span
+                        class="w-2 h-2 rounded-full"
+                        style={sync_dot_style(entry)}
+                      />
+                      <span class="text-xs" style="color: var(--color-quill);">
+                        {sync_relative(entry)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+                <%= if @sync_health.dead_letter_count > 0 do %>
+                  <p
+                    class="text-xs mt-3 pt-3"
+                    style="color: var(--color-ribbon-red); border-top: 1px solid rgba(196,65,90,0.2);"
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-3.5 inline" />
+                    {@sync_health.dead_letter_count} record(s) need attention
+                  </p>
+                <% end %>
+              </.link>
+            </div>
+
             <%!-- Recently Published --%>
             <div class="space-y-3">
               <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
@@ -338,8 +384,70 @@ defmodule KirokuWeb.Admin.DashboardLive do
      socket
      |> assign(:stats, Map.put(stats, :users, user_count))
      |> assign(:pending_items, Repository.list_pending_items(10))
-     |> assign(:recent_published, Repository.list_recent_published(5))}
+     |> assign(:recent_published, Repository.list_recent_published(5))
+     |> assign(:sync_health, sync_health_summary())}
   end
 
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
+
+  # Compact sync health summary for the dashboard widget. Returns one entry
+  # per legacy view with its latest run status, plus the unresolved dead-letter
+  # count surfaced once (on the first entry / as a separate field).
+  defp sync_health_summary do
+    import Ecto.Query
+
+    views = Kiroku.Sync.Importer.views()
+
+    entries =
+      Enum.map(views, fn {view, _} ->
+        run = Kiroku.Sync.get_latest_sync_run(view)
+
+        %{
+          view: view,
+          status: run && run.status,
+          started_at: run && run.started_at,
+          failed: run && (run.records_failed || 0)
+        }
+      end)
+
+    dead_letter_count =
+      Kiroku.Repo.aggregate(
+        from(d in Kiroku.Sync.DeadLetterQueue, where: is_nil(d.resolved_at)),
+        :count
+      )
+
+    %{entries: entries, dead_letter_count: dead_letter_count}
+  end
+
+  # Renders a small colored dot indicating the health of a view's last run.
+  defp sync_dot_style(%{status: nil}),
+    do: "background: var(--color-quill); opacity: 0.4;"
+
+  defp sync_dot_style(%{status: "running"}),
+    do: "background: #7dd3fc;"
+
+  defp sync_dot_style(%{status: "completed", failed: failed}) when failed > 0,
+    do: "background: #fb923c;"
+
+  defp sync_dot_style(%{status: "completed"}),
+    do: "background: #6ee7b7;"
+
+  defp sync_dot_style(%{status: "failed"}),
+    do: "background: var(--color-ribbon-red);"
+
+  defp sync_dot_style(_),
+    do: "background: var(--color-quill); opacity: 0.4;"
+
+  defp sync_relative(%{started_at: nil}), do: "never"
+
+  defp sync_relative(%{started_at: dt}) do
+    diff = DateTime.diff(DateTime.utc_now(), dt)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86_400 -> "#{div(diff, 3600)}h ago"
+      true -> "#{div(diff, 86_400)}d ago"
+    end
+  end
 end

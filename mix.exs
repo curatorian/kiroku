@@ -67,6 +67,8 @@ defmodule Kiroku.MixProject do
 
       # ── Email ─────────────────────────────────────────────────────────────
       {:swoosh, "~> 1.16"},
+      # SMTP adapter for Swoosh (required by Swoosh.Adapters.SMTP)
+      {:gen_smtp, "~> 1.2"},
 
       # ── HTTP ──────────────────────────────────────────────────────────────
       {:req, "~> 0.5"},

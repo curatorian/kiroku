@@ -31,12 +31,20 @@ defmodule Kiroku.Access.AuthorizationTest do
   # ── Community ──────────────────────────────────────────────────────────────
 
   describe "community permissions" do
-    test "admin can CRUD" do
+    test "superadmin can CRUD" do
+      superadmin = user(:superadmin)
+      assert Authorization.can?(superadmin, :read, community())
+      assert Authorization.can?(superadmin, :create, community())
+      assert Authorization.can?(superadmin, :update, community())
+      assert Authorization.can?(superadmin, :delete, community())
+    end
+
+    test "admin can only read (management is superadmin-only)" do
       admin = user(:admin)
       assert Authorization.can?(admin, :read, community())
-      assert Authorization.can?(admin, :create, community())
-      assert Authorization.can?(admin, :update, community())
-      assert Authorization.can?(admin, :delete, community())
+      refute Authorization.can?(admin, :create, community())
+      refute Authorization.can?(admin, :update, community())
+      refute Authorization.can?(admin, :delete, community())
     end
 
     test "submitter can only read" do

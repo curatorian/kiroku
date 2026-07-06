@@ -14,6 +14,9 @@ defmodule Kiroku.Repository.Community do
     field :position, :integer, default: 0
     field :is_active, :boolean, default: true
 
+    # Virtual field used only for hierarchical tree display in the admin UI.
+    field :depth, :integer, virtual: true, default: 0
+
     belongs_to :parent_community, __MODULE__
     has_many :subcommunities, __MODULE__, foreign_key: :parent_community_id
     has_many :collections, Kiroku.Repository.Collection
@@ -36,5 +39,18 @@ defmodule Kiroku.Repository.Community do
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 255)
     |> unique_constraint(:handle)
+    |> validate_not_self_parent()
+  end
+
+  # A community cannot be its own parent.
+  defp validate_not_self_parent(%Ecto.Changeset{} = changeset) do
+    id = get_field(changeset, :id)
+    parent_id = get_field(changeset, :parent_community_id)
+
+    if id && parent_id && id == parent_id do
+      add_error(changeset, :parent_community_id, "cannot be its own parent")
+    else
+      changeset
+    end
   end
 end

@@ -5,7 +5,7 @@ defmodule KirokuWeb.CommunityLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities()
+    communities = Repository.list_root_communities()
 
     {:ok,
      socket

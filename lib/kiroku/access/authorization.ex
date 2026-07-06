@@ -14,12 +14,10 @@ defmodule Kiroku.Access.Authorization do
   # Superadmin may do anything
   def can?(%User{user_type: :superadmin}, _action, _resource), do: true
 
-  # ── Community CRUD ────────────────────────────────────────────────────────────
-
-  def can?(%User{user_type: type}, action, %Community{})
-      when type in [:admin] and action in [:read, :create, :update, :delete] do
-    true
-  end
+  # ── Community CRUD (superadmin only) ─────────────────────────────────────────
+  #
+  # Community management — including the hierarchical structure — is restricted
+  # to superadmins. Admins and below may only read.
 
   def can?(_user, :read, %Community{}), do: true
 

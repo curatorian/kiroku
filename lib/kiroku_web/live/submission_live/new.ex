@@ -59,12 +59,19 @@ defmodule KirokuWeb.SubmissionLive.New do
         max_file_size: 20_000_000
       )
 
-    if Authorization.can?(user, :create, %Item{}) do
+    if Authorization.can?(user, :create, %Item{}) and submission_open?(user) do
       {:ok, socket}
     else
-      {:ok, push_navigate(socket, to: ~p"/my/items")}
+      {:ok,
+       socket
+       |> put_flash(:error, "Item submission is currently disabled.")
+       |> push_navigate(to: ~p"/my/items")}
     end
   end
+
+  defp submission_open?(%{user_type: type}) when type in [:admin, :superadmin], do: true
+
+  defp submission_open?(_user), do: Kiroku.Settings.allow_user_submit?()
 
   @impl true
   def handle_params(_params, _uri, socket) do

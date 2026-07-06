@@ -18,6 +18,18 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
           <h1 class="font-heading text-2xl" style="color: var(--color-lilac);">{@community.name}</h1>
           <span class="kiroku-handle">{@community.handle}</span>
         </div>
+
+        <div :if={@community.parent_community} class="text-sm" style="color: var(--color-quill);">
+          Part of
+          <.link
+            navigate={~p"/admin/communities/#{@community.parent_community.id}"}
+            style="color: var(--color-lavender);"
+            class="hover:text-white transition-colors"
+          >
+            {@community.parent_community.name}
+          </.link>
+        </div>
+
         <div class="kiroku-card p-6 space-y-4">
           <%= if @community.short_description do %>
             <p style="color: var(--color-quill);">{@community.short_description}</p>
@@ -37,7 +49,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
             </.link>
             <button
               phx-click="delete"
-              data-confirm="Delete this community?"
+              data-confirm="Delete this community? Its subcommunities will become top-level."
               class="px-4 py-2 rounded-lg text-sm font-medium"
               style="background: rgba(196,65,90,0.12); color: var(--color-ribbon-red); border: 1px solid rgba(196,65,90,0.2);"
             >
@@ -45,14 +57,42 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
             </button>
           </div>
         </div>
+
+        <div :if={@community.subcommunities != []} class="kiroku-card p-6">
+          <h2 class="font-heading text-lg mb-3" style="color: var(--color-lilac);">
+            Subcommunities
+          </h2>
+          <ul class="space-y-2">
+            <li :for={sub <- @community.subcommunities} class="flex items-center gap-2">
+              <span style="color: var(--color-wisteria);">
+                <.icon name="hero-folder" class="w-4 h-4" />
+              </span>
+              <.link
+                navigate={~p"/admin/communities/#{sub.id}"}
+                style="color: var(--color-lavender);"
+                class="hover:text-white transition-colors text-sm"
+              >
+                {sub.name}
+              </.link>
+              <span class="kiroku-handle text-xs">/{sub.handle}</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </Layouts.admin>
     """
   end
 
   def mount(%{"id" => id}, _session, socket) do
-    community = Repository.get_community!(id)
-    {:ok, assign(socket, :community, community)}
+    if superadmin?(socket) do
+      community = Repository.get_community_with_relations!(id)
+      {:ok, assign(socket, :community, community)}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Only superadmins can manage communities.")
+       |> push_navigate(to: ~p"/admin")}
+    end
   end
 
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
@@ -64,5 +104,9 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
      socket
      |> put_flash(:info, "Community deleted.")
      |> push_navigate(to: ~p"/admin/communities")}
+  end
+
+  defp superadmin?(socket) do
+    socket.assigns[:current_user] && socket.assigns.current_user.user_type == :superadmin
   end
 end

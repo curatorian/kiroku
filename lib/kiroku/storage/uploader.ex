@@ -89,7 +89,7 @@ defmodule Kiroku.Storage.Uploader do
   # ── Storage key generation ─────────────────────────────────────────────────
 
   @doc """
-  Generates a storage key for a new bitstream.
+  Generates a storage-key for a new bitstream.
   Format: "items/{item_id}/{bundle_lowercase}/{uuid}{ext}"
   """
   def storage_key(item_id, bundle_name, original_filename) do
@@ -97,6 +97,22 @@ defmodule Kiroku.Storage.Uploader do
     uuid = Ecto.UUID.generate()
     bundle_str = bundle_name |> to_string() |> String.downcase()
     "items/#{item_id}/#{bundle_str}/#{uuid}#{ext}"
+  end
+
+  @doc """
+  Returns the `Bitstream` record fields that describe where `upload/3` would
+  actually write bytes under the current (or given) adapter.
+
+  Always pair `upload/3` with this so the DB row matches the destination —
+  otherwise downloads (BitstreamController) look in the wrong place and 404.
+
+      %{storage_type: :s3, storage_bucket: "kiroku-uploads"} | %{storage_type: :local}
+  """
+  def record_attrs(adapter \\ adapter()) do
+    case adapter do
+      :s3 -> %{storage_type: :s3, storage_bucket: Kiroku.Settings.storage_bucket()}
+      _ -> %{storage_type: :local}
+    end
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

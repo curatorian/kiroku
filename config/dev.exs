@@ -10,6 +10,19 @@ config :kiroku, Kiroku.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
+# MSSQL legacy read-only repo (import-time only; started manually by the import
+# task and sync workers — NOT part of the supervision tree). Reads the same
+# MSSQL_* env vars as production so you can test imports locally. Copy
+# .env.example → .env and fill in your legacy DB credentials.
+config :kiroku, Kiroku.LegacyRepo,
+  adapter: Ecto.Adapters.Tds,
+  hostname: System.get_env("MSSQL_HOST"),
+  database: System.get_env("MSSQL_DB"),
+  username: System.get_env("MSSQL_USER"),
+  password: System.get_env("MSSQL_PASS"),
+  port: String.to_integer(System.get_env("MSSQL_PORT", "1433")),
+  pool_size: 2
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
