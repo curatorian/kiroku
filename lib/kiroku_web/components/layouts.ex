@@ -164,13 +164,15 @@ defmodule KirokuWeb.Layouts do
             current_path={@page_title}
             match="Items"
           />
-          <.admin_nav_item
-            icon="hero-building-library"
-            label="Communities"
-            href={~p"/admin/communities"}
-            current_path={@page_title}
-            match="Communities"
-          />
+          <%= if @current_scope && @current_scope.user_type == :superadmin do %>
+            <.admin_nav_item
+              icon="hero-building-library"
+              label="Communities"
+              href={~p"/admin/communities"}
+              current_path={@page_title}
+              match="Communities"
+            />
+          <% end %>
           <.admin_nav_item
             icon="hero-folder-open"
             label="Collections"
@@ -185,6 +187,15 @@ defmodule KirokuWeb.Layouts do
             current_path={@page_title}
             match="Users"
           />
+          <%= if @current_scope && @current_scope.user_type in [:admin, :superadmin] do %>
+            <.admin_nav_item
+              icon="hero-arrow-path"
+              label="Sync & Import"
+              href={~p"/admin/sync"}
+              current_path={@page_title}
+              match="Sync"
+            />
+          <% end %>
           <div class="admin-sidebar-divider" />
           <.admin_nav_item
             icon="hero-cog-6-tooth"
@@ -248,6 +259,122 @@ defmodule KirokuWeb.Layouts do
 
     <.flash_group flash={@flash} />
     """
+  end
+
+  @doc """
+  Renders the first-run setup wizard shell: a centered layout with a brand
+  wordmark, a step progress indicator, and flash messages.
+
+  ## Examples
+
+      <Layouts.setup flash={@flash} current_step={@step}>
+        <h1>Content</h1>
+      </Layouts.setup>
+  """
+  attr :flash, :map, required: true
+  attr :current_step, :atom, default: :admin
+  attr :brand, :map, default: %{}
+  slot :inner_block, required: true
+
+  def setup(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:brand, fn -> Kiroku.Settings.brand_settings() end)
+      |> assign(:steps, setup_steps())
+
+    ~H"""
+    <div
+      class="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+      style="background: var(--color-grimoire);"
+    >
+      <div class="w-full max-w-xl">
+        <div class="flex items-center justify-center gap-2 mb-8">
+          <%= if @brand[:logo_url] do %>
+            <img src={@brand.logo_url} alt={@brand.name} class="h-8 w-auto object-contain" />
+          <% else %>
+            <span class="kiroku-kanji text-2xl leading-none">記</span>
+            <span class="kiroku-wordmark text-xl leading-none">
+              {@brand[:name] || "Kiroku"}
+            </span>
+          <% end %>
+        </div>
+
+        <.setup_progress steps={@steps} current={@current_step} />
+
+        <div class="kiroku-card p-6 sm:p-8 mt-6">
+          {render_slot(@inner_block)}
+        </div>
+
+        <p class="text-center text-xs mt-6" style="color: var(--color-dust);">
+          Initial setup — required before the repository can be used.
+        </p>
+      </div>
+    </div>
+
+    <.flash_group flash={@flash} />
+    """
+  end
+
+  defp setup_steps do
+    [
+      %{key: :admin, label: "Admin"},
+      %{key: :brand, label: "Brand"},
+      %{key: :storage, label: "Storage"},
+      %{key: :mailer, label: "Email"}
+    ]
+  end
+
+  defp setup_progress(assigns) do
+    ~H"""
+    <div class="flex items-center justify-center gap-2">
+      <%= for {step, index} <- Enum.with_index(@steps) do %>
+        <% done? = step_index(@current, @steps) > index %>
+        <% active? = @current == step.key %>
+        <div class="flex items-center gap-2">
+          <div
+            class={[
+              "flex items-center justify-center rounded-full text-xs font-semibold transition-all duration-200",
+              "w-7 h-7",
+              if(active?,
+                do: "ring-2",
+                else: if(done?, do: "", else: "")
+              )
+            ]}
+            style={
+              if active? do
+                "background: var(--color-patchouli); color: white; --tw-ring-color: color-mix(in srgb, var(--color-patchouli) 40%, transparent);"
+              else
+                if done? do
+                  "background: color-mix(in srgb, var(--color-patchouli) 30%, transparent); color: var(--color-lilac);"
+                else
+                  "background: rgba(155,126,200,0.08); color: var(--color-dust);"
+                end
+              end
+            }
+          >
+            <%= if done? do %>
+              <.icon name="hero-check" class="w-4 h-4" />
+            <% else %>
+              {index + 1}
+            <% end %>
+          </div>
+          <span
+            class="text-xs font-medium hidden sm:inline"
+            style={if active?, do: "color: var(--color-lilac);", else: "color: var(--color-dust);"}
+          >
+            {step.label}
+          </span>
+          <%= if index < length(@steps) - 1 do %>
+            <div class="w-6 h-px" style="background: rgba(155,126,200,0.2);"></div>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp step_index(current, steps) do
+    Enum.find_index(steps, fn s -> s.key == current end) || 0
   end
 
   # Nav items for the public top bar. Add, remove, or reorder entries here.

@@ -10,6 +10,8 @@ defmodule Kiroku.Application do
     children = [
       KirokuWeb.Telemetry,
       Kiroku.Repo,
+      # Applies DB-backed mailer config on boot; must start after Repo.
+      Kiroku.Mailer.ConfigWorker,
       {DNSCluster, query: Application.get_env(:kiroku, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Kiroku.PubSub},
       {Oban, Application.fetch_env!(:kiroku, Oban)},

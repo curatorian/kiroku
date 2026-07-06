@@ -30,6 +30,13 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
           >
             <.input field={@form[:name]} type="text" label="Name" required />
             <.input field={@form[:handle]} type="text" label="Handle" required />
+            <.input
+              field={@form[:parent_community_id]}
+              type="select"
+              label="Parent community"
+              options={@parent_options}
+              prompt="— Root community (no parent) —"
+            />
             <.input field={@form[:short_description]} type="text" label="Short Description" />
             <.input field={@form[:description]} type="textarea" label="Description" />
             <div class="flex gap-3 pt-2">
@@ -60,7 +67,12 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Communities">
       <div class="space-y-6">
         <div class="flex items-center justify-between">
-          <h1 class="font-heading text-3xl" style="color: var(--color-lilac);">Communities</h1>
+          <div>
+            <h1 class="font-heading text-3xl" style="color: var(--color-lilac);">Communities</h1>
+            <p class="text-sm mt-1" style="color: var(--color-quill);">
+              Organize communities into a hierarchy. Top-level communities appear on the public browse page.
+            </p>
+          </div>
           <.link
             patch={~p"/admin/communities/new"}
             class="px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2"
@@ -91,7 +103,12 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
                 id={id}
                 style="border-top: 1px solid rgba(155,126,200,0.1);"
               >
-                <td class="px-4 py-3" style="color: var(--color-lilac);">{community.name}</td>
+                <td class="px-4 py-3" style={"padding-left: #{(community.depth || 0) * 1.5 + 1}rem;"}>
+                  <%= if (community.depth || 0) > 0 do %>
+                    <span style="color: var(--color-quill);" class="mr-1">└</span>
+                  <% end %>
+                  <span style="color: var(--color-lilac);">{community.name}</span>
+                </td>
                 <td class="px-4 py-3 kiroku-handle">{community.handle}</td>
                 <td class="px-4 py-3">
                   <%= if community.is_active do %>
@@ -118,7 +135,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
                   <button
                     phx-click="delete"
                     phx-value-id={community.id}
-                    data-confirm="Delete this community?"
+                    data-confirm="Delete this community? Its subcommunities will become top-level."
                     class="text-xs transition-colors hover:text-white"
                     style="color: var(--color-ribbon-red);"
                   >
@@ -135,21 +152,38 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   end
 
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities()
+    communities = Repository.list_communities_tree()
     {:ok, stream(socket, :communities, communities)}
   end
 
   def handle_params(params, _uri, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+    if superadmin?(socket) do
+      {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Only superadmins can manage communities.")
+       |> push_navigate(to: ~p"/admin")}
+    end
   end
 
   defp apply_action(socket, :index, _params) do
-    socket |> assign(:form, nil) |> assign(:current_community, nil)
+    communities = Repository.list_communities_tree()
+
+    socket
+    |> assign(:form, nil)
+    |> assign(:current_community, nil)
+    |> assign(:parent_options, [])
+    |> stream(:communities, communities, reset: true)
   end
 
   defp apply_action(socket, :new, _params) do
     changeset = Community.changeset(%Community{}, %{})
-    socket |> assign(:current_community, nil) |> assign(:form, to_form(changeset, as: :community))
+
+    socket
+    |> assign(:current_community, nil)
+    |> assign(:parent_options, parent_select_options(Repository.list_possible_parents_tree(nil)))
+    |> assign(:form, to_form(changeset, as: :community))
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
@@ -158,7 +192,22 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
 
     socket
     |> assign(:current_community, community)
+    |> assign(
+      :parent_options,
+      parent_select_options(Repository.list_possible_parents_tree(community))
+    )
     |> assign(:form, to_form(changeset, as: :community))
+  end
+
+  defp parent_select_options(communities) do
+    Enum.map(communities, fn community ->
+      indent = String.duplicate("\u00A0\u00A0\u00A0", community.depth || 0)
+      {"#{indent}#{community.name}", community.id}
+    end)
+  end
+
+  defp superadmin?(socket) do
+    socket.assigns[:current_user] && socket.assigns.current_user.user_type == :superadmin
   end
 
   def handle_event("validate", %{"community" => params}, socket) do
@@ -168,14 +217,21 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   end
 
   def handle_event("save", %{"community" => params}, socket) do
+    parent_id = normalize_parent_id(params["parent_community_id"])
+
+    params =
+      case parent_id do
+        :root -> Map.delete(params, "parent_community_id")
+        id -> Map.put(params, "parent_community_id", id)
+      end
+
     case socket.assigns.live_action do
       :new ->
         case Repository.create_community(params) do
-          {:ok, community} ->
+          {:ok, _community} ->
             {:noreply,
              socket
              |> put_flash(:info, "Community created.")
-             |> stream_insert(:communities, community, at: 0)
              |> push_patch(to: ~p"/admin/communities")}
 
           {:error, changeset} ->
@@ -186,11 +242,10 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
         community = socket.assigns.current_community
 
         case Repository.update_community(community, params) do
-          {:ok, updated} ->
+          {:ok, _updated} ->
             {:noreply,
              socket
              |> put_flash(:info, "Community updated.")
-             |> stream_insert(:communities, updated)
              |> push_patch(to: ~p"/admin/communities")}
 
           {:error, changeset} ->
@@ -203,9 +258,17 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     community = Repository.get_community!(id)
     {:ok, _} = Repository.delete_community(community)
 
+    # Re-stream the tree since deleting a node reshuffles the hierarchy.
+    communities = Repository.list_communities_tree()
+
     {:noreply,
      socket
      |> put_flash(:info, "Community deleted.")
-     |> stream_delete(:communities, community)}
+     |> stream(:communities, communities, reset: true)}
   end
+
+  # Treat an empty/select-prompt parent id as "no parent".
+  defp normalize_parent_id(""), do: :root
+  defp normalize_parent_id(nil), do: :root
+  defp normalize_parent_id(id), do: id
 end

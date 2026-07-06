@@ -6,41 +6,45 @@
 #
 #     ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=secret123456 mix run priv/repo/seeds.exs
 
-import Ecto.Changeset
-alias Kiroku.Accounts.User
-alias Kiroku.Repo
+# import Ecto.Changeset
+# alias Kiroku.Accounts.User
+# alias Kiroku.Repo
 alias Kiroku.Settings
 
 # ── Admin seed ────────────────────────────────────────────────────────────────
 
-admin_email = System.get_env("ADMIN_EMAIL", "admin@kiroku.local")
-admin_password = System.get_env("ADMIN_PASSWORD", "kiroku_admin_2025!")
-admin_name = System.get_env("ADMIN_NAME", "Administrator")
+# admin_email = System.get_env("ADMIN_EMAIL", "admin@kiroku.local")
+# admin_password = System.get_env("ADMIN_PASSWORD", "kiroku_admin_2025!")
+# admin_name = System.get_env("ADMIN_NAME", "Administrator")
 
-case Repo.get_by(User, email: admin_email) do
-  %User{} ->
-    IO.puts("  [seeds] Admin user #{admin_email} already exists, skipping.")
+# case Repo.get_by(User, email: admin_email) do
+#   %User{} ->
+#     IO.puts("  [seeds] Admin user #{admin_email} already exists, skipping.")
 
-  nil ->
-    now = NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+#   nil ->
+#     now = NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
 
-    %User{}
-    |> User.registration_changeset(%{
-      email: admin_email,
-      password: admin_password,
-      display_name: admin_name
-    })
-    |> put_change(:user_type, :superadmin)
-    |> put_change(:confirmed_at, now)
-    |> Repo.insert!()
+#     %User{}
+#     |> User.registration_changeset(%{
+#       email: admin_email,
+#       password: admin_password,
+#       display_name: admin_name
+#     })
+#     |> put_change(:user_type, :superadmin)
+#     |> put_change(:confirmed_at, now)
+#     |> Repo.insert!()
 
-    IO.puts("  [seeds] Created admin user: #{admin_email}")
-    IO.puts("  [seeds] Password: #{admin_password}")
-    IO.puts("  [seeds] Change this password immediately after first login!")
-end
+#     IO.puts("  [seeds] Created admin user: #{admin_email}")
+#     IO.puts("  [seeds] Password: #{admin_password}")
+#     IO.puts("  [seeds] Change this password immediately after first login!")
+# end
 
 setting_defaults = [
-  {"allow_user_submit", "false", "Let the user submit an item to the repository"}
+  {"allow_user_submit", "false", "Let the user submit an item to the repository"},
+  # Fresh installs must trigger the first-run wizard. Seeding "false" keeps the
+  # row present (with its description) while still leaving setup incomplete until
+  # the wizard runs `Settings.mark_setup_complete/0`.
+  {"setup_complete", "false", "Whether the first-run onboarding wizard has been completed"}
 ]
 
 Enum.each(setting_defaults, fn {key, value, description} ->

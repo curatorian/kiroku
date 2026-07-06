@@ -33,6 +33,9 @@ defmodule KirokuWeb.ConnCase do
 
   setup tags do
     Kiroku.DataCase.setup_sandbox(tags)
+    # Controller tests assume the app is past onboarding. Force the cached
+    # setup state to "complete" so the SetupGuard plug doesn't redirect.
+    Kiroku.Onboarding.force_setup_state(true)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

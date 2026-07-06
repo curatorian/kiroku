@@ -12,6 +12,7 @@ defmodule KirokuWeb.Router do
     plug :put_secure_browser_headers
     plug :fetch_current_user
     plug KirokuWeb.Plugs.Locale
+    plug KirokuWeb.Plugs.SetupGuard
   end
 
   pipeline :api do
@@ -24,6 +25,11 @@ defmodule KirokuWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    # First-run onboarding wizard (gated by SetupGuard)
+    live_session :setup do
+      live "/setup", SetupLive, :index
+    end
 
     # Handle resolver (DSpace legacy URLs)
     get "/handle/*path", HandleController, :show
@@ -151,11 +157,23 @@ defmodule KirokuWeb.Router do
     end
   end
 
-  # MSSQL Sync management (outside admin scope to avoid aliasing issues)
+  # MSSQL Sync management. Kept outside the KirokuWeb.Admin scope to avoid the
+  # module being aliased to KirokuWeb.Admin.AdminSyncLive. Staff (admin /
+  # superadmin) authorization is enforced inside AdminSyncLive.mount/3.
+  #
+  # IMPORTANT: the live_session + on_mount is what populates `current_user` in
+  # the LiveView assigns. Without it, `socket.assigns[:current_user]` is nil and
+  # the staff?/1 guard rejects everyone (including superadmins).
   scope "/admin", KirokuWeb do
     pipe_through [:browser, :require_authenticated_user]
 
-    live "/sync", AdminSyncLive, :index
+    live_session :admin_sync,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      live "/sync", AdminSyncLive, :index
+    end
+
+    # SAF export zip download (enforced in the controller for staff only).
+    get "/saf/download/:job_id", SafController, :download
   end
 
   # ── OAI-PMH API ───────────────────────────────────────────────────────────────

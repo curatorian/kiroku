@@ -19,6 +19,7 @@ defmodule KirokuWeb.MyItemLive.Index do
             </p>
           </div>
           <.link
+            :if={@can_submit}
             patch={~p"/my/items/new"}
             class="px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors"
             style="background: var(--color-patchouli); color: white;"
@@ -31,9 +32,14 @@ defmodule KirokuWeb.MyItemLive.Index do
           <div class="hidden only:block kiroku-card p-12 text-center">
             <span class="kiroku-kanji text-5xl opacity-30">記</span>
             <p class="mt-4" style="color: var(--color-quill);">
-              You have not submitted any items yet.
+              <%= if @can_submit do %>
+                You have not submitted any items yet.
+              <% else %>
+                You have not submitted any items yet. Submission is currently disabled.
+              <% end %>
             </p>
             <.link
+              :if={@can_submit}
               patch={~p"/my/items/new"}
               class="mt-4 inline-block px-5 py-2 rounded-lg font-medium text-sm"
               style="background: var(--color-patchouli); color: white;"
@@ -180,12 +186,14 @@ defmodule KirokuWeb.MyItemLive.Index do
     user = socket.assigns.current_user
     items = Repository.list_items_by_submitter(user.id)
     collections = list_all_collections()
+    can_submit = Kiroku.Settings.allow_user_submit?() or staff?(user)
 
     {:ok,
      socket
      |> assign(:collections, collections)
      |> assign(:item_types, @item_types)
      |> assign(:current_item, nil)
+     |> assign(:can_submit, can_submit)
      |> assign(:form, nil)
      |> stream(:items, items)}
   end
@@ -202,12 +210,18 @@ defmodule KirokuWeb.MyItemLive.Index do
   end
 
   defp apply_action(socket, :new, _params) do
-    changeset = Item.changeset(%Item{}, %{})
+    if socket.assigns.can_submit do
+      changeset = Item.changeset(%Item{}, %{})
 
-    socket
-    |> assign(:page_title, "Submit New Item")
-    |> assign(:current_item, nil)
-    |> assign(:form, to_form(changeset, as: :item))
+      socket
+      |> assign(:page_title, "Submit New Item")
+      |> assign(:current_item, nil)
+      |> assign(:form, to_form(changeset, as: :item))
+    else
+      socket
+      |> put_flash(:error, "Item submission is currently disabled.")
+      |> push_patch(to: ~p"/my/items")
+    end
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
@@ -301,4 +315,7 @@ defmodule KirokuWeb.MyItemLive.Index do
       Repository.list_collections_for_community(community.id)
     end)
   end
+
+  defp staff?(%{user_type: type}) when type in [:admin, :superadmin], do: true
+  defp staff?(_), do: false
 end

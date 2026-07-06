@@ -5,7 +5,7 @@ defmodule KirokuWeb.CommunityLive.Show do
 
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
-    community = Repository.get_community_by_handle!(handle)
+    community = Repository.get_community_with_relations_by_handle!(handle)
     collections = Repository.list_collections_for_community(community.id)
 
     {:ok,
@@ -21,10 +21,19 @@ defmodule KirokuWeb.CommunityLive.Show do
     <Layouts.app flash={@flash} current_scope={@current_user}>
       <div class="space-y-8">
         <%!-- Breadcrumb --%>
-        <nav class="flex items-center gap-2 text-sm" style="color: var(--color-quill);">
+        <nav class="flex items-center gap-2 text-sm flex-wrap" style="color: var(--color-quill);">
           <.link navigate={~p"/communities"} class="hover:text-white transition-colors">
             Communities
           </.link>
+          <%= if @community.parent_community do %>
+            <span>/</span>
+            <.link
+              navigate={~p"/communities/#{@community.parent_community.handle}"}
+              class="hover:text-white transition-colors"
+            >
+              {@community.parent_community.name}
+            </.link>
+          <% end %>
           <span>/</span>
           <span style="color: var(--color-wisteria);">{@community.name}</span>
         </nav>
@@ -49,6 +58,40 @@ defmodule KirokuWeb.CommunityLive.Show do
                 </p>
               <% end %>
             </div>
+          </div>
+        </div>
+
+        <%!-- Subcommunities --%>
+        <div :if={@community.subcommunities != []}>
+          <h2 class="font-heading text-2xl mb-4" style="color: var(--color-lilac);">
+            Subcommunities
+          </h2>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <.link
+              :for={sub <- @community.subcommunities}
+              navigate={~p"/communities/#{sub.handle}"}
+              class="kiroku-card p-4 flex items-center gap-3 hover:border-purple-500/40 transition-colors group"
+            >
+              <div
+                class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+              >
+                <.icon name="hero-academic-cap" class="w-4 h-4" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p
+                  class="font-medium group-hover:text-white transition-colors"
+                  style="color: var(--color-lilac);"
+                >
+                  {sub.name}
+                </p>
+                <p class="kiroku-handle">{sub.handle}</p>
+              </div>
+              <.icon
+                name="hero-chevron-right"
+                class="w-4 h-4 shrink-0 text-[var(--color-quill)]"
+              />
+            </.link>
           </div>
         </div>
 
