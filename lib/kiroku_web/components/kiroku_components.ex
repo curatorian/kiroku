@@ -3,10 +3,15 @@ defmodule KirokuWeb.KirokuComponents do
   Common UI components shared across LiveViews and controllers.
 
   Includes status badges, item type badges, handles, empty states,
-  page headers, and breadcrumb navigation.
+  page headers, breadcrumb navigation, and pagination.
   """
+
   use Phoenix.Component
   use Gettext, backend: KirokuWeb.Gettext
+
+  import KirokuWeb.CoreComponents, only: [icon: 1]
+
+  alias Kiroku.Pagination
 
   # ── Status Badge ──────────────────────────────────────────────────────────
 
@@ -266,5 +271,131 @@ defmodule KirokuWeb.KirokuComponents do
       <% end %>
     </nav>
     """
+  end
+
+  # ── Pagination ─────────────────────────────────────────────────────────────
+
+  @doc """
+  Renders a reusable pagination control.
+
+  Uses `<.link patch={...}>` so page navigation is URL-bookmarkable and
+  integrates with `handle_params` in LiveViews.
+
+  ## Attributes
+
+    * `:pagination` — a `Kiroku.Pagination` struct (required)
+    * `:path` — base route path, e.g. `"/admin/items"` (required)
+    * `:params` — current query params as a map, e.g. `%{"status" => "submitted"}`.
+      Page number is injected automatically; existing filters are preserved.
+
+  ## Example
+
+      <.pagination
+        pagination={@pagination}
+        path="/admin/items"
+        params={%{"status" => @status_filter, "search" => @search_query}}
+      />
+  """
+  attr :pagination, :map, required: true
+  attr :path, :string, required: true
+  attr :params, :map, default: %{}
+
+  def pagination(assigns) do
+    ~H"""
+    <div :if={@pagination.total_pages > 1} class="flex items-center justify-center gap-1.5 mt-6">
+      <%!-- Previous page --%>
+      <.page_link
+        path={@path}
+        params={@params}
+        page={@pagination.page - 1}
+        disabled={!Pagination.has_prev?(@pagination)}
+        aria_label="Previous page"
+      >
+        <.icon name="hero-chevron-left" class="w-4 h-4" />
+      </.page_link>
+
+      <%!-- Page numbers --%>
+      <% current_page = @pagination.page %>
+      <%= for item <- Pagination.page_list(@pagination) do %>
+        <%= cond do %>
+          <% item == :ellipsis -> %>
+            <span class="px-2 text-sm select-none" style="color: var(--color-quill);">…</span>
+          <% item == current_page -> %>
+            <span
+              class="min-w-[2.25rem] w-4 h-9 flex items-center justify-center rounded-lg text-sm font-semibold transition-all"
+              style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 6px rgba(123,79,166,0.3);"
+              aria-current="page"
+            >
+              {item}
+            </span>
+          <% true -> %>
+            <.page_link path={@path} params={@params} page={item}>
+              {item}
+            </.page_link>
+        <% end %>
+      <% end %>
+
+      <%!-- Next page --%>
+      <.page_link
+        path={@path}
+        params={@params}
+        page={@pagination.page + 1}
+        disabled={!Pagination.has_next?(@pagination)}
+        aria_label="Next page"
+      >
+        <.icon name="hero-chevron-right" class="w-4 h-4" />
+      </.page_link>
+    </div>
+    """
+  end
+
+  # Internal: single page link button (or disabled placeholder)
+  attr :path, :string, required: true
+  attr :params, :map, default: %{}
+  attr :page, :integer, required: true
+  attr :disabled, :boolean, default: false
+  attr :aria_label, :string, default: nil
+  slot :inner_block
+
+  defp page_link(%{disabled: true} = assigns) do
+    ~H"""
+    <span
+      class="min-w-[2.25rem] h-9 flex items-center justify-center rounded-lg text-sm cursor-not-allowed"
+      style="color: var(--color-quill); opacity: 0.35;"
+      aria-label={@aria_label}
+      aria-disabled="true"
+    >
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  defp page_link(assigns) do
+    ~H"""
+    <.link
+      patch={build_page_url(@path, @params, @page)}
+      class="min-w-[2.25rem] h-9 flex items-center justify-center px-2 rounded-lg text-sm font-medium transition-all duration-150 hover:scale-105 active:scale-95"
+      style="background: rgba(155,126,200,0.1); color: var(--color-wisteria);"
+      aria-label={@aria_label || "Page #{@page}"}
+    >
+      {render_slot(@inner_block)}
+    </.link>
+    """
+  end
+
+  defp build_page_url(path, params, page) do
+    query =
+      params
+      |> Map.put("page", page)
+      |> Enum.reject(fn
+        {_, nil} -> true
+        {_, ""} -> true
+        {"page", 1} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {k, v} -> "#{k}=#{URI.encode_www_form(to_string(v))}" end)
+      |> Enum.join("&")
+
+    if query == "", do: path, else: "#{path}?#{query}"
   end
 end

@@ -1,8 +1,11 @@
 defmodule KirokuWeb.Admin.CollectionLive.Index do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.KirokuComponents
+
   alias Kiroku.Repository
   alias Kiroku.Repository.Collection
+  alias Kiroku.Pagination
 
   def render(%{live_action: action} = assigns) when action in [:new, :edit] do
     ~H"""
@@ -142,27 +145,40 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
             </tbody>
           </table>
         </div>
+
+        <.pagination pagination={@pagination} path="/admin/collections" params={%{}} />
       </div>
     </Layouts.admin>
     """
   end
 
   def mount(_params, _session, socket) do
-    collections = Repository.list_collections()
     communities = Repository.list_communities()
 
     {:ok,
      socket
      |> assign(:communities, communities)
-     |> stream(:collections, collections)}
+     |> assign(:pagination, Pagination.build(0, 1, 20))
+     |> stream(:collections, [])}
   end
 
   def handle_params(params, _uri, socket) do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, _params) do
-    socket |> assign(:form, nil) |> assign(:current_collection, nil)
+  defp apply_action(socket, :index, params) do
+    page = parse_page(params["page"])
+
+    {collections, pagination} =
+      Repository.list_collections_pagination(page: page, per_page: 20)
+
+    collections = Kiroku.Repo.preload(collections, :community)
+
+    socket
+    |> assign(:form, nil)
+    |> assign(:current_collection, nil)
+    |> assign(:pagination, pagination)
+    |> stream(:collections, collections, reset: true)
   end
 
   defp apply_action(socket, :new, _params) do
@@ -228,5 +244,14 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
      socket
      |> put_flash(:info, "Collection deleted.")
      |> stream_delete(:collections, collection)}
+  end
+
+  defp parse_page(nil), do: 1
+
+  defp parse_page(p) do
+    case Integer.parse(p) do
+      {n, ""} when n > 0 -> n
+      _ -> 1
+    end
   end
 end

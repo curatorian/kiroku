@@ -7,6 +7,7 @@ defmodule Kiroku.Repository do
 
   import Ecto.Query
   alias Kiroku.Repo
+  alias Kiroku.Pagination
 
   alias Kiroku.Repository.{
     Community,
@@ -19,6 +20,43 @@ defmodule Kiroku.Repository do
     ItemTeamMember,
     ItemMetadata
   }
+
+  @item_preloads [
+    :submitter,
+    :item_keywords,
+    :item_authors,
+    :item_advisors,
+    :item_examiners,
+    :item_team_members,
+    {:bitstreams, from(b in Kiroku.Content.Bitstream, order_by: [b.bundle_name, b.sequence])},
+    :metadata_extras,
+    :collection
+  ]
+
+  # Fields needed for card/list displays. Using select: with this list avoids
+  # transferring 100+ columns (including massive abstracts) from the DB.
+  @item_display_fields [
+    :id,
+    :handle,
+    :legacy_id,
+    :title,
+    :abstract,
+    :item_type,
+    :faculty,
+    :program_study,
+    :department,
+    :student_id,
+    :student_name,
+    :status,
+    :access_level,
+    :publication_year,
+    :date_submitted,
+    :date_issued,
+    :published_at,
+    :inserted_at,
+    :collection_id,
+    :submitter_id
+  ]
 
   # ── Communities ─────────────────────────────────────────────────────────────
 
@@ -58,6 +96,32 @@ defmodule Kiroku.Repository do
       Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
 
     build_community_tree(communities, nil, 0)
+  end
+
+  @doc """
+  Paginated version of `list_communities_tree/0`.
+  Returns `{communities, %Pagination{}}` as a flat paginated list of active
+  communities (not a nested tree), ordered by position.
+  """
+  def list_communities_tree_pagination(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count =
+      Repo.one(from c in Community, where: c.is_active == true, select: count(c.id))
+
+    pagination = Pagination.build(count, page, per_page)
+
+    communities =
+      Repo.all(
+        from c in Community,
+          where: c.is_active == true,
+          order_by: c.position,
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination)
+      )
+
+    {communities, pagination}
   end
 
   defp build_community_tree(all, parent_id, depth) do
@@ -130,7 +194,7 @@ defmodule Kiroku.Repository do
     ordered_subq = from(c in Community, where: c.is_active == true, order_by: c.position)
 
     Repo.get_by!(Community, handle: handle)
-    |> Repo.preload(parent_community: :parent_community, subcommunities: ordered_subq)
+    |> Repo.preload(subcommunities: ordered_subq)
   end
 
   def get_community!(id), do: Repo.get!(Community, id)
@@ -140,6 +204,38 @@ defmodule Kiroku.Repository do
   def get_community_by_handle!(handle), do: Repo.get_by!(Community, handle: handle)
 
   def get_community_by_handle(handle), do: Repo.get_by(Community, handle: handle)
+
+  @doc """
+  Returns the full ancestor chain of a community as a list of maps,
+  ordered from root → … → current. Supports arbitrary hierarchy depth
+  via a recursive CTE — no Ecto preload depth limit.
+
+      [%{id: ..., name: "Root",   handle: "unpad-ta"},
+       %{id: ..., name: "Fakultas", handle: "fakultas-hukum"},
+       %{id: ..., name: "Sarjana",  handle: "hukum-s1"}]
+  """
+  def community_ancestor_chain(community_id) do
+    {:ok, uuid} = Ecto.UUID.dump(community_id)
+
+    {:ok, %{rows: rows}} =
+      Repo.query(
+        """
+        WITH RECURSIVE ancestors AS (
+          SELECT id, name, handle, parent_community_id, 0 AS depth
+          FROM communities
+          WHERE id = $1
+          UNION ALL
+          SELECT c.id, c.name, c.handle, c.parent_community_id, a.depth + 1
+          FROM communities c
+          JOIN ancestors a ON c.id = a.parent_community_id
+        )
+        SELECT id, name, handle FROM ancestors ORDER BY depth DESC
+        """,
+        [uuid]
+      )
+
+    Enum.map(rows, fn [id, name, handle] -> %{id: id, name: name, handle: handle} end)
+  end
 
   def create_community(attrs) do
     %Community{}
@@ -186,6 +282,61 @@ defmodule Kiroku.Repository do
     Repo.all(from c in Collection, order_by: c.name)
   end
 
+  @doc """
+  Paginated version of `list_collections/0`.
+  Returns `{collections, %Pagination{}}`.
+  """
+  def list_collections_pagination(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count = Repo.aggregate(Collection, :count, :id)
+    pagination = Pagination.build(count, page, per_page)
+
+    collections =
+      Repo.all(
+        from c in Collection,
+          order_by: c.name,
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination)
+      )
+
+    {collections, pagination}
+  end
+
+  @doc """
+  Returns all active collections in a single query (avoids N+1 when paired
+  with communities). Use `Enum.group_by(&1.community_id)` to associate them.
+  """
+  def list_active_collections do
+    Repo.all(
+      from c in Collection,
+        where: c.is_active == true,
+        order_by: c.position
+    )
+  end
+
+  @doc """
+  Returns all active communities with their active collections preloaded in
+  exactly two queries (regardless of community count).
+  """
+  def list_communities_with_collections do
+    communities = list_communities()
+
+    collections =
+      Repo.all(
+        from c in Collection,
+          where: c.is_active == true and c.community_id in ^Enum.map(communities, & &1.id),
+          order_by: c.position
+      )
+
+    grouped = Enum.group_by(collections, & &1.community_id)
+
+    Enum.map(communities, fn community ->
+      Map.put(community, :collections, Map.get(grouped, community.id, []))
+    end)
+  end
+
   def list_collections_for_community(community_id) do
     Repo.all(
       from c in Collection,
@@ -218,27 +369,32 @@ defmodule Kiroku.Repository do
 
   # ── Items ────────────────────────────────────────────────────────────────────
 
-  def get_item!(id), do: Repo.get!(Item, id)
+  def get_item!(id_or_handle) do
+    case Ecto.UUID.cast(id_or_handle) do
+      {:ok, _} -> Repo.get!(Item, id_or_handle)
+      :error -> Repo.get_by!(Item, handle: id_or_handle)
+    end
+  end
 
-  def get_item(id), do: Repo.get(Item, id)
+  def get_item(id_or_handle) do
+    case Ecto.UUID.cast(id_or_handle) do
+      {:ok, _} -> Repo.get(Item, id_or_handle)
+      :error -> Repo.get_by(Item, handle: id_or_handle)
+    end
+  end
 
   def get_item_by_handle!(handle), do: Repo.get_by!(Item, handle: handle)
 
   def get_item_by_handle(handle), do: Repo.get_by(Item, handle: handle)
 
-  def get_item_with_preloads!(id) do
-    Repo.get!(Item, id)
-    |> Repo.preload([
-      :collection,
-      :submitter,
-      :item_keywords,
-      :item_authors,
-      :item_advisors,
-      :item_examiners,
-      :item_team_members,
-      :bitstreams,
-      :metadata_extras
-    ])
+  def get_item_with_preloads!(id_or_handle) do
+    item =
+      case Ecto.UUID.cast(id_or_handle) do
+        {:ok, _} -> Repo.get!(Item, id_or_handle)
+        :error -> Repo.get_by!(Item, handle: id_or_handle)
+      end
+
+    Repo.preload(item, @item_preloads)
   end
 
   def list_items(%{} = filters) do
@@ -250,7 +406,118 @@ defmodule Kiroku.Repository do
         status -> from i in query, where: i.status == ^status
       end
 
+    query =
+      case Map.get(filters, :item_type) do
+        nil -> query
+        item_type -> from i in query, where: i.item_type == ^item_type
+      end
+
+    query =
+      case Map.get(filters, :search) do
+        nil ->
+          query
+
+        "" ->
+          query
+
+        search ->
+          search_term = "%#{search}%"
+
+          from i in query,
+            where:
+              ilike(i.title, ^search_term) or
+                ilike(i.handle, ^search_term) or
+                ilike(i.student_name, ^search_term)
+      end
+
     Repo.all(query)
+  end
+
+  @doc """
+  Lightweight version of `list_items/1` that selects only the fields needed
+  for card/list displays. Avoids transferring large text columns (abstracts,
+  type-specific fields) from the database.
+  """
+  def list_items_for_display(%{} = filters) do
+    filters
+    |> items_for_display_query()
+    |> Repo.all()
+  end
+
+  @doc """
+  Paginated version of `list_items_for_display/1`.
+
+  Returns `{items, %Pagination{}}`. The same filters map is accepted; page
+  and per_page are read from the keyword opts.
+
+  ## Options
+
+    * `:page` — page number (default 1)
+    * `:per_page` — items per page (default 20)
+
+  ## Example
+
+      {items, pagination} =
+        Repository.list_items_for_display_pagination(
+          %{status: :submitted, search: "thesis"},
+          page: 2, per_page: 15
+        )
+  """
+  def list_items_for_display_pagination(%{} = filters, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count =
+      filters
+      |> items_for_display_query()
+      |> Repo.aggregate(:count, :id)
+
+    pagination = Pagination.build(count, page, per_page)
+
+    items =
+      filters
+      |> items_for_display_query()
+      |> limit(^per_page)
+      |> offset(^Pagination.offset(pagination))
+      |> Repo.all()
+
+    {items, pagination}
+  end
+
+  defp items_for_display_query(%{} = filters) do
+    query =
+      from i in Item,
+        select: ^@item_display_fields,
+        order_by: [desc: i.inserted_at]
+
+    query =
+      case Map.get(filters, :status) do
+        nil -> query
+        status -> from i in query, where: i.status == ^status
+      end
+
+    query =
+      case Map.get(filters, :item_type) do
+        nil -> query
+        item_type -> from i in query, where: i.item_type == ^item_type
+      end
+
+    case Map.get(filters, :search) do
+      nil ->
+        query
+
+      "" ->
+        query
+
+      search ->
+        search_term = "%#{search}%"
+
+        from i in query,
+          where:
+            ilike(i.title, ^search_term) or
+              ilike(i.handle, ^search_term) or
+              ilike(i.student_name, ^search_term)
+    end
   end
 
   @doc """
@@ -290,6 +557,7 @@ defmodule Kiroku.Repository do
         where: i.status == :submitted,
         order_by: [asc: i.inserted_at],
         limit: ^limit,
+        select: ^@item_display_fields,
         preload: :submitter
     )
   end
@@ -302,7 +570,8 @@ defmodule Kiroku.Repository do
       from i in Item,
         where: i.status == :published,
         order_by: [desc: i.published_at],
-        limit: ^limit
+        limit: ^limit,
+        select: ^@item_display_fields
     )
   end
 
@@ -316,8 +585,39 @@ defmodule Kiroku.Repository do
         where: i.status == :published and i.discoverable == true,
         order_by: [desc: i.published_at],
         limit: ^per_page,
-        offset: ^offset
+        offset: ^offset,
+        select: ^@item_display_fields
     )
+  end
+
+  @doc """
+  Paginated version of `list_published_items/1`.
+  Returns `{items, %Pagination{}}`.
+  """
+  def list_published_items_pagination(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count =
+      Repo.one(
+        from i in Item,
+          where: i.status == :published and i.discoverable == true,
+          select: count(i.id)
+      )
+
+    pagination = Pagination.build(count, page, per_page)
+
+    items =
+      Repo.all(
+        from i in Item,
+          where: i.status == :published and i.discoverable == true,
+          order_by: [desc: i.published_at],
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination),
+          select: ^@item_display_fields
+      )
+
+    {items, pagination}
   end
 
   def list_items_for_collection(collection_id, opts \\ []) do
@@ -333,16 +633,84 @@ defmodule Kiroku.Repository do
             i.discoverable == true,
         order_by: [desc: i.published_at],
         limit: ^per_page,
-        offset: ^offset
+        offset: ^offset,
+        select: ^@item_display_fields
     )
+  end
+
+  @doc """
+  Paginated version of `list_items_for_collection/2`.
+  Returns `{items, %Pagination{}}`.
+  """
+  def list_items_for_collection_pagination(collection_id, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count =
+      Repo.one(
+        from i in Item,
+          where:
+            i.collection_id == ^collection_id and
+              i.status == :published and
+              i.discoverable == true,
+          select: count(i.id)
+      )
+
+    pagination = Pagination.build(count, page, per_page)
+
+    items =
+      Repo.all(
+        from i in Item,
+          where:
+            i.collection_id == ^collection_id and
+              i.status == :published and
+              i.discoverable == true,
+          order_by: [desc: i.published_at],
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination),
+          select: ^@item_display_fields
+      )
+
+    {items, pagination}
   end
 
   def list_items_by_submitter(user_id) do
     Repo.all(
       from i in Item,
         where: i.submitter_id == ^user_id,
-        order_by: [desc: i.inserted_at]
+        order_by: [desc: i.inserted_at],
+        select: ^@item_display_fields
     )
+  end
+
+  @doc """
+  Paginated version of `list_items_by_submitter/1`.
+  Returns `{items, %Pagination{}}`.
+  """
+  def list_items_by_submitter_pagination(user_id, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+
+    count =
+      Repo.one(
+        from i in Item,
+          where: i.submitter_id == ^user_id,
+          select: count(i.id)
+      )
+
+    pagination = Pagination.build(count, page, per_page)
+
+    items =
+      Repo.all(
+        from i in Item,
+          where: i.submitter_id == ^user_id,
+          order_by: [desc: i.inserted_at],
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination),
+          select: ^@item_display_fields
+      )
+
+    {items, pagination}
   end
 
   def count_items_for_collection(collection_id) do
@@ -381,7 +749,48 @@ defmodule Kiroku.Repository do
     |> order_by([i], desc: i.published_at)
     |> limit(^per_page)
     |> offset(^offset)
+    |> select([i], ^@item_display_fields)
     |> Repo.all()
+  end
+
+  @doc """
+  Paginated version of `search_items/1`.
+  Returns `{items, %Pagination{}}`. Accepts the same params map as `search_items/1`
+  (page and per_page are read from the map).
+  """
+  def search_items_pagination(%{} = params) do
+    term = Map.get(params, :term)
+    department = Map.get(params, :department)
+    faculty = Map.get(params, :faculty)
+    year = Map.get(params, :year)
+    item_type = Map.get(params, :item_type)
+    collection_id = Map.get(params, :collection_id)
+    page = Map.get(params, :page, 1)
+    per_page = Map.get(params, :per_page, 20)
+
+    base =
+      from(i in Item,
+        where: i.status == :published and i.discoverable == true
+      )
+      |> maybe_full_text_filter(term)
+      |> maybe_filter(:department, department)
+      |> maybe_filter(:faculty, faculty)
+      |> maybe_filter(:publication_year, year)
+      |> maybe_filter(:item_type, item_type)
+      |> maybe_filter(:collection_id, collection_id)
+
+    count = Repo.aggregate(base, :count, :id)
+    pagination = Pagination.build(count, page, per_page)
+
+    items =
+      base
+      |> order_by([i], desc: i.published_at)
+      |> limit(^per_page)
+      |> offset(^Pagination.offset(pagination))
+      |> select([i], ^@item_display_fields)
+      |> Repo.all()
+
+    {items, pagination}
   end
 
   defp maybe_full_text_filter(query, nil), do: query

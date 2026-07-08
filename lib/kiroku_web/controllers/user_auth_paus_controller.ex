@@ -56,8 +56,20 @@ defmodule KirokuWeb.UserAuthPausController do
     attrs = oauth_user_attrs(paus_profile)
 
     case Accounts.get_user_by_email(email) do
-      nil -> Accounts.create_user_from_oauth(attrs)
-      user -> {:ok, user}
+      nil ->
+        # New user → create then assign :internal role
+        with {:ok, user} <- Accounts.create_user_from_oauth(attrs),
+             {:ok, user} <- Accounts.assign_internal_role(user) do
+          {:ok, user}
+        end
+
+      %Kiroku.Accounts.User{user_type: :submitter} = user ->
+        # Default role → upgrade to :internal (PAuS = verified academic member)
+        Accounts.assign_internal_role(user)
+
+      user ->
+        # Has an assigned role (internal/reviewer/admin/superadmin) → leave as-is
+        {:ok, user}
     end
   end
 

@@ -65,8 +65,15 @@ defmodule KirokuWeb.UserRegistrationLive do
   end
 
   def mount(_params, _session, socket) do
-    changeset = Accounts.change_user_registration(%User{})
-    {:ok, assign(socket, form: to_form(changeset, as: :user))}
+    if Kiroku.Settings.allow_registration?() do
+      changeset = Accounts.change_user_registration(%User{})
+      {:ok, assign(socket, form: to_form(changeset, as: :user))}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Self-registration is disabled. Please sign in with PAuS.")
+       |> push_navigate(to: ~p"/users/log_in")}
+    end
   end
 
   def handle_event("validate", %{"user" => params}, socket) do
@@ -79,21 +86,31 @@ defmodule KirokuWeb.UserRegistrationLive do
   end
 
   def handle_event("save", %{"user" => params}, socket) do
-    case Accounts.register_user(params) do
-      {:ok, user} ->
-        {:ok, _} =
-          Accounts.deliver_user_confirmation_instructions(
-            user,
-            &url(~p"/users/confirm/#{&1}")
-          )
+    if not Kiroku.Settings.allow_registration?() do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Self-registration is disabled.")
+       |> push_navigate(to: ~p"/users/log_in")}
+    else
+      case Accounts.register_user(params) do
+        {:ok, user} ->
+          {:ok, _} =
+            Accounts.deliver_user_confirmation_instructions(
+              user,
+              &url(~p"/users/confirm/#{&1}")
+            )
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "Akun berhasil dibuat. Silakan periksa email Anda untuk konfirmasi.")
-         |> redirect(to: ~p"/users/log_in")}
+          {:noreply,
+           socket
+           |> put_flash(
+             :info,
+             "Akun berhasil dibuat. Silakan periksa email Anda untuk konfirmasi."
+           )
+           |> redirect(to: ~p"/users/log_in")}
 
-      {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset, as: :user))}
+        {:error, changeset} ->
+          {:noreply, assign(socket, form: to_form(changeset, as: :user))}
+      end
     end
   end
 end

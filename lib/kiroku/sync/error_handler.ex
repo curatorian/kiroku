@@ -342,7 +342,14 @@ defmodule Kiroku.Sync.ErrorHandler do
 
   defp format_datetime(nil), do: "Unknown"
 
-  defp format_datetime(dt) do
+  defp format_datetime(%NaiveDateTime{} = dt) do
+    dt
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.shift_zone!("Asia/Jakarta")
+    |> Calendar.strftime("%Y-%m-%d %H:%M:%S")
+  end
+
+  defp format_datetime(%DateTime{} = dt) do
     dt
     |> DateTime.shift_zone!("Asia/Jakarta")
     |> Calendar.strftime("%Y-%m-%d %H:%M:%S")

@@ -157,9 +157,9 @@ defmodule KirokuWeb.Router do
     end
   end
 
-  # MSSQL Sync management. Kept outside the KirokuWeb.Admin scope to avoid the
-  # module being aliased to KirokuWeb.Admin.AdminSyncLive. Staff (admin /
-  # superadmin) authorization is enforced inside AdminSyncLive.mount/3.
+  # MSSQL Sync + SAF import/export management. Kept outside the KirokuWeb.Admin
+  # scope to avoid the modules being aliased to KirokuWeb.Admin.*. Staff (admin /
+  # superadmin) authorization is enforced inside each LiveView's mount/3.
   #
   # IMPORTANT: the live_session + on_mount is what populates `current_user` in
   # the LiveView assigns. Without it, `socket.assigns[:current_user]` is nil and
@@ -170,6 +170,11 @@ defmodule KirokuWeb.Router do
     live_session :admin_sync,
       on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
       live "/sync", AdminSyncLive, :index
+    end
+
+    live_session :admin_saf,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      live "/saf", AdminSafLive, :index
     end
 
     # SAF export zip download (enforced in the controller for staff only).

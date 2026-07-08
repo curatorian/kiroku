@@ -2,7 +2,8 @@ defmodule Kiroku.Repo.Migrations.CreateSyncRuns do
   use Ecto.Migration
 
   def change do
-    create table(:sync_runs) do
+    create table(:sync_runs, primary_key: false) do
+      add :id, :binary_id, primary_key: true
       add :source_view, :string, null: false
       add :status, :string, null: false, default: "pending"
       add :started_at, :utc_datetime
@@ -24,8 +25,12 @@ defmodule Kiroku.Repo.Migrations.CreateSyncRuns do
     create index(:sync_runs, [:started_at])
 
     # Create a table to track individual record sync status
-    create table(:sync_record_tracking) do
-      add :sync_run_id, references(:sync_runs, on_delete: :delete_all), null: false
+    create table(:sync_record_tracking, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+
+      add :sync_run_id, references(:sync_runs, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :legacy_id, :string, null: false
       add :item_id, :binary_id
       # "inserted", "updated", "failed", "skipped"

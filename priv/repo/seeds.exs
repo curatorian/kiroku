@@ -92,3 +92,19 @@ Enum.each(brand_defaults, fn {key, value, description} ->
       IO.puts("  [seeds] Brand setting #{key} already exists, skipping.")
   end
 end)
+
+# ── Repository handle prefix seed ───────────────────────────────────────────
+
+case Settings.get("handle_prefix") do
+  nil ->
+    Settings.put(
+      "handle_prefix",
+      "kandaga",
+      "Prefix for DSpace-style handles (e.g. kandaga/12345)"
+    )
+
+    IO.puts("  [seeds] Set handle_prefix = kandaga")
+
+  existing ->
+    IO.puts("  [seeds] handle_prefix already set: #{existing}, skipping")
+end

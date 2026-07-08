@@ -421,4 +421,23 @@ h6 {
   padding: 1.5rem;
 }
 
+/* Toggleable community details */
+.community-toggle {
+  border: none;
+  padding: 0;
+}
+.community-toggle[open] > summary .toggle-icon {
+  transform: rotate(90deg);
+}
+.community-toggle summary {
+  list-style: none;
+  cursor: pointer;
+}
+.community-toggle summary::-webkit-details-marker {
+  display: none;
+}
+.toggle-icon {
+  transition: transform 0.2s ease;
+}
+
 /* This file is for your main application CSS */

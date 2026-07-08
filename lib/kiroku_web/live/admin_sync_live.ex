@@ -1,20 +1,22 @@
 defmodule KirokuWeb.AdminSyncLive do
   @moduledoc """
-  Staff dashboard for monitoring and triggering MSSQL sync/import jobs.
+  Staff dashboard for monitoring and triggering MSSQL sync jobs.
 
   Mounted at `/admin/sync`. Restricted to admins and superadmins. Shows live
   stats, recent runs, dead-letter queue, and exposes:
     - incremental sync per view (enqueues `MssqlSyncWorker`)
-    - full import per view / all views (enqueues `ImportWorker`)
-    - dry-run import (validate without persisting)
     - retry / resolve dead-letter records
+
+  Full imports are **not** exposed here — run them from the CLI with
+  `mix kiroku.import_from_mssql`. Runs triggered from the CLI still appear in
+  the monitoring tables below.
   """
 
   use KirokuWeb, :live_view
 
   alias Kiroku.{LegacyRepo, Repo, Sync}
   alias Kiroku.Sync.DeadLetterQueue
-  alias Kiroku.Workers.{ImportWorker, MssqlSyncWorker}
+  alias Kiroku.Workers.MssqlSyncWorker
   import Ecto.Query
 
   @refresh_interval_ms 5_000
@@ -22,20 +24,22 @@ defmodule KirokuWeb.AdminSyncLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Sync &amp; Import">
+    <Layouts.admin flash={@flash} current_scope={@current_user} page_title="Sync">
       <div class="space-y-8">
         <%!-- Header ──────────────────────────────────────────────────────── --%>
         <div class="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 class="font-heading text-3xl" style="color: var(--color-lilac);">
-              Sync &amp; Import
+              Sync
             </h1>
             <p class="font-body text-sm mt-1" style="color: var(--color-quill);">
-              Synchronize and import legacy records from MSSQL. Auto-refreshes every 5s while jobs run.
+              Synchronize legacy records from MSSQL (incremental). Full imports run from the CLI: <code>mix kiroku.import_from_mssql</code>.
             </p>
           </div>
           <div class="flex items-center gap-2">
-            {render_mssql_connection_status(assigns)}
+            <%= if @sync_enabled do %>
+              {render_mssql_connection_status(assigns)}
+            <% end %>
             <span
               :if={has_active_runs?(assigns)}
               class="text-xs px-2.5 py-1 rounded-full animate-pulse"
@@ -54,7 +58,7 @@ defmodule KirokuWeb.AdminSyncLive do
         </div>
 
         <%!-- Stats cards ────────────────────────────────────────────────── --%>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div :if={@sync_enabled} class="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <.sync_stat_card
             label="Total Runs"
             value={stat_value(@sync_stats, "total_runs")}
@@ -81,7 +85,7 @@ defmodule KirokuWeb.AdminSyncLive do
           />
         </div>
 
-        <div class="grid lg:grid-cols-2 gap-6">
+        <div :if={@sync_enabled} class="max-w-2xl">
           <%!-- Sync controls (incremental) ─────────────────────────────── --%>
           <div class="kiroku-card p-6 space-y-4">
             <div class="flex items-center gap-2">
@@ -114,239 +118,12 @@ defmodule KirokuWeb.AdminSyncLive do
               Sync all views
             </button>
           </div>
-
-          <%!-- Import controls (full) ──────────────────────────────────── --%>
-          <div class="kiroku-card p-6 space-y-4">
-            <div class="flex items-center gap-2">
-              <span style="color: var(--color-patchouli);">
-                <.icon name="hero-cloud-arrow-down" class="size-5" />
-              </span>
-              <h2 class="font-heading text-lg" style="color: var(--color-lilac);">
-                Full Import
-              </h2>
-            </div>
-            <p class="text-xs" style="color: var(--color-quill);">
-              Re-processes <strong>every</strong>
-              record in a view. Use for initial loads or forcing re-sync.
-            </p>
-
-            <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                phx-click="toggle_dry_run"
-                phx-value-dry_run={!@dry_run}
-                checked={@dry_run}
-                class="h-4 w-4 rounded"
-                style="accent-color: var(--color-patchouli);"
-              />
-              <span class="text-sm" style="color: var(--color-wisteria);">
-                Dry run (validate only — no writes)
-              </span>
-            </label>
-
-            <div class="grid grid-cols-2 gap-2">
-              <button
-                :for={{view, _type} <- @views}
-                phx-click="trigger_import"
-                phx-value-view={view}
-                class={[
-                  "px-3 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-95 border",
-                  if(@dry_run,
-                    do: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-                    else: "bg-purple-500/15 text-purple-300 border-purple-500/30"
-                  )
-                ]}
-              >
-                {view}
-              </button>
-            </div>
-            <button
-              phx-click="trigger_import_all"
-              class={[
-                "w-full px-3 py-2 rounded-lg text-sm font-semibold transition-all hover:brightness-110 active:scale-95",
-                if(@dry_run,
-                  do: "bg-amber-500 text-white",
-                  else: "bg-purple-500 text-white"
-                )
-              ]}
-            >
-              {if(@dry_run, do: "Dry-run import all views", else: "Import all views")}
-            </button>
-          </div>
-        </div>
-
-        <%!-- DSpace SAF export / import ─────────────────────────────────── --%>
-        <div class="grid lg:grid-cols-2 gap-6">
-          <%!-- SAF Export ─────────────────────────────────────────────── --%>
-          <div class="kiroku-card p-6 space-y-4">
-            <div class="flex items-center gap-2">
-              <span style="color: var(--color-patchouli);">
-                <.icon name="hero-arrow-up-tray" class="size-5" />
-              </span>
-              <h2 class="font-heading text-lg" style="color: var(--color-lilac);">
-                DSpace SAF Export
-              </h2>
-            </div>
-            <p class="text-xs" style="color: var(--color-quill);">
-              Export a collection to a downloadable DSpace Simple Archive zip (metadata + files).
-            </p>
-
-            <form phx-change="saf_select_collection" class="space-y-3">
-              <label class="block text-xs uppercase tracking-wider" style="color: var(--color-quill);">
-                Collection
-              </label>
-              <select name="collection" class="kiroku-search-input w-full">
-                <option value="">— Select collection —</option>
-                <option
-                  :for={{name, handle} <- @collections}
-                  value={handle}
-                  selected={handle == @saf_collection}
-                >
-                  {name}
-                </option>
-              </select>
-            </form>
-
-            <div class="flex gap-2">
-              <button
-                phx-click="saf_export"
-                phx-value-collection={@saf_collection}
-                phx-value-scope="published"
-                disabled={@saf_collection == ""}
-                class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                style="background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25);"
-              >
-                Export published
-              </button>
-              <button
-                phx-click="saf_export"
-                phx-value-collection={@saf_collection}
-                phx-value-scope="all"
-                disabled={@saf_collection == ""}
-                class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                style="background: rgba(155,126,200,0.15); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.25);"
-              >
-                Export all
-              </button>
-            </div>
-          </div>
-
-          <%!-- SAF Import ─────────────────────────────────────────────── --%>
-          <div class="kiroku-card p-6 space-y-4">
-            <div class="flex items-center gap-2">
-              <span style="color: var(--color-patchouli);">
-                <.icon name="hero-arrow-down-tray" class="size-5" />
-              </span>
-              <h2 class="font-heading text-lg" style="color: var(--color-lilac);">
-                DSpace SAF Import
-              </h2>
-            </div>
-            <p class="text-xs" style="color: var(--color-quill);">
-              Upload a SAF zip. Items are upserted by handle (re-importing updates existing items).
-            </p>
-
-            <form phx-submit="saf_import" phx-change="saf_validate" class="space-y-3">
-              <.live_file_input upload={@uploads.saf_archive} class="hidden" />
-
-              <div
-                :for={entry <- @uploads.saf_archive.entries}
-                class="flex items-center justify-between px-3 py-2 rounded-lg"
-                style="background: rgba(155,126,200,0.08);"
-              >
-                <span class="text-sm truncate" style="color: var(--color-lilac);">
-                  {entry.client_name}
-                </span>
-                <button
-                  type="button"
-                  phx-click="saf_cancel_upload"
-                  phx-value-ref={entry.ref}
-                  class="text-xs px-2"
-                  style="color: var(--color-ribbon-red);"
-                >
-                  <.icon name="hero-x-mark" class="size-4" />
-                </button>
-              </div>
-
-              <label class="block text-xs uppercase tracking-wider" style="color: var(--color-quill);">
-                Override collection (optional)
-              </label>
-              <select
-                name="collection"
-                class="kiroku-search-input w-full"
-                phx-change="saf_select_collection"
-              >
-                <option value="">— Use archive's collections file —</option>
-                <option
-                  :for={{name, handle} <- @collections}
-                  value={handle}
-                  selected={handle == @saf_collection}
-                >
-                  {name}
-                </option>
-              </select>
-
-              <label class="flex items-center gap-2.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  phx-click="saf_toggle_import_dry_run"
-                  phx-value-dry_run={!@saf_import_dry_run}
-                  checked={@saf_import_dry_run}
-                  class="h-4 w-4 rounded"
-                  style="accent-color: var(--color-patchouli);"
-                />
-                <span class="text-sm" style="color: var(--color-wisteria);">
-                  Dry run (validate only)
-                </span>
-              </label>
-
-              <button
-                type="submit"
-                class="w-full px-3 py-2 rounded-lg text-sm font-semibold transition-all hover:brightness-110 active:scale-95"
-                style="background: var(--color-patchouli); color: white;"
-              >
-                {if(@saf_import_dry_run, do: "Dry-run import", else: "Import archive")}
-              </button>
-            </form>
-          </div>
-        </div>
-
-        <%!-- Available SAF exports (download links) ─────────────────────── --%>
-        <div :if={@saf_exports != []} class="kiroku-card overflow-hidden">
-          <div class="p-5" style="border-bottom: 1px solid rgba(155,126,200,0.12);">
-            <h2 class="font-heading text-base" style="color: var(--color-wisteria);">
-              Exported Archives
-            </h2>
-          </div>
-          <ul>
-            <li
-              :for={exp <- @saf_exports}
-              class="flex items-center justify-between px-5 py-3"
-              style="border-top: 1px solid rgba(155,126,200,0.08);"
-            >
-              <div class="min-w-0">
-                <p class="text-sm font-medium truncate" style="color: var(--color-lilac);">
-                  {Path.basename(exp.path)}
-                </p>
-                <p class="text-xs" style="color: var(--color-quill);">
-                  {format_file_size(exp.size)}
-                </p>
-              </div>
-              <.link
-                href={~p"/admin/saf/download/#{exp.job_id}"}
-                download
-                class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors hover:brightness-110"
-                style="background: rgba(16,185,129,0.15); color: #6ee7b7;"
-              >
-                <.icon name="hero-arrow-down-tray" class="size-3.5" /> Download
-              </.link>
-            </li>
-          </ul>
         </div>
 
         <%!-- MSSQL Connection Status ─────────────────────────────────────── --%>
-        <div class="kiroku-card p-6 space-y-4">
+        <div :if={@sync_enabled} class="kiroku-card p-6 space-y-4">
           <div class="flex items-center gap-2">
-            {render_connection_icon(assigns.mssql_connection_status)}
+            {render_connection_icon(assigns)}
             <h2 class="font-heading text-lg" style="color: var(--color-lilac);">
               MSSQL Connection Status
             </h2>
@@ -358,12 +135,12 @@ defmodule KirokuWeb.AdminSyncLive do
             <p class="text-xs" style="color: var(--color-quill);">
               {@mssql_connection_status.details}
             </p>
-            {render_connection_details(assigns.mssql_connection_status)}
+            {render_connection_details(assigns)}
           </div>
         </div>
 
         <%!-- Per-view statistics ────────────────────────────────────────── --%>
-        <div class="kiroku-card overflow-hidden">
+        <div :if={@sync_enabled} class="kiroku-card overflow-hidden">
           <div class="p-5" style="border-bottom: 1px solid rgba(155,126,200,0.12);">
             <h2 class="font-heading text-base" style="color: var(--color-wisteria);">
               Per-View Statistics
@@ -411,7 +188,7 @@ defmodule KirokuWeb.AdminSyncLive do
         </div>
 
         <%!-- Recent runs ─────────────────────────────────────────────────── --%>
-        <div class="kiroku-card overflow-hidden">
+        <div :if={@sync_enabled} class="kiroku-card overflow-hidden">
           <div class="p-5" style="border-bottom: 1px solid rgba(155,126,200,0.12);">
             <h2 class="font-heading text-base" style="color: var(--color-wisteria);">
               Recent Runs
@@ -608,16 +385,7 @@ defmodule KirokuWeb.AdminSyncLive do
     if staff?(socket) do
       socket =
         socket
-        |> allow_upload(:saf_archive,
-          accept: ~w(.zip),
-          max_entries: 1,
-          max_file_size: 500_000_000,
-          auto_upload: false
-        )
         |> assign_sync_data()
-        |> assign(:dry_run, false)
-        |> assign(:saf_collection, "")
-        |> assign(:saf_import_dry_run, false)
         |> schedule_refresh()
 
       {:ok, socket}
@@ -637,119 +405,32 @@ defmodule KirokuWeb.AdminSyncLive do
     {:noreply, assign_sync_data(socket)}
   end
 
-  def handle_event("toggle_dry_run", %{"dry_run" => dry_run?}, socket) do
-    {:noreply, assign(socket, :dry_run, dry_run? == "true")}
-  end
-
   # ── Incremental sync (manual) ──────────────────────────────────────────────
 
   def handle_event("trigger_sync", %{"view" => view}, socket) do
-    enqueue_job(MssqlSyncWorker, %{"view" => view}, socket, "Sync queued for #{view}")
+    if Kiroku.Sync.enabled?() do
+      enqueue_job(MssqlSyncWorker, %{"view" => view}, socket, "Sync queued for #{view}")
+    else
+      {:noreply, put_flash(socket, :error, "MSSQL is not configured.")}
+    end
   end
 
   def handle_event("trigger_sync_all", _, socket) do
-    Kiroku.Sync.Importer.views()
-    |> Enum.each(fn {view, _} ->
-      %{view: view, triggered_by: triggered_by(socket)}
-      |> MssqlSyncWorker.new()
-      |> Oban.insert()
-    end)
+    if Kiroku.Sync.enabled?() do
+      Kiroku.Sync.Importer.views()
+      |> Enum.each(fn {view, _} ->
+        %{view: view, triggered_by: triggered_by(socket)}
+        |> MssqlSyncWorker.new()
+        |> Oban.insert()
+      end)
 
-    {:noreply,
-     socket
-     |> put_flash(:info, "Sync queued for all views.")
-     |> assign_sync_data()
-     |> schedule_refresh()}
-  end
-
-  # ── Full import ────────────────────────────────────────────────────────────
-
-  def handle_event("trigger_import", %{"view" => view}, socket) do
-    args = %{
-      "view" => view,
-      "dry_run" => socket.assigns.dry_run,
-      "triggered_by" => triggered_by(socket)
-    }
-
-    enqueue_job(ImportWorker, args, socket, import_flash(socket, view))
-  end
-
-  def handle_event("trigger_import_all", _, socket) do
-    args = %{
-      "view" => "all",
-      "dry_run" => socket.assigns.dry_run,
-      "triggered_by" => triggered_by(socket)
-    }
-
-    enqueue_job(ImportWorker, args, socket, import_flash(socket, "all views"))
-  end
-
-  # ── DSpace SAF export / import ─────────────────────────────────────────────
-
-  def handle_event("saf_export", %{"collection" => collection_handle, "scope" => scope}, socket) do
-    args = %{
-      "target" => "collection",
-      "id" => collection_handle,
-      "only" => scope,
-      "triggered_by" => triggered_by(socket)
-    }
-
-    enqueue_job(
-      Kiroku.Workers.SafExportWorker,
-      args,
-      socket,
-      "SAF export queued — the zip will appear below when ready."
-    )
-  end
-
-  def handle_event("saf_select_collection", %{"collection" => handle}, socket) do
-    {:noreply, assign(socket, :saf_collection, handle)}
-  end
-
-  def handle_event("saf_toggle_import_dry_run", %{"dry_run" => dry?}, socket) do
-    {:noreply, assign(socket, :saf_import_dry_run, dry? == "true")}
-  end
-
-  def handle_event("saf_validate", _params, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_event("saf_cancel_upload", %{"ref" => ref}, socket) do
-    {:noreply, cancel_upload(socket, :saf_archive, ref)}
-  end
-
-  def handle_event("saf_import", _params, socket) do
-    case consume_uploaded_entries(socket, :saf_archive, fn %{path: path}, _entry ->
-           # Move the upload into a stable location the worker can read.
-           dest = Path.join(Kiroku.Saf.imports_dir(), "#{Ecto.UUID.generate()}.zip")
-           File.mkdir_p!(Kiroku.Saf.imports_dir())
-           File.cp!(path, dest)
-           {:ok, dest}
-         end) do
-      [source] ->
-        args = %{
-          "source" => source,
-          "dry_run" => socket.assigns.saf_import_dry_run,
-          "triggered_by" => triggered_by(socket)
-        }
-
-        args =
-          if socket.assigns.saf_collection != "",
-            do: Map.put(args, "collection", socket.assigns.saf_collection),
-            else: args
-
-        enqueue_job(
-          Kiroku.Workers.SafImportWorker,
-          args,
-          socket,
-          if(socket.assigns.saf_import_dry_run,
-            do: "SAF dry-run import queued.",
-            else: "SAF import queued — check item counts after it completes."
-          )
-        )
-
-      [] ->
-        {:noreply, put_flash(socket, :error, "Choose a SAF zip file first.")}
+      {:noreply,
+       socket
+       |> put_flash(:info, "Sync queued for all views.")
+       |> assign_sync_data()
+       |> schedule_refresh()}
+    else
+      {:noreply, put_flash(socket, :error, "MSSQL is not configured.")}
     end
   end
 
@@ -824,24 +505,36 @@ defmodule KirokuWeb.AdminSyncLive do
   # ── Data loading ───────────────────────────────────────────────────────────
 
   defp assign_sync_data(socket) do
-    stats = Sync.get_sync_stats()
-    recent_runs = Sync.list_sync_runs(limit: 15)
-    failed_records = recent_failed_records(recent_runs)
-    dead_letter_queue = unresolved_dead_letters(50)
-    mssql_connection_status = check_mssql_connection()
+    sync_enabled = Kiroku.Sync.enabled?()
+
+    socket =
+      if sync_enabled do
+        stats = Sync.get_sync_stats()
+        recent_runs = Sync.list_sync_runs(limit: 15)
+        failed_records = recent_failed_records(recent_runs)
+        dead_letter_queue = unresolved_dead_letters(50)
+        mssql_connection_status = check_mssql_connection()
+
+        assign(socket, %{
+          sync_stats: stats,
+          recent_runs: recent_runs,
+          failed_records: failed_records,
+          dead_letter_queue: dead_letter_queue,
+          mssql_connection_status: mssql_connection_status
+        })
+      else
+        assign(socket, %{
+          sync_stats: %{},
+          recent_runs: [],
+          failed_records: [],
+          dead_letter_queue: [],
+          mssql_connection_status: %{status: :disabled, message: "MSSQL not configured"}
+        })
+      end
 
     assign(socket, %{
-      sync_stats: stats,
-      recent_runs: recent_runs,
-      failed_records: failed_records,
-      dead_letter_queue: dead_letter_queue,
-      views: Kiroku.Sync.Importer.views(),
-      collections:
-        Repo.all(
-          from c in Kiroku.Repository.Collection, order_by: c.name, select: {c.name, c.handle}
-        ),
-      saf_exports: Kiroku.Saf.list_exports(),
-      mssql_connection_status: mssql_connection_status
+      sync_enabled: sync_enabled,
+      views: Kiroku.Sync.Importer.views()
     })
   end
 
@@ -892,10 +585,15 @@ defmodule KirokuWeb.AdminSyncLive do
   end
 
   defp recent_failed_records(sync_runs) do
-    sync_runs
-    |> Enum.filter(&(&1.status == "failed" or &1.records_failed > 0))
-    |> Enum.flat_map(fn run -> Sync.list_failed_records(run.id, limit: 5) end)
-    |> Enum.take(20)
+    failed_runs =
+      Enum.filter(sync_runs, &(&1.status == "failed" or &1.records_failed > 0))
+
+    if failed_runs == [] do
+      []
+    else
+      run_ids = Enum.map(failed_runs, & &1.id)
+      Sync.list_failed_records_for_runs(run_ids, 20)
+    end
   end
 
   defp unresolved_dead_letters(limit) do
@@ -936,17 +634,18 @@ defmodule KirokuWeb.AdminSyncLive do
     end
   end
 
-  defp import_flash(socket, target) do
-    if socket.assigns.dry_run,
-      do: "Dry-run import queued for #{target} (nothing will be written).",
-      else: "Full import queued for #{target}."
-  end
-
   # ── Render helpers ─────────────────────────────────────────────────────────
 
   def format_datetime(nil), do: "Never"
 
-  def format_datetime(dt) do
+  def format_datetime(%NaiveDateTime{} = dt) do
+    dt
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.shift_zone!("Asia/Jakarta")
+    |> Calendar.strftime("%Y-%m-%d %H:%M:%S")
+  end
+
+  def format_datetime(%DateTime{} = dt) do
     dt
     |> DateTime.shift_zone!("Asia/Jakarta")
     |> Calendar.strftime("%Y-%m-%d %H:%M:%S")
@@ -1054,7 +753,7 @@ defmodule KirokuWeb.AdminSyncLive do
   defp tint_fg("red"), do: "color: var(--color-ribbon-red);"
   defp tint_fg(_), do: "color: var(--color-lavender);"
 
-  defp render_mssql_connection_status(%{assigns: assigns}) do
+  defp render_mssql_connection_status(assigns) do
     status = assigns.mssql_connection_status
 
     case status.status do
@@ -1093,7 +792,7 @@ defmodule KirokuWeb.AdminSyncLive do
     end
   end
 
-  defp render_connection_icon(%{assigns: assigns}) do
+  defp render_connection_icon(assigns) do
     connection_status = assigns.mssql_connection_status
 
     case connection_status.status do
@@ -1120,7 +819,7 @@ defmodule KirokuWeb.AdminSyncLive do
     end
   end
 
-  defp render_connection_details(%{assigns: assigns}) do
+  defp render_connection_details(assigns) do
     connection_status = assigns.mssql_connection_status
 
     if connection_status.status == :connected do

@@ -1,8 +1,11 @@
 defmodule KirokuWeb.Admin.UserLive.Index do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.KirokuComponents
+
   alias Kiroku.Accounts
   alias Kiroku.Accounts.User
+  alias Kiroku.Pagination
 
   @user_types_all ~w(submitter reviewer admin superadmin)
   @user_types_admin ~w(submitter reviewer)
@@ -162,6 +165,12 @@ defmodule KirokuWeb.Admin.UserLive.Index do
             </tbody>
           </table>
         </div>
+
+        <.pagination
+          pagination={@pagination}
+          path="/admin/users"
+          params={%{"type" => if(@filter != "all", do: @filter)}}
+        />
       </div>
 
       <%!-- New User Modal --%>
@@ -227,24 +236,28 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   # ── Mount & params ───────────────────────────────────────────────────────────
 
   def mount(_params, _session, socket) do
-    users = Accounts.list_users_with_policies()
-
     {:ok,
      socket
-     |> assign(:total_users, length(users))
+     |> assign(:total_users, 0)
      |> assign(:filter, "all")
+     |> assign(:pagination, Pagination.build(0, 1, 20))
      |> assign(:available_types, available_types_for(socket.assigns.current_user))
      |> assign(:form, nil)
-     |> stream(:users, users)}
+     |> stream(:users, [])}
   end
 
   def handle_params(params, _uri, socket) do
     filter = Map.get(params, "type", "all")
-    users = filtered_users(filter)
+    page = parse_page(params["page"])
+
+    {users, pagination} =
+      Accounts.list_users_with_policies_pagination(type: filter, page: page, per_page: 20)
 
     socket =
       socket
+      |> assign(:total_users, pagination.total_count)
       |> assign(:filter, filter)
+      |> assign(:pagination, pagination)
       |> stream(:users, users, reset: true)
       |> apply_action(socket.assigns.live_action, params)
 
@@ -322,23 +335,18 @@ defmodule KirokuWeb.Admin.UserLive.Index do
 
   defp role_options_for(_), do: []
 
-  defp filtered_users("all"), do: Accounts.list_users_with_policies()
-
-  defp filtered_users(type) when type in @user_types_all do
-    import Ecto.Query
-
-    Kiroku.Repo.all(
-      from u in User,
-        where: u.user_type == ^String.to_existing_atom(type),
-        order_by: [asc: u.email]
-    )
-  end
-
-  defp filtered_users(_), do: Accounts.list_users_with_policies()
-
   defp role_badge_class(:superadmin), do: "submitted"
   defp role_badge_class(:admin), do: "under-review"
   defp role_badge_class(:reviewer), do: "embargoed"
   defp role_badge_class(:submitter), do: "draft"
   defp role_badge_class(_), do: "draft"
+
+  defp parse_page(nil), do: 1
+
+  defp parse_page(p) do
+    case Integer.parse(p) do
+      {n, ""} when n > 0 -> n
+      _ -> 1
+    end
+  end
 end

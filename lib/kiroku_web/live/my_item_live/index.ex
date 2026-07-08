@@ -1,9 +1,12 @@
 defmodule KirokuWeb.MyItemLive.Index do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.KirokuComponents
+
   alias Kiroku.Repository
   alias Kiroku.Repository.Item
   alias Kiroku.Access.Authorization
+  alias Kiroku.Pagination
 
   @item_types ~w(skripsi memorandum_hukum studi_kasus laporan_proyek karya_kreatif karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone)
 
@@ -52,18 +55,108 @@ defmodule KirokuWeb.MyItemLive.Index do
             id={id}
             class="kiroku-card p-5 flex items-start gap-4 mb-3"
           >
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 space-y-2">
               <div class="flex items-center gap-2 mb-1.5 flex-wrap">
                 <span class="badge-item-type">{item.item_type}</span>
                 <span class={["status-badge", to_string(item.status)]}>{item.status}</span>
                 <%= if item.publication_year do %>
-                  <span class="text-xs" style="color: var(--color-quill);">
+                  <span
+                    class="text-xs px-2 py-0.5 rounded-full"
+                    style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+                  >
                     {item.publication_year}
                   </span>
                 <% end %>
               </div>
-              <p class="font-body text-base" style="color: var(--color-lilac);">{item.title}</p>
-              <p class="kiroku-handle mt-1">{item.handle || item.id}</p>
+              <p class="font-body text-base font-medium" style="color: var(--color-lilac);">
+                {item.title}
+              </p>
+              <p class="kiroku-handle text-xs">{item.handle || item.id}</p>
+
+              <%!-- Abstract (truncated) --%>
+              <%= if item.abstract do %>
+                <% abstract_text = item.abstract
+
+                truncated_abstract =
+                  if String.length(abstract_text) > 120 do
+                    String.slice(abstract_text, 0, 117) <> "..."
+                  else
+                    abstract_text
+                  end %>
+                <p
+                  class="text-sm leading-relaxed line-clamp-2"
+                  style="color: var(--color-quill);"
+                >
+                  {truncated_abstract}
+                </p>
+              <% end %>
+
+              <%!-- Author information --%>
+              <%= if item.student_name do %>
+                <div class="flex items-center gap-2">
+                  <div
+                    class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold"
+                    style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+                  >
+                    {String.first(item.student_name)}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-xs truncate" style="color: var(--color-wisteria);">
+                      {item.student_name}
+                    </p>
+                    <%= if item.student_id do %>
+                      <p class="font-mono text-[10px] truncate" style="color: var(--color-quill);">
+                        NPM: {item.student_id}
+                      </p>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+
+              <%!-- Academic information --%>
+              <div class="flex flex-wrap gap-1.5 text-[10px]" style="color: var(--color-quill);">
+                <%= if item.program_study do %>
+                  <span class="px-1.5 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+                    {item.program_study}
+                  </span>
+                <% end %>
+                <%= if item.faculty do %>
+                  <span class="px-1.5 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+                    {item.faculty}
+                  </span>
+                <% end %>
+              </div>
+
+              <%!-- Date information --%>
+              <%= if not is_nil(item.date_submitted) or not is_nil(item.published_at) or not is_nil(item.inserted_at) do %>
+                <% display_date =
+                  cond do
+                    not is_nil(item.date_submitted) -> item.date_submitted
+                    not is_nil(item.published_at) -> item.published_at
+                    not is_nil(item.inserted_at) -> item.inserted_at
+                    true -> nil
+                  end
+
+                date_label =
+                  cond do
+                    not is_nil(item.date_submitted) -> "Submitted"
+                    not is_nil(item.published_at) -> "Published"
+                    not is_nil(item.inserted_at) -> "Created"
+                    true -> ""
+                  end %>
+                <%= if display_date do %>
+                  <div class="flex items-center gap-1.5">
+                    <.icon
+                      name="hero-calendar"
+                      class="w-3 h-3 shrink-0"
+                      style="color: var(--color-dust);"
+                    />
+                    <span class="font-mono text-[10px]" style="color: var(--color-dust);">
+                      {date_label}: {Calendar.strftime(display_date, "%d %b %Y")}
+                    </span>
+                  </div>
+                <% end %>
+              <% end %>
             </div>
             <div class="flex items-center gap-2 shrink-0">
               <%= if item.status in [:draft, :submitted] do %>
@@ -97,6 +190,8 @@ defmodule KirokuWeb.MyItemLive.Index do
             </div>
           </div>
         </div>
+
+        <.pagination pagination={@pagination} path="/my/items" params={%{}} />
       </div>
     </Layouts.app>
     """
@@ -184,7 +279,6 @@ defmodule KirokuWeb.MyItemLive.Index do
 
   def mount(_params, _session, socket) do
     user = socket.assigns.current_user
-    items = Repository.list_items_by_submitter(user.id)
     collections = list_all_collections()
     can_submit = Kiroku.Settings.allow_user_submit?() or staff?(user)
 
@@ -195,18 +289,27 @@ defmodule KirokuWeb.MyItemLive.Index do
      |> assign(:current_item, nil)
      |> assign(:can_submit, can_submit)
      |> assign(:form, nil)
-     |> stream(:items, items)}
+     |> assign(:pagination, Pagination.build(0, 1, 20))
+     |> stream(:items, [])}
   end
 
   def handle_params(params, _uri, socket) do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, _params) do
+  defp apply_action(socket, :index, params) do
+    user = socket.assigns.current_user
+    page = parse_page(params["page"])
+
+    {items, pagination} =
+      Repository.list_items_by_submitter_pagination(user.id, page: page, per_page: 20)
+
     socket
     |> assign(:page_title, "My Items")
     |> assign(:form, nil)
     |> assign(:current_item, nil)
+    |> assign(:pagination, pagination)
+    |> stream(:items, items, reset: true)
   end
 
   defp apply_action(socket, :new, _params) do
@@ -310,12 +413,18 @@ defmodule KirokuWeb.MyItemLive.Index do
   end
 
   defp list_all_collections do
-    Repository.list_communities()
-    |> Enum.flat_map(fn community ->
-      Repository.list_collections_for_community(community.id)
-    end)
+    Repository.list_active_collections()
   end
 
   defp staff?(%{user_type: type}) when type in [:admin, :superadmin], do: true
   defp staff?(_), do: false
+
+  defp parse_page(nil), do: 1
+
+  defp parse_page(p) do
+    case Integer.parse(p) do
+      {n, ""} when n > 0 -> n
+      _ -> 1
+    end
+  end
 end

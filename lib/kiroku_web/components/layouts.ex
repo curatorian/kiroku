@@ -188,12 +188,21 @@ defmodule KirokuWeb.Layouts do
             match="Users"
           />
           <%= if @current_scope && @current_scope.user_type in [:admin, :superadmin] do %>
+            <%= if Kiroku.Sync.enabled?() do %>
+              <.admin_nav_item
+                icon="hero-arrow-path"
+                label="Sync"
+                href={~p"/admin/sync"}
+                current_path={@page_title}
+                match="Sync"
+              />
+            <% end %>
             <.admin_nav_item
-              icon="hero-arrow-path"
-              label="Sync & Import"
-              href={~p"/admin/sync"}
+              icon="hero-archive-box-arrow-down"
+              label="SAF Import/Export"
+              href={~p"/admin/saf"}
               current_path={@page_title}
-              match="Sync"
+              match="SAF"
             />
           <% end %>
           <div class="admin-sidebar-divider" />

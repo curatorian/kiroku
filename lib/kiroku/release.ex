@@ -1,0 +1,62 @@
+defmodule Kiroku.Release do
+  @moduledoc """
+  Helpers for executing release-time tasks (migrations, rollbacks, seeds)
+  without starting the endpoint or the full supervision tree.
+
+  These are invoked by the overlay scripts shipped in the release:
+
+      bin/migrate
+      bin/seeds
+
+  They run against the runtime configuration (config/runtime.exs), so the
+  same environment variables required to boot the app — `DATABASE_URL`,
+  `SECRET_KEY_BASE`, etc. — must be present when invoking them.
+  """
+
+  @app :kiroku
+
+  @doc """
+  Runs all pending migrations for every configured repo.
+  """
+  def migrate do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+    end
+  end
+
+  @doc """
+  Rolls back the given repo to a specific version.
+
+      bin/kiroku eval "Kiroku.Release.rollback(Kiroku.Repo, 20250101000005)"
+  """
+  def rollback(repo, version) do
+    load_app()
+    {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
+  end
+
+  @doc """
+  Ensures all migrations are applied, then loads the seed script
+  (`priv/repo/seeds.exs`). Safe to run repeatedly — seeds are idempotent.
+  """
+  def seeds do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(repo, fn repo ->
+          Ecto.Migrator.run(repo, :up, all: true)
+
+          seed_script = Path.join([:code.priv_dir(@app), "repo", "seeds.exs"])
+
+          if File.exists?(seed_script) do
+            Code.eval_file(seed_script)
+          end
+        end)
+    end
+  end
+
+  defp repos, do: Application.fetch_env!(@app, :ecto_repos)
+  defp load_app, do: Application.load(@app)
+end

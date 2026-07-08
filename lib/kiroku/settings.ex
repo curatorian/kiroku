@@ -273,4 +273,41 @@ defmodule Kiroku.Settings do
   the `allow_user_submit` setting, defaulting to `false`.
   """
   def allow_user_submit?, do: get("allow_user_submit", "false") == "true"
+
+  @doc """
+  Returns whether self-registration is allowed.
+  When false, the standard email/password registration form is disabled.
+  PAuS OAuth login always works regardless of this setting.
+  Defaults to true.
+  """
+  def allow_registration?, do: get("allow_registration", "true") == "true"
+
+  # ── Repository handle ────────────────────────────────────────────────────────
+
+  @doc """
+  Returns the handle prefix for this repository (e.g. "kandaga").
+  Used when constructing item, community, and collection handles during import.
+  Defaults to "kandaga".
+  """
+  def handle_prefix, do: get("handle_prefix", "kandaga")
+
+  @doc """
+  Returns the list of bitstream descriptions that are globally locked
+  (e.g. ["Bab 2", "Bab 3"]). Locked files are visible only to :internal
+  users and staff. Returns [] when unset.
+  """
+  def locked_bitstream_descriptions do
+    get("locked_bitstream_descriptions", "")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+  end
+
+  @doc "Sets the locked bitstream descriptions from a list."
+  def put_locked_bitstream_descriptions(descriptions) when is_list(descriptions) do
+    put(
+      "locked_bitstream_descriptions",
+      Enum.join(descriptions, ","),
+      "Bitstream descriptions locked from public view (visible to internal + staff)"
+    )
+  end
 end

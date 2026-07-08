@@ -11,6 +11,8 @@ defmodule KirokuWeb.Admin.SettingsLive do
     embargo = Settings.embargo_settings()
     mailer = Settings.mailer_settings()
     allow_submit = Settings.allow_user_submit?()
+    allow_reg = Settings.allow_registration?()
+    locked_descs = Settings.locked_bitstream_descriptions()
 
     socket =
       socket
@@ -22,6 +24,8 @@ defmodule KirokuWeb.Admin.SettingsLive do
       |> assign(:mailer_adapter, mailer.provider)
       |> assign(:mailer_form, to_form(mailer_form_params(mailer), as: :mailer))
       |> assign(:allow_submit, allow_submit)
+      |> assign(:allow_registration, allow_reg)
+      |> assign(:locked_descriptions, locked_descs)
 
     {:ok, socket}
   end
@@ -247,6 +251,17 @@ defmodule KirokuWeb.Admin.SettingsLive do
               placeholder="https://… (leave blank to use the text wordmark)"
             />
 
+            <.input
+              field={@brand_form[:handle_prefix]}
+              type="text"
+              label="Handle Prefix"
+              placeholder="kandaga"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Used for DSpace-style handles (e.g. <code>kandaga/12345</code>). Default: <code>kandaga</code>.
+              Affects newly imported items and communities.
+            </p>
+
             <%!-- Brand colour picker --%>
             <div>
               <label
@@ -346,14 +361,28 @@ defmodule KirokuWeb.Admin.SettingsLive do
         <div id="submission-settings" class="kiroku-card p-6 space-y-5">
           <div>
             <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">
-              User Submissions
+              Users & Access
             </h2>
             <p class="text-xs mt-1" style="color: var(--color-quill);">
-              Control whether regular users can submit new items. Staff (admins) can always create items.
+              Control self-registration and item submission. PAuS login always works regardless of these settings.
             </p>
           </div>
 
           <.form for={nil} id="submission-form" phx-submit="save_submission" class="space-y-4">
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                name="submission[allow_registration]"
+                value="true"
+                checked={@allow_registration}
+                class="h-5 w-5 rounded"
+                style="accent-color: var(--color-patchouli);"
+              />
+              <span class="text-sm" style="color: var(--color-wisteria);">
+                Allow self-registration (email/password)
+              </span>
+            </label>
+
             <label class="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -375,6 +404,70 @@ defmodule KirokuWeb.Admin.SettingsLive do
                 style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
               >
                 <.icon name="hero-arrow-down-tray" class="size-4" /> Save
+              </button>
+            </div>
+          </.form>
+        </div>
+
+        <%!-- File Access Control --%>
+        <div id="file-access-settings" class="kiroku-card p-6 space-y-5">
+          <div>
+            <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">
+              File Access Control
+            </h2>
+            <p class="text-xs mt-1" style="color: var(--color-quill);">
+              Toggle which file types are locked from public view.
+              Locked files are visible to <strong>internal</strong> users (students/lecturers)
+              and staff. Applies globally to all items.
+            </p>
+          </div>
+
+          <.form for={nil} id="file-access-form" phx-submit="save_file_locks" class="space-y-3">
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <%= for desc <- ["Bab 1", "Bab 2", "Bab 3", "Bab 4", "Bab 5", "Bab 6", "Abstract", "Daftar isi", "Daftar pustaka", "Lampiran", "Lembar pengesahan", "Surat pengantar", "Full text"] do %>
+                <% checked = desc in @locked_descriptions %>
+                <label
+                  class={[
+                    "flex items-center gap-2 p-2.5 rounded-lg cursor-pointer text-sm transition-colors",
+                    if checked do
+                      "text-white"
+                    else
+                      ""
+                    end
+                  ]}
+                  style={
+                    if checked,
+                      do: "background: rgba(196,65,90,0.15); border: 1px solid rgba(196,65,90,0.3);",
+                      else:
+                        "background: rgba(155,126,200,0.08); border: 1px solid rgba(155,126,200,0.15);"
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    name="locked[]"
+                    value={desc}
+                    checked={checked}
+                    class="h-4 w-4 rounded"
+                    style="accent-color: var(--color-ribbon-red);"
+                  />
+                  <span style={
+                    if checked,
+                      do: "color: var(--color-ribbon-red);",
+                      else: "color: var(--color-wisteria);"
+                  }>
+                    {desc}
+                  </span>
+                </label>
+              <% end %>
+            </div>
+
+            <div class="pt-1">
+              <button
+                type="submit"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-150 hover:brightness-110 active:scale-95"
+                style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" /> Save Locks
               </button>
             </div>
           </.form>
@@ -495,7 +588,8 @@ defmodule KirokuWeb.Admin.SettingsLive do
       {"brand_description", params["description"]},
       {"brand_contact_email", params["contact_email"]},
       {"brand_contact_phone", params["contact_phone"]},
-      {"brand_logo_url", params["logo_url"]}
+      {"brand_logo_url", params["logo_url"]},
+      {"handle_prefix", params["handle_prefix"]}
     ]
 
     # Prefer the text field value over the color picker (both send the same name;
@@ -605,18 +699,49 @@ defmodule KirokuWeb.Admin.SettingsLive do
   @impl true
   def handle_event("save_submission", %{"submission" => params}, socket) do
     allowed = params["allow_user_submit"] == "true"
+    reg = params["allow_registration"] == "true"
+
     Settings.put("allow_user_submit", if(allowed, do: "true", else: "false"))
+    Settings.put("allow_registration", if(reg, do: "true", else: "false"))
+
+    messages =
+      []
+      |> Kernel.++(
+        if reg, do: ["Self-registration enabled."], else: ["Self-registration disabled."]
+      )
+      |> Kernel.++(
+        if allowed, do: ["User submissions enabled."], else: ["User submissions disabled."]
+      )
 
     {:noreply,
      socket
      |> assign(:allow_submit, allowed)
+     |> assign(:allow_registration, reg)
+     |> put_flash(:info, Enum.join(messages, " "))}
+  end
+
+  @impl true
+  def handle_event("save_file_locks", %{"locked" => locked}, socket) do
+    descriptions = if is_list(locked), do: locked, else: [locked]
+    Settings.put_locked_bitstream_descriptions(descriptions)
+
+    {:noreply,
+     socket
+     |> assign(:locked_descriptions, descriptions)
      |> put_flash(
        :info,
-       if(allowed,
-         do: "User submissions enabled.",
-         else: "User submissions disabled."
-       )
+       "File access controls saved. #{length(descriptions)} file type(s) locked."
      )}
+  end
+
+  @impl true
+  def handle_event("save_file_locks", _params, socket) do
+    Settings.put_locked_bitstream_descriptions([])
+
+    {:noreply,
+     socket
+     |> assign(:locked_descriptions, [])
+     |> put_flash(:info, "All file locks cleared.")}
   end
 
   @impl true
@@ -678,6 +803,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
       "contact_email" => brand.contact_email || "",
       "contact_phone" => brand.contact_phone || "",
       "logo_url" => brand.logo_url || "",
+      "handle_prefix" => Settings.handle_prefix(),
       "primary_color" => brand.primary_color || "#7B4FA6"
     }
   end

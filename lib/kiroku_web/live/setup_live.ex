@@ -99,6 +99,15 @@ defmodule KirokuWeb.SetupLive do
               placeholder="repository@university.ac.id"
             />
             <.input field={@brand_form[:contact_phone]} type="text" label="Contact phone" />
+            <.input
+              field={@brand_form[:handle_prefix]}
+              type="text"
+              label="Handle prefix"
+              placeholder="kandaga"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Used for DSpace-style handles, e.g. <code>kandaga/12345</code>. Default: <code>kandaga</code>.
+            </p>
             <.step_actions back_event="back_brand" next_label="Continue →" />
           </.form>
         <% @step == :storage -> %>
@@ -388,6 +397,7 @@ defmodule KirokuWeb.SetupLive do
     put_if_present("brand_description", params["description"])
     put_if_present("brand_contact_email", params["contact_email"])
     put_if_present("brand_contact_phone", params["contact_phone"])
+    put_if_present("handle_prefix", params["handle_prefix"])
     put_if_present("brand_logo_url", params["logo_url"])
     put_if_present("brand_primary_color", params["primary_color"])
   end
@@ -433,6 +443,7 @@ defmodule KirokuWeb.SetupLive do
       "description" => brand.description || "",
       "contact_email" => brand.contact_email || "",
       "contact_phone" => brand.contact_phone || "",
+      "handle_prefix" => Settings.handle_prefix(),
       "logo_url" => brand.logo_url || "",
       "primary_color" => brand.primary_color || "#7B4FA6"
     }

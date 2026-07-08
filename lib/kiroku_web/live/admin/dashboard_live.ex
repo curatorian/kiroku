@@ -195,9 +195,10 @@ defmodule KirokuWeb.Admin.DashboardLive do
               >
                 <%= for item <- @pending_items do %>
                   <div class="p-4 flex items-start gap-4">
-                    <div class="flex-1 min-w-0">
+                    <div class="flex-1 min-w-0 space-y-2">
                       <div class="flex items-center gap-2 mb-1 flex-wrap">
                         <span class="badge-item-type text-xs">{item.item_type}</span>
+                        <span class="status-badge text-xs submitted">submitted</span>
                         <%= if item.faculty do %>
                           <span
                             class="font-ui text-xs px-2 py-0.5 rounded"
@@ -210,14 +211,85 @@ defmodule KirokuWeb.Admin.DashboardLive do
                       <p class="font-body text-sm font-medium" style="color: var(--color-lilac);">
                         {item.title}
                       </p>
-                      <div class="flex items-center gap-3 mt-1">
-                        <%= if item.submitter do %>
-                          <span class="font-ui text-xs" style="color: var(--color-quill);">
-                            {item.submitter.display_name || item.submitter.email}
+
+                      <%!-- Abstract (truncated) --%>
+                      <%= if item.abstract do %>
+                        <% abstract_text = item.abstract
+
+                        truncated_abstract =
+                          if String.length(abstract_text) > 100 do
+                            String.slice(abstract_text, 0, 97) <> "..."
+                          else
+                            abstract_text
+                          end %>
+                        <p
+                          class="text-xs leading-relaxed line-clamp-2"
+                          style="color: var(--color-quill);"
+                        >
+                          {truncated_abstract}
+                        </p>
+                      <% end %>
+
+                      <%!-- Author information --%>
+                      <%= if item.student_name do %>
+                        <div class="flex items-center gap-2">
+                          <div
+                            class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold"
+                            style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+                          >
+                            {String.first(item.student_name)}
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <p
+                              class="font-medium text-xs truncate"
+                              style="color: var(--color-wisteria);"
+                            >
+                              {item.student_name}
+                            </p>
+                            <%= if item.student_id do %>
+                              <p
+                                class="font-mono text-[10px] truncate"
+                                style="color: var(--color-quill);"
+                              >
+                                NPM: {item.student_id}
+                              </p>
+                            <% end %>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%!-- Academic information --%>
+                      <div
+                        class="flex flex-wrap gap-1.5 text-[10px]"
+                        style="color: var(--color-quill);"
+                      >
+                        <%= if item.program_study do %>
+                          <span
+                            class="px-1.5 py-0.5 rounded"
+                            style="background: rgba(155,126,200,0.06);"
+                          >
+                            {item.program_study}
                           </span>
                         <% end %>
-                        <span class="font-ui text-xs" style="color: var(--color-quill);">
-                          {Calendar.strftime(item.inserted_at, "%d %b %Y")}
+                        <%= if item.submitter do %>
+                          <span
+                            class="px-1.5 py-0.5 rounded"
+                            style="background: rgba(155,126,200,0.06);"
+                          >
+                            by {item.submitter.display_name || item.submitter.email}
+                          </span>
+                        <% end %>
+                      </div>
+
+                      <%!-- Date information --%>
+                      <div class="flex items-center gap-1.5">
+                        <.icon
+                          name="hero-calendar"
+                          class="w-3 h-3 shrink-0"
+                          style="color: var(--color-dust);"
+                        />
+                        <span class="font-mono text-[10px]" style="color: var(--color-dust);">
+                          Created: {Calendar.strftime(item.inserted_at, "%d %b %Y")}
                         </span>
                       </div>
                     </div>
@@ -292,50 +364,55 @@ defmodule KirokuWeb.Admin.DashboardLive do
             </div>
 
             <%!-- Sync Health ─────────────────────────────────────────────── --%>
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
-                  Sync Health
-                </h2>
+            <%= if @sync_health do %>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
+                    Sync Health
+                  </h2>
+                  <.link
+                    navigate={~p"/admin/sync"}
+                    class="text-xs font-medium transition-colors hover:text-white"
+                    style="color: var(--color-lavender);"
+                  >
+                    Manage →
+                  </.link>
+                </div>
                 <.link
                   navigate={~p"/admin/sync"}
-                  class="text-xs font-medium transition-colors hover:text-white"
-                  style="color: var(--color-lavender);"
+                  class="kiroku-card p-4 block transition-colors hover:border-purple-500/40"
                 >
-                  Manage →
+                  <div class="space-y-2">
+                    <div
+                      :for={entry <- @sync_health.entries}
+                      class="flex items-center justify-between"
+                    >
+                      <span class="text-xs" style="color: var(--color-quill);">
+                        {entry.view}
+                      </span>
+                      <span class="flex items-center gap-1.5">
+                        <span
+                          class="w-2 h-2 rounded-full"
+                          style={sync_dot_style(entry)}
+                        />
+                        <span class="text-xs" style="color: var(--color-quill);">
+                          {sync_relative(entry)}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                  <%= if @sync_health.dead_letter_count > 0 do %>
+                    <p
+                      class="text-xs mt-3 pt-3"
+                      style="color: var(--color-ribbon-red); border-top: 1px solid rgba(196,65,90,0.2);"
+                    >
+                      <.icon name="hero-exclamation-triangle" class="size-3.5 inline" />
+                      {@sync_health.dead_letter_count} record(s) need attention
+                    </p>
+                  <% end %>
                 </.link>
               </div>
-              <.link
-                navigate={~p"/admin/sync"}
-                class="kiroku-card p-4 block transition-colors hover:border-purple-500/40"
-              >
-                <div class="space-y-2">
-                  <div :for={entry <- @sync_health.entries} class="flex items-center justify-between">
-                    <span class="text-xs" style="color: var(--color-quill);">
-                      {entry.view}
-                    </span>
-                    <span class="flex items-center gap-1.5">
-                      <span
-                        class="w-2 h-2 rounded-full"
-                        style={sync_dot_style(entry)}
-                      />
-                      <span class="text-xs" style="color: var(--color-quill);">
-                        {sync_relative(entry)}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-                <%= if @sync_health.dead_letter_count > 0 do %>
-                  <p
-                    class="text-xs mt-3 pt-3"
-                    style="color: var(--color-ribbon-red); border-top: 1px solid rgba(196,65,90,0.2);"
-                  >
-                    <.icon name="hero-exclamation-triangle" class="size-3.5 inline" />
-                    {@sync_health.dead_letter_count} record(s) need attention
-                  </p>
-                <% end %>
-              </.link>
-            </div>
+            <% end %>
 
             <%!-- Recently Published --%>
             <div class="space-y-3">
@@ -356,13 +433,67 @@ defmodule KirokuWeb.Admin.DashboardLive do
                       <div class="flex items-center gap-1.5 mb-1">
                         <span class="badge-item-type text-xs">{item.item_type}</span>
                       </div>
-                      <p class="font-body text-xs line-clamp-2" style="color: var(--color-lilac);">
+                      <p
+                        class="font-body text-xs font-medium line-clamp-2"
+                        style="color: var(--color-lilac);"
+                      >
                         {item.title}
                       </p>
+
+                      <%!-- Author information --%>
+                      <%= if item.student_name do %>
+                        <div class="flex items-center gap-1.5 mt-1">
+                          <div
+                            class="w-4 h-4 rounded-full flex items-center justify-center shrink-0 text-[8px] font-bold"
+                            style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+                          >
+                            {String.first(item.student_name)}
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <p
+                              class="font-medium text-[10px] truncate"
+                              style="color: var(--color-wisteria);"
+                            >
+                              {item.student_name}
+                            </p>
+                            <%= if item.student_id do %>
+                              <p
+                                class="font-mono text-[8px] truncate"
+                                style="color: var(--color-quill);"
+                              >
+                                NPM: {item.student_id}
+                              </p>
+                            <% end %>
+                          </div>
+                        </div>
+                      <% end %>
+
+                      <%!-- Academic information --%>
+                      <div
+                        class="flex flex-wrap gap-1 mt-1 text-[8px]"
+                        style="color: var(--color-quill);"
+                      >
+                        <%= if item.program_study do %>
+                          <span
+                            class="px-1 py-0.5 rounded"
+                            style="background: rgba(155,126,200,0.06);"
+                          >
+                            {item.program_study}
+                          </span>
+                        <% end %>
+                      </div>
+
                       <%= if item.published_at do %>
-                        <p class="font-ui text-xs mt-1" style="color: var(--color-quill);">
-                          {Calendar.strftime(item.published_at, "%d %b %Y")}
-                        </p>
+                        <div class="flex items-center gap-1 mt-1">
+                          <.icon
+                            name="hero-calendar"
+                            class="w-2.5 h-2.5 shrink-0"
+                            style="color: var(--color-dust);"
+                          />
+                          <span class="font-mono text-[8px]" style="color: var(--color-dust);">
+                            {Calendar.strftime(item.published_at, "%d %b %Y")}
+                          </span>
+                        </div>
                       <% end %>
                     </.link>
                   <% end %>
@@ -385,7 +516,8 @@ defmodule KirokuWeb.Admin.DashboardLive do
      |> assign(:stats, Map.put(stats, :users, user_count))
      |> assign(:pending_items, Repository.list_pending_items(10))
      |> assign(:recent_published, Repository.list_recent_published(5))
-     |> assign(:sync_health, sync_health_summary())}
+     |> assign(:sync_enabled, Kiroku.Sync.enabled?())
+     |> assign(:sync_health, maybe_sync_health())}
   end
 
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
@@ -393,14 +525,25 @@ defmodule KirokuWeb.Admin.DashboardLive do
   # Compact sync health summary for the dashboard widget. Returns one entry
   # per legacy view with its latest run status, plus the unresolved dead-letter
   # count surfaced once (on the first entry / as a separate field).
+  # Returns nil when MSSQL sync is not configured.
+  defp maybe_sync_health do
+    if Kiroku.Sync.enabled?(), do: sync_health_summary(), else: nil
+  end
+
   defp sync_health_summary do
     import Ecto.Query
 
     views = Kiroku.Sync.Importer.views()
 
+    latest_runs =
+      views
+      |> Enum.map(fn {view, _} -> to_string(view) end)
+      |> Kiroku.Sync.get_latest_sync_runs()
+      |> Enum.group_by(& &1.source_view)
+
     entries =
       Enum.map(views, fn {view, _} ->
-        run = Kiroku.Sync.get_latest_sync_run(view)
+        run = Map.get(latest_runs, to_string(view), []) |> List.first()
 
         %{
           view: view,

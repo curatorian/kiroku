@@ -1,21 +1,50 @@
 defmodule KirokuWeb.CollectionLive.Show do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.KirokuPublicComponents
+  import KirokuWeb.KirokuComponents
+
   alias Kiroku.Repository
+  alias Kiroku.Pagination
 
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
     collection = Repository.get_collection_by_handle!(handle)
     collection = Kiroku.Repo.preload(collection, :community)
-    items = Repository.list_items_for_collection(collection.id)
     item_count = Repository.count_items_for_collection(collection.id)
+    ancestor_chain = Repository.community_ancestor_chain(collection.community_id)
 
     {:ok,
      socket
      |> assign(:page_title, "#{collection.name} — Kiroku")
      |> assign(:collection, collection)
+     |> assign(:item_count, item_count)
+     |> assign(:ancestor_chain, ancestor_chain)
+     |> assign(:items, [])
+     |> assign(:pagination, Pagination.build(item_count, 1, 20))}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    collection = socket.assigns.collection
+    page = parse_page(params["page"])
+
+    {items, pagination} =
+      Repository.list_items_for_collection_pagination(collection.id, page: page, per_page: 20)
+
+    {:noreply,
+     socket
      |> assign(:items, items)
-     |> assign(:item_count, item_count)}
+     |> assign(:pagination, pagination)}
+  end
+
+  defp parse_page(nil), do: 1
+
+  defp parse_page(p) do
+    case Integer.parse(p) do
+      {n, ""} when n > 0 -> n
+      _ -> 1
+    end
   end
 
   @impl true
@@ -23,19 +52,24 @@ defmodule KirokuWeb.CollectionLive.Show do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
       <div class="space-y-8">
-        <%!-- Breadcrumb --%>
-        <nav class="flex items-center gap-2 text-sm" style="color: var(--color-quill);">
-          <.link navigate={~p"/communities"} class="hover:text-white transition-colors">
+        <%!-- Breadcrumb (full hierarchy via recursive CTE) --%>
+        <nav class="flex items-center gap-1.5 text-xs flex-wrap" style="color: var(--color-quill);">
+          <.link
+            navigate={~p"/communities"}
+            class="hover:text-[var(--color-patchouli)] transition-colors"
+          >
             Communities
           </.link>
-          <span>/</span>
-          <.link
-            navigate={~p"/communities/#{@collection.community.handle}"}
-            class="hover:text-white transition-colors"
-          >
-            {@collection.community.name}
-          </.link>
-          <span>/</span>
+          <%= for ancestor <- @ancestor_chain do %>
+            <.icon name="hero-chevron-right" class="w-3 h-3 shrink-0 opacity-50" />
+            <.link
+              navigate={~p"/communities/#{ancestor.handle}"}
+              class="hover:text-[var(--color-patchouli)] transition-colors"
+            >
+              {ancestor.name}
+            </.link>
+          <% end %>
+          <.icon name="hero-chevron-right" class="w-3 h-3 shrink-0 opacity-50" />
           <span style="color: var(--color-wisteria);">{@collection.name}</span>
         </nav>
 
@@ -74,38 +108,15 @@ defmodule KirokuWeb.CollectionLive.Show do
           <% else %>
             <div class="space-y-3">
               <%= for item <- @items do %>
-                <.link
-                  navigate={~p"/items/#{item.handle}"}
-                  class="kiroku-card p-5 flex items-start gap-4 hover:border-purple-500/40 transition-colors group block"
-                >
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1.5">
-                      <span class="badge-item-type">{item.item_type}</span>
-                      <%= if item.publication_year do %>
-                        <span class="text-xs" style="color: var(--color-quill);">
-                          {item.publication_year}
-                        </span>
-                      <% end %>
-                    </div>
-                    <h3
-                      class="font-body text-base leading-snug group-hover:text-white transition-colors"
-                      style="color: var(--color-lilac);"
-                    >
-                      {item.title}
-                    </h3>
-                    <%= if item.department do %>
-                      <p class="text-xs mt-1" style="color: var(--color-quill);">
-                        {item.department}
-                      </p>
-                    <% end %>
-                  </div>
-                  <.icon
-                    name="hero-chevron-right"
-                    class="w-4 h-4 shrink-0 mt-1 text-[var(--color-quill)]"
-                  />
-                </.link>
+                <.item_card item={item} />
               <% end %>
             </div>
+
+            <.pagination
+              pagination={@pagination}
+              path="/collections/#{@collection.handle}"
+              params={%{}}
+            />
           <% end %>
         </div>
       </div>

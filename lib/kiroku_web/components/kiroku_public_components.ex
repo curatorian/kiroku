@@ -9,6 +9,7 @@ defmodule KirokuWeb.KirokuPublicComponents do
   use Gettext, backend: KirokuWeb.Gettext
 
   import KirokuWeb.KirokuComponents
+  import KirokuWeb.CoreComponents, only: [icon: 1]
 
   # ── Item Card ─────────────────────────────────────────────────────────────
 
@@ -29,31 +30,115 @@ defmodule KirokuWeb.KirokuPublicComponents do
   def item_card(assigns) do
     ~H"""
     <.link
-      navigate={@navigate || "/items/#{@item.id}"}
+      navigate={@navigate || "/items/#{@item.handle}"}
       class="kiroku-card p-4 flex gap-4 items-start block transition-all duration-200"
       style="text-decoration: none;"
       onmouseover="this.style.borderColor='rgba(155,126,200,0.35)'; this.style.boxShadow='0 0 20px rgba(123,79,166,0.15)'"
       onmouseout="this.style.borderColor=''; this.style.boxShadow=''"
     >
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+      <div class="min-w-0 flex-1 space-y-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <.item_type_badge type={@item.item_type} />
           <.status_badge status={@item.status} />
+          <%= if @item.publication_year do %>
+            <span
+              class="text-xs px-2 py-0.5 rounded-full"
+              style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+            >
+              {@item.publication_year}
+            </span>
+          <% end %>
         </div>
+
         <p class="font-heading text-base leading-snug" style="color: var(--color-wisteria);">
           {@item.title}
         </p>
-        <%= if @item[:authors] && @item.authors != [] do %>
-          <p class="font-body text-xs mt-1" style="color: var(--color-quill);">
-            {Enum.join(Enum.take(@item.authors, 3), "; ")}
+
+        <%!-- Abstract (truncated) --%>
+        <%= if @item.abstract do %>
+          <% abstract_text = @item.abstract
+
+          truncated_abstract =
+            if String.length(abstract_text) > 150 do
+              String.slice(abstract_text, 0, 147) <> "..."
+            else
+              abstract_text
+            end %>
+          <p
+            class="text-sm leading-relaxed line-clamp-2"
+            style="color: var(--color-quill);"
+          >
+            {truncated_abstract}
           </p>
         <% end %>
+
+        <%!-- Author information --%>
+        <%= if @item.student_name do %>
+          <div class="flex items-center gap-2">
+            <div
+              class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold"
+              style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+            >
+              {String.first(@item.student_name)}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-medium text-sm truncate" style="color: var(--color-wisteria);">
+                {@item.student_name}
+              </p>
+              <%= if @item.student_id do %>
+                <p class="font-mono text-xs truncate" style="color: var(--color-quill);">
+                  NPM: {@item.student_id}
+                </p>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+
+        <%!-- Academic information --%>
+        <div class="flex flex-wrap gap-2 text-xs" style="color: var(--color-quill);">
+          <%= if @item.program_study do %>
+            <span class="px-2 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+              {@item.program_study}
+            </span>
+          <% end %>
+          <%= if @item.faculty do %>
+            <span class="px-2 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+              {@item.faculty}
+            </span>
+          <% end %>
+        </div>
+
+        <%!-- Date information --%>
+        <%= if not is_nil(@item.date_submitted) or not is_nil(@item.published_at) or not is_nil(@item.inserted_at) do %>
+          <% display_date =
+            cond do
+              not is_nil(@item.date_submitted) -> @item.date_submitted
+              not is_nil(@item.published_at) -> @item.published_at
+              not is_nil(@item.inserted_at) -> @item.inserted_at
+              true -> nil
+            end
+
+          date_label =
+            cond do
+              not is_nil(@item.date_submitted) -> "Submitted"
+              not is_nil(@item.published_at) -> "Published"
+              not is_nil(@item.inserted_at) -> "Created"
+              true -> ""
+            end %>
+          <%= if display_date do %>
+            <div class="flex items-center gap-1.5">
+              <.icon
+                name="hero-calendar"
+                class="w-3.5 h-3.5 shrink-0"
+                style="color: var(--color-dust);"
+              />
+              <span class="font-mono text-xs" style="color: var(--color-dust);">
+                {date_label}: {Calendar.strftime(display_date, "%d %b %Y")}
+              </span>
+            </div>
+          <% end %>
+        <% end %>
       </div>
-      <%= if @item[:published_at] do %>
-        <span class="font-body text-xs shrink-0 mt-0.5" style="color: var(--color-quill);">
-          {Calendar.strftime(@item.published_at, "%b %Y")}
-        </span>
-      <% end %>
     </.link>
     """
   end
@@ -89,7 +174,7 @@ defmodule KirokuWeb.KirokuPublicComponents do
             {@community.name}
           </p>
           <p class="kiroku-handle text-xs mt-0.5">{@community.handle}</p>
-          <%= if @community[:short_description] do %>
+          <%= if @community.short_description do %>
             <p class="font-body text-xs mt-2 line-clamp-2" style="color: var(--color-quill);">
               {@community.short_description}
             </p>
@@ -124,7 +209,7 @@ defmodule KirokuWeb.KirokuPublicComponents do
     >
       <p class="font-heading text-base" style="color: var(--color-lilac);">{@collection.name}</p>
       <p class="kiroku-handle text-xs mt-1">{@collection.handle}</p>
-      <%= if @collection[:description] do %>
+      <%= if @collection.description do %>
         <p class="font-body text-xs mt-2 line-clamp-2" style="color: var(--color-quill);">
           {@collection.description}
         </p>
