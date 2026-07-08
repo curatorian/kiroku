@@ -42,90 +42,234 @@
     </div>
   </section>
 
-  <%!-- Communities --%>
+  <%!-- Browse Collections --%>
   <%= if @communities != [] do %>
-    <section class="py-12 px-4">
-      <div class="max-w-5xl mx-auto space-y-6">
-        <div class="flex items-baseline justify-between">
-          <h2 class="font-heading text-2xl" style="color: var(--color-lilac);">
+    <section class="py-20 px-4 relative overflow-hidden">
+      <%!-- Decorative dotted background --%>
+      <div
+        class="absolute inset-0 opacity-[0.03] pointer-events-none"
+        style="background-image: radial-gradient(var(--color-patchouli) 1.5px, transparent 1.5px); background-size: 28px 28px;"
+      >
+      </div>
+
+      <div class="max-w-5xl mx-auto space-y-10 relative z-10">
+        <%!-- Section header --%>
+        <div class="text-center space-y-3">
+          <div
+            class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full"
+            style="background: rgba(123,79,166,0.12); border: 1px solid rgba(123,79,166,0.2);"
+          >
+            <.icon name="hero-square-3-stack-3d" class="w-4 h-4 text-[var(--color-patchouli)]" />
+            <span
+              class="text-xs font-semibold uppercase tracking-wider"
+              style="color: var(--color-patchouli);"
+            >
+              Explore
+            </span>
+          </div>
+          <h2
+            class="font-heading text-3xl sm:text-4xl font-bold"
+            style="color: var(--color-lilac);"
+          >
             Browse Collections
           </h2>
-          <.link
-            navigate={~p"/communities"}
-            class="text-sm font-medium"
-            style="color: var(--color-lavender);"
-          >
-            View all →
-          </.link>
+          <p class="text-sm max-w-md mx-auto" style="color: var(--color-quill);">
+            Navigate through faculties, degree programs, and academic departments
+          </p>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        <%!-- Community cards --%>
+        <div class="space-y-4">
           <%= for community <- @communities do %>
-            <.link
-              navigate={~p"/communities/#{community.handle}"}
-              class="kiroku-card-raised p-5 block"
-            >
-              <div class="flex items-start gap-3">
-                <span class="kiroku-kanji text-3xl shrink-0" style="opacity: 0.4;">記</span>
-                <div class="min-w-0">
-                  <p class="font-heading text-base truncate" style="color: var(--color-lilac);">
+            <% coll_count =
+              length(community.collections) +
+                Enum.reduce(community.subcommunities, 0, fn s, acc ->
+                  acc + length(s.collections)
+                end) %>
+            <div class="kiroku-card-raised overflow-hidden transition-all duration-200">
+              <%!-- Community header --%>
+              <.link
+                navigate={~p"/communities/#{community.handle}"}
+                class="p-5 sm:p-6 flex items-center gap-4 block group"
+                style="text-decoration: none;"
+              >
+                <div
+                  class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110"
+                  style="background: linear-gradient(135deg, rgba(123,79,166,0.3), rgba(123,79,166,0.12)); color: var(--color-patchouli);"
+                >
+                  <.icon name="hero-academic-cap" class="w-6 h-6 sm:w-7 sm:h-7" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p
+                    class="font-heading text-lg sm:text-xl font-semibold transition-colors"
+                    style="color: var(--color-lilac);"
+                  >
                     {community.name}
                   </p>
-                  <p class="kiroku-handle text-xs mt-0.5">{community.handle}</p>
-                  <%= if community.short_description do %>
-                    <p
-                      class="font-body text-xs mt-2 line-clamp-2"
-                      style="color: var(--color-quill);"
+                  <div class="flex items-center gap-2 mt-1 flex-wrap">
+                    <p class="kiroku-handle text-xs">{community.handle}</p>
+                    <span
+                      class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                      style="background: rgba(123,79,166,0.1); color: var(--color-patchouli);"
                     >
-                      {community.short_description}
-                    </p>
+                      {coll_count} collections
+                    </span>
+                    <%= if community.subcommunities != [] do %>
+                      <span
+                        class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                        style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+                      >
+                        {length(community.subcommunities)} subcommunit{if length(
+                                                                            community.subcommunities
+                                                                          ) == 1,
+                                                                          do: "y",
+                                                                          else: "ies"}
+                      </span>
+                    <% end %>
+                  </div>
+                </div>
+                <div
+                  class="shrink-0 transition-transform duration-200 group-hover:translate-x-1"
+                  style="color: var(--color-quill);"
+                >
+                  <.icon name="hero-chevron-right" class="w-5 h-5" />
+                </div>
+              </.link>
+
+              <%!-- Direct collections (pills) --%>
+              <%= if community.collections != [] do %>
+                <div class="px-5 sm:px-6 pb-3 flex flex-wrap gap-2">
+                  <%= for collection <- community.collections do %>
+                    <.link
+                      navigate={~p"/collections/#{collection.handle}"}
+                      class="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 hover:scale-105"
+                      style="background: rgba(123,79,166,0.08); border: 1px solid rgba(123,79,166,0.15); color: var(--color-wisteria); text-decoration: none;"
+                    >
+                      <.icon
+                        name="hero-folder-open"
+                        class="w-3.5 h-3.5 text-[var(--color-patchouli)] opacity-60"
+                      />
+                      {collection.name}
+                    </.link>
                   <% end %>
                 </div>
-              </div>
-            </.link>
+              <% end %>
+
+              <%!-- Toggleable subcommunities --%>
+              <%= if community.subcommunities != [] do %>
+                <details
+                  class="community-toggle border-t"
+                  style="border-color: rgba(155,126,200,0.12);"
+                >
+                  <summary
+                    class="px-5 sm:px-6 py-3 flex items-center gap-2 text-sm cursor-pointer"
+                    style="color: var(--color-lavender);"
+                  >
+                    <.icon
+                      name="hero-chevron-right"
+                      class="w-4 h-4 toggle-icon text-[var(--color-patchouli)]"
+                    />
+                    <span class="font-semibold">Expand subcommunities</span>
+                  </summary>
+                  <div class="px-5 sm:px-6 pb-5 space-y-3">
+                    <%= for sub <- community.subcommunities do %>
+                      <div
+                        class="rounded-xl overflow-hidden"
+                        style="background: rgba(123,79,166,0.04); border: 1px solid rgba(123,79,166,0.08);"
+                      >
+                        <%!-- Subcommunity header --%>
+                        <.link
+                          navigate={~p"/communities/#{sub.handle}"}
+                          class="p-3.5 flex items-center gap-3 block group"
+                          style="text-decoration: none;"
+                        >
+                          <div
+                            class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110"
+                            style="background: rgba(123,79,166,0.15); color: var(--color-patchouli);"
+                          >
+                            <.icon name="hero-building-library" class="w-4 h-4" />
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <p
+                              class="font-semibold text-sm transition-colors"
+                              style="color: var(--color-lilac);"
+                            >
+                              {sub.name}
+                            </p>
+                            <p class="kiroku-handle text-[10px]">{sub.handle}</p>
+                          </div>
+                          <%= if sub.collections != [] do %>
+                            <span
+                              class="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+                              style="background: rgba(123,79,166,0.1); color: var(--color-patchouli);"
+                            >
+                              {length(sub.collections)}
+                            </span>
+                          <% end %>
+                          <.icon
+                            name="hero-chevron-right"
+                            class="w-4 h-4 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 text-[var(--color-quill)]"
+                          />
+                        </.link>
+
+                        <%!-- Subcommunity collections --%>
+                        <%= if sub.collections != [] do %>
+                          <div class="px-3.5 pb-3.5 flex flex-wrap gap-1.5">
+                            <%= for collection <- sub.collections do %>
+                              <.link
+                                navigate={~p"/collections/#{collection.handle}"}
+                                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all duration-150 hover:scale-105"
+                                style="background: rgba(155,126,200,0.06); border: 1px solid rgba(155,126,200,0.1); color: var(--color-wisteria); text-decoration: none;"
+                              >
+                                <.icon
+                                  name="hero-folder-open"
+                                  class="w-3 h-3 opacity-50 text-[var(--color-patchouli)]"
+                                />
+                                {collection.name}
+                              </.link>
+                            <% end %>
+                          </div>
+                        <% end %>
+                      </div>
+                    <% end %>
+                  </div>
+                </details>
+              <% end %>
+            </div>
           <% end %>
         </div>
       </div>
     </section>
   <% end %>
 
-  <%!-- Recent Items --%>
+  <%!-- Recently Added --%>
   <%= if @recent_items != [] do %>
-    <section class="py-12 px-4" style="background: rgba(20,14,38,0.4);">
-      <div class="max-w-5xl mx-auto space-y-6">
+    <section class="py-16 px-4">
+      <div class="max-w-5xl mx-auto space-y-8">
         <div class="flex items-baseline justify-between">
-          <h2 class="font-heading text-2xl" style="color: var(--color-lilac);">Recently Added</h2>
+          <div>
+            <p
+              class="text-sm font-medium uppercase tracking-widest mb-1"
+              style="color: var(--color-patchouli);"
+            >
+              Latest
+            </p>
+            <h2 class="font-heading text-3xl font-semibold" style="color: var(--color-lilac);">
+              Recently Added
+            </h2>
+          </div>
           <.link
             navigate={~p"/search"}
-            class="text-sm font-medium"
+            class="text-sm font-medium transition-colors"
             style="color: var(--color-lavender);"
           >
             Browse all →
           </.link>
         </div>
-        <div class="space-y-3">
+
+        <div class="grid gap-4 sm:grid-cols-2">
           <%= for item <- @recent_items do %>
-            <.link
-              navigate={~p"/items/#{item.id}"}
-              class="kiroku-card p-4 flex gap-4 items-start block"
-            >
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="badge-item-type text-xs">{item.item_type}</span>
-                  <span class="status-badge published text-xs">published</span>
-                </div>
-                <p class="font-heading text-base" style="color: var(--color-wisteria);">
-                  {item.title}
-                </p>
-                <%= if item.authors && item.authors != [] do %>
-                  <p class="font-body text-xs mt-1" style="color: var(--color-quill);">
-                    {Enum.join(Enum.take(item.authors, 3), "; ")}
-                  </p>
-                <% end %>
-              </div>
-              <span class="font-body text-xs shrink-0 mt-1" style="color: var(--color-quill);">
-                {Calendar.strftime(item.published_at, "%b %Y")}
-              </span>
-            </.link>
+            <.item_card item={item} navigate={~p"/items/#{item.handle}"} />
           <% end %>
         </div>
       </div>

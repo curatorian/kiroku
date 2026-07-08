@@ -7,12 +7,14 @@ defmodule KirokuWeb.CommunityLive.Show do
   def mount(%{"handle" => handle}, _session, socket) do
     community = Repository.get_community_with_relations_by_handle!(handle)
     collections = Repository.list_collections_for_community(community.id)
+    ancestor_chain = Repository.community_ancestor_chain(community.id)
 
     {:ok,
      socket
      |> assign(:page_title, "#{community.name} — Kiroku")
      |> assign(:community, community)
-     |> assign(:collections, collections)}
+     |> assign(:collections, collections)
+     |> assign(:ancestor_chain, ancestor_chain)}
   end
 
   @impl true
@@ -20,21 +22,24 @@ defmodule KirokuWeb.CommunityLive.Show do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
       <div class="space-y-8">
-        <%!-- Breadcrumb --%>
-        <nav class="flex items-center gap-2 text-sm flex-wrap" style="color: var(--color-quill);">
-          <.link navigate={~p"/communities"} class="hover:text-white transition-colors">
+        <%!-- Breadcrumb (full hierarchy via recursive CTE) --%>
+        <nav class="flex items-center gap-1.5 text-xs flex-wrap" style="color: var(--color-quill);">
+          <.link
+            navigate={~p"/communities"}
+            class="hover:text-[var(--color-patchouli)] transition-colors"
+          >
             Communities
           </.link>
-          <%= if @community.parent_community do %>
-            <span>/</span>
+          <%= for ancestor <- Enum.drop(@ancestor_chain, -1) do %>
+            <.icon name="hero-chevron-right" class="w-3 h-3 shrink-0 opacity-50" />
             <.link
-              navigate={~p"/communities/#{@community.parent_community.handle}"}
-              class="hover:text-white transition-colors"
+              navigate={~p"/communities/#{ancestor.handle}"}
+              class="hover:text-[var(--color-patchouli)] transition-colors"
             >
-              {@community.parent_community.name}
+              {ancestor.name}
             </.link>
           <% end %>
-          <span>/</span>
+          <.icon name="hero-chevron-right" class="w-3 h-3 shrink-0 opacity-50" />
           <span style="color: var(--color-wisteria);">{@community.name}</span>
         </nav>
 

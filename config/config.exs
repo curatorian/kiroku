@@ -7,6 +7,8 @@
 # General application configuration
 import Config
 
+config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
+
 config :kiroku,
   ecto_repos: [Kiroku.Repo],
   generators: [timestamp_type: :utc_datetime],
@@ -15,8 +17,21 @@ config :kiroku,
 
 # Oban background job processing
 embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
-# Every 6 hours
 sync_cron = System.get_env("SYNC_CRON", "0 */6 * * *")
+
+# Sync cron entries are only included when the MSSQL legacy source is
+# configured. In prod releases, runtime.exs re-evaluates this and overrides.
+sync_crontab =
+  if System.get_env("MSSQL_HOST") not in [nil, ""] do
+    [
+      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
+      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
+      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
+      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
+    ]
+  else
+    []
+  end
 
 config :kiroku, Oban,
   repo: Kiroku.Repo,
@@ -25,11 +40,7 @@ config :kiroku, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       {embargo_cron, Kiroku.Embargo.LifterWorker},
-       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
-       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
-       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
-       {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
+       {embargo_cron, Kiroku.Embargo.LifterWorker} | sync_crontab
      ]}
   ]
 

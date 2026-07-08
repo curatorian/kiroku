@@ -120,7 +120,9 @@ defmodule Kiroku.Saf.Exporter do
     :ok =
       :zip.create(
         to_charlist(zip_path),
-        relative |> Enum.map(fn {rel, _} -> to_charlist(rel) end), cwd: to_charlist(saf_dir))
+        relative |> Enum.map(fn {rel, _} -> to_charlist(rel) end),
+        cwd: to_charlist(saf_dir)
+      )
 
     {:ok, zip_path}
   end

@@ -2,11 +2,24 @@ defmodule Kiroku.Sync do
   @moduledoc """
   Context module for managing MSSQL synchronization operations.
   Handles sync run tracking, change detection, and sync status monitoring.
+
+  The entire feature is **optional**. Call `enabled?/0` to check whether
+  MSSQL is configured before invoking any sync functions.
   """
 
   import Ecto.Query
   alias Kiroku.Repo
   alias Kiroku.Sync.{SyncRun, SyncRecordTracking}
+
+  @doc """
+  Returns `true` when the MSSQL legacy import source is configured.
+
+  Checks for the `MSSQL_HOST` environment variable. When this returns `false`,
+  all sync/import operations are no-ops and the UI hides sync-related widgets.
+  """
+  def enabled? do
+    System.get_env("MSSQL_HOST") not in [nil, ""]
+  end
 
   # ── Sync Run Management ─────────────────────────────────────────────────────
 
@@ -148,6 +161,33 @@ defmodule Kiroku.Sync do
         where: t.sync_run_id == ^sync_run_id and t.action == "failed",
         limit: ^limit
     )
+  end
+
+  @doc """
+  Returns failed records across multiple sync runs in a single query.
+  """
+  def list_failed_records_for_runs(sync_run_ids, limit \\ 20) do
+    Repo.all(
+      from t in SyncRecordTracking,
+        where: t.sync_run_id in ^sync_run_ids and t.action == "failed",
+        order_by: [desc: t.synced_at],
+        limit: ^limit
+    )
+  end
+
+  @doc """
+  Returns the latest sync run for each of the given source views in a single
+  query (avoids N+1).
+  """
+  def get_latest_sync_runs(source_views) do
+    import Ecto.Query
+
+    from(s in SyncRun,
+      where: s.source_view in ^source_views,
+      order_by: [s.source_view, desc: s.started_at]
+    )
+    |> distinct([s], s.source_view)
+    |> Repo.all()
   end
 
   def calculate_record_checksum(record) do

@@ -20,21 +20,25 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
 
        mix kiroku.import_from_mssql
        mix kiroku.import_from_mssql --dry-run
+       mix kiroku.import_from_mssql --dry-run --limit 20
        mix kiroku.import_from_mssql --batch-size 500
        mix kiroku.import_from_mssql --view Skripsi     (import one view only)
        mix kiroku.import_from_mssql --incremental      (only sync changed records)
        mix kiroku.import_from_mssql --check-connection (test MSSQL connection only)
 
-  Options:
+   Options:
 
-     --dry-run         Parse and validate but do not persist.
+     --dry-run         Parse and validate but do not persist. Defaults to a
+                       5-record sample per view unless --limit is given.
+     --limit N         Process at most N records per view (default 5 in dry-run,
+                       unlimited otherwise).
      --batch-size N    Stream records in batches of N (default 100).
      --view NAME       Import only this view (Skripsi / Tesis / Disertasi / Tugas-Akhir).
      --incremental     Only sync records that have changed since last sync.
      --check-connection Test MSSQL connection and display status without importing.
 
-  The heavy lifting lives in `Kiroku.Sync.Importer`. This task is a thin CLI
-  wrapper; the dashboard triggers the same logic via `Kiroku.Workers.ImportWorker`.
+  The heavy lifting lives in `Kiroku.Sync.Importer`. This task is the canonical
+  entry point for full imports — run it from the CLI (see usage above).
   """
 
   require Logger
@@ -53,6 +57,15 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
     incremental? = Keyword.get(opts, :incremental, false)
     only_view = Keyword.get(opts, :view)
     check_connection? = Keyword.get(opts, :check_connection, false)
+    explicit_limit = Keyword.get(opts, :limit)
+
+    # Dry-run defaults to a 5-record sample per view unless --limit overrides.
+    limit =
+      cond do
+        explicit_limit -> explicit_limit
+        dry_run? -> 5
+        true -> nil
+      end
 
     if check_connection? do
       check_mssql_connection()
@@ -106,6 +119,7 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
             incremental: incremental?,
             sync_run: sync_run,
             batch_size: batch_size,
+            limit: limit,
             log: true
           )
 
@@ -155,7 +169,8 @@ defmodule Mix.Tasks.Kiroku.ImportFromMssql do
           dry_run: :boolean,
           view: :string,
           incremental: :boolean,
-          check_connection: :boolean
+          check_connection: :boolean,
+          limit: :integer
         ]
       )
 

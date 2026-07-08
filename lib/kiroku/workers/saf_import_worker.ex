@@ -2,9 +2,13 @@ defmodule Kiroku.Workers.SafImportWorker do
   @moduledoc """
   Imports items from a DSpace Simple Archive Format zip.
 
-  Enqueued by the `/admin/sync` dashboard after a zip is uploaded. Args:
+  Enqueued by the `/admin/saf` dashboard after a zip is uploaded. The source
+  zip is staged in the OS temp directory (`/tmp`) by the LiveView and is
+  **always** deleted after processing (success or failure, dry-run or real).
 
-    * `"source"`       — filesystem path to the uploaded `.zip`
+  Args:
+
+    * `"source"`       — filesystem path to the uploaded `.zip` (in `/tmp`)
     * `"collection"`   — optional owning collection handle/UUID (overrides file)
     * `"dry_run"`      — when true, validate without persisting
     * `"triggered_by"` — user id of the admin who triggered the run
@@ -20,6 +24,15 @@ defmodule Kiroku.Workers.SafImportWorker do
   def perform(%Oban.Job{args: args}) do
     source = args["source"]
 
+    result = do_import(source, args)
+
+    # Always clean up the staged zip from /tmp, regardless of outcome.
+    File.rm(source)
+
+    result
+  end
+
+  defp do_import(source, args) do
     opts =
       []
       |> then(&if args["dry_run"], do: [{:dry_run, true} | &1], else: &1)
@@ -37,8 +50,6 @@ defmodule Kiroku.Workers.SafImportWorker do
             "inserted=#{stats.inserted} updated=#{stats.updated} failed=#{stats.failed}"
         )
 
-        # Best-effort cleanup of the uploaded zip after a real (non-dry-run) import.
-        unless args["dry_run"], do: File.rm(source)
         :ok
 
       {:error, :no_item_dirs} ->

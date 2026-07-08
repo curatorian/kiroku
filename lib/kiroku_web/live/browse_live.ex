@@ -5,13 +5,7 @@ defmodule KirokuWeb.BrowseLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities()
-
-    communities_with_collections =
-      Enum.map(communities, fn c ->
-        collections = Repository.list_collections_for_community(c.id)
-        Map.put(c, :collections, collections)
-      end)
+    communities_with_collections = Repository.list_communities_with_collections()
 
     {:ok,
      socket

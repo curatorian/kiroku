@@ -43,12 +43,12 @@ defmodule Kiroku.LegacyView do
     field :FileSuratIsi, :string
     field :FilePengesahan, :string
     field :Lulus, :string
-    field :Verifikasi, :integer
+    field :Verifikasi, :boolean
     # Validasi is VARCHAR in legacy — may hold integers or strings like "pustaka"
     field :Validasi, :string
-    field :stPublikasi, :integer
-    field :TagPustaka, :string
-    field :idpustaka, :string
+    field :stPublikasi, :boolean
+    field :TagPustaka, :boolean
+    field :idpustaka, :integer
     field :Judul, :string
     field :Abstrak, :string
   end

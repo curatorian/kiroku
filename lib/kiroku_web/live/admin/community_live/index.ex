@@ -152,8 +152,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   end
 
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities_tree()
-    {:ok, stream(socket, :communities, communities)}
+    {:ok, stream(socket, :communities, [])}
   end
 
   def handle_params(params, _uri, socket) do

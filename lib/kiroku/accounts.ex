@@ -17,6 +17,46 @@ defmodule Kiroku.Accounts do
     Repo.all(from u in User, order_by: [asc: u.user_type, asc: u.email])
   end
 
+  @doc """
+  Paginated version of `list_users_with_policies/0`.
+  Returns `{users, %Kiroku.Pagination{}}`.
+
+  Pass `:type` to filter by `user_type` (e.g. `"admin"`, `"submitter"`).
+  Pass `"all"` or `nil` for no type filter.
+  """
+  def list_users_with_policies_pagination(opts \\ []) do
+    import Ecto.Query
+    alias Kiroku.Pagination
+
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
+    type = Keyword.get(opts, :type)
+
+    base_query = user_type_query(type)
+
+    count = Repo.aggregate(base_query, :count, :id)
+    pagination = Pagination.build(count, page, per_page)
+
+    users =
+      Repo.all(
+        from u in base_query,
+          order_by: [asc: u.user_type, asc: u.email],
+          limit: ^per_page,
+          offset: ^Pagination.offset(pagination)
+      )
+
+    {users, pagination}
+  end
+
+  defp user_type_query(nil), do: User
+
+  defp user_type_query("all"), do: User
+
+  defp user_type_query(type) when is_binary(type) do
+    import Ecto.Query
+    from(u in User, where: u.user_type == ^String.to_existing_atom(type))
+  end
+
   def list_admins do
     import Ecto.Query
     Repo.all(from u in User, where: u.user_type in [:admin, :superadmin])
@@ -44,6 +84,17 @@ defmodule Kiroku.Accounts do
       NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
     )
     |> Repo.insert()
+  end
+
+  @doc """
+  Promotes a user to the :internal role (students/lecturers).
+  Used by PAuS OAuth — only callers should ensure the user doesn't already
+  have a higher role (admin/reviewer/superadmin) before calling this.
+  """
+  def assign_internal_role(%User{} = user) do
+    user
+    |> Ecto.Changeset.change(%{user_type: :internal})
+    |> Repo.update()
   end
 
   def admin_update_user(%User{} = user, attrs) do

@@ -1,7 +1,11 @@
 defmodule KirokuWeb.SearchLive do
   use KirokuWeb, :live_view
 
+  import KirokuWeb.KirokuPublicComponents
+  import KirokuWeb.KirokuComponents
+
   alias Kiroku.Repository
+  alias Kiroku.Pagination
 
   @impl true
   def mount(_params, _session, socket) do
@@ -9,6 +13,7 @@ defmodule KirokuWeb.SearchLive do
      socket
      |> assign(:page_title, "Search — Kiroku")
      |> assign(:items, [])
+     |> assign(:pagination, Pagination.build(0, 1, 20))
      |> assign(:query, nil)
      |> assign(:filters, %{})}
   end
@@ -26,18 +31,19 @@ defmodule KirokuWeb.SearchLive do
       page: parse_page(params["page"])
     }
 
-    items =
+    {items, pagination} =
       if query || Enum.any?(filters, fn {_k, v} -> v not in [nil, 1] end) do
-        Repository.search_items(Map.merge(filters, %{term: query}))
+        Repository.search_items_pagination(Map.merge(filters, %{term: query}))
       else
-        []
+        {[], Pagination.build(0, 1, 20)}
       end
 
     {:noreply,
      socket
      |> assign(:query, query)
      |> assign(:filters, filters)
-     |> assign(:items, items)}
+     |> assign(:items, items)
+     |> assign(:pagination, pagination)}
   end
 
   @impl true
@@ -152,7 +158,7 @@ defmodule KirokuWeb.SearchLive do
           <%= if @query do %>
             <p class="text-sm mb-4" style="color: var(--color-quill);">
               Showing results for <span style="color: var(--color-wisteria);">"{@query}"</span>
-              — {length(@items)} result(s)
+              — {@pagination.total_count} result(s)
             </p>
           <% end %>
 
@@ -168,48 +174,15 @@ defmodule KirokuWeb.SearchLive do
           <% else %>
             <div class="space-y-3">
               <%= for item <- @items do %>
-                <.link
-                  navigate={~p"/items/#{item.handle}"}
-                  class="kiroku-card p-5 block hover:border-purple-500/40 transition-colors group"
-                >
-                  <div class="flex items-start gap-4">
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2 flex-wrap mb-1.5">
-                        <span class="badge-item-type">{item.item_type}</span>
-                        <%= if item.publication_year do %>
-                          <span class="text-xs" style="color: var(--color-quill);">
-                            {item.publication_year}
-                          </span>
-                        <% end %>
-                        <%= if item.faculty do %>
-                          <span class="text-xs" style="color: var(--color-quill);">
-                            {item.faculty}
-                          </span>
-                        <% end %>
-                      </div>
-                      <h3
-                        class="font-body text-base leading-snug group-hover:text-white transition-colors"
-                        style="color: var(--color-lilac);"
-                      >
-                        {item.title}
-                      </h3>
-                      <%= if item.abstract do %>
-                        <p
-                          class="text-sm mt-1.5 line-clamp-2 leading-relaxed"
-                          style="color: var(--color-quill);"
-                        >
-                          {item.abstract}
-                        </p>
-                      <% end %>
-                    </div>
-                    <.icon
-                      name="hero-chevron-right"
-                      class="w-4 h-4 shrink-0 mt-1 text-[var(--color-quill)]"
-                    />
-                  </div>
-                </.link>
+                <.item_card item={item} />
               <% end %>
             </div>
+
+            <.pagination
+              pagination={@pagination}
+              path="/search"
+              params={build_search_params(@query, @filters)}
+            />
           <% end %>
         </div>
       </div>
@@ -234,4 +207,18 @@ defmodule KirokuWeb.SearchLive do
       _ -> nil
     end
   end
+
+  defp build_search_params(query, filters) do
+    %{}
+    |> maybe_param("q", query)
+    |> maybe_param("type", filters[:item_type])
+    |> maybe_param("faculty", filters[:faculty])
+    |> maybe_param("department", filters[:department])
+    |> maybe_param("year", filters[:year])
+    |> maybe_param("collection_id", filters[:collection_id])
+  end
+
+  defp maybe_param(params, _key, nil), do: params
+  defp maybe_param(params, _key, ""), do: params
+  defp maybe_param(params, key, value), do: Map.put(params, key, value)
 end

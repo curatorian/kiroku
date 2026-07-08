@@ -35,7 +35,7 @@ defmodule Kiroku.Access.Authorization do
   def can?(_user, :read, %Item{status: :published, discoverable: true}), do: true
 
   def can?(%User{user_type: type}, :read, %Item{})
-      when type in [:reviewer, :admin] do
+      when type in [:internal, :reviewer, :admin] do
     true
   end
 

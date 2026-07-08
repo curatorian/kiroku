@@ -2,11 +2,13 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   use KirokuWeb, :live_view
 
   import KirokuWeb.ItemForm
+  import KirokuWeb.KirokuComponents
 
   alias Kiroku.Repository
   alias Kiroku.Repository.Item
 
   @statuses ~w(submitted published draft embargoed withdrawn)
+  @item_types ~w(skripsi tesis disertasi tugas_akhir memorandum_hukum studi_kasus laporan_proyek karya_kreatif karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone)
 
   # ── :index render ──────────────────────────────────────────────────────────
 
@@ -23,6 +25,89 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
           >
             <.icon name="hero-plus" class="w-4 h-4" /> New Item
           </.link>
+        </div>
+
+        <%!-- Search and filters --%>
+        <div class="kiroku-card p-4 space-y-4">
+          <div class="flex flex-col sm:flex-row gap-3">
+            <div class="flex-1">
+              <.form for={@search_form} id="search-form" phx-change="search">
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2">
+                    <.icon
+                      name="hero-magnifying-glass"
+                      class="w-4 h-4"
+                      style="color: var(--color-quill);"
+                    />
+                  </span>
+                  <input
+                    type="text"
+                    name="search"
+                    id="search-input"
+                    value={@search_query}
+                    placeholder="Search by title, handle, or student name..."
+                    class="kiroku-search-input w-full pl-10"
+                    autocomplete="off"
+                  />
+                  <button
+                    :if={@search_query != ""}
+                    type="button"
+                    phx-click="clear_search"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-xs hover:text-white transition-colors"
+                    style="color: var(--color-quill);"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </.form>
+            </div>
+            <div class="sm:w-48">
+              <.form for={@filter_form} id="filter-form" phx-change="filter">
+                <select
+                  name="item_type"
+                  id="item-type-select"
+                  class="kiroku-search-input w-full"
+                >
+                  <option value="">All Types</option>
+                  <%= for type <- @item_types do %>
+                    <option value={type} selected={@item_type_filter == type}>
+                      {String.capitalize(String.replace(type, "_", " "))}
+                    </option>
+                  <% end %>
+                </select>
+              </.form>
+            </div>
+          </div>
+          <%= if @search_query != "" or @item_type_filter != "" do %>
+            <div class="flex items-center gap-2 text-xs" style="color: var(--color-quill);">
+              <span>Active filters:</span>
+              <%= if @search_query != "" do %>
+                <span
+                  class="px-2 py-1 rounded-full"
+                  style="background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
+                >
+                  Search: "{@search_query}"
+                  <button type="button" phx-click="clear_search" class="ml-1 hover:text-white">
+                    &times;
+                  </button>
+                </span>
+              <% end %>
+              <%= if @item_type_filter != "" do %>
+                <span
+                  class="px-2 py-1 rounded-full"
+                  style="background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
+                >
+                  Type: {String.capitalize(String.replace(@item_type_filter, "_", " "))}
+                  <button type="button" phx-click="clear_type_filter" class="ml-1 hover:text-white">
+                    &times;
+                  </button>
+                </span>
+              <% end %>
+              <button type="button" phx-click="clear_all_filters" class="underline hover:text-white">
+                Clear all
+              </button>
+            </div>
+          <% end %>
         </div>
 
         <%!-- Status filter tabs --%>
@@ -59,19 +144,106 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
           <% end %>
         </div>
 
-        <div id="items" phx-update="stream" class="space-y-2">
+        <div id="items" phx-update="stream" class="space-y-3">
           <div
             :for={{id, item} <- @streams.items}
             id={id}
             class="kiroku-card p-4 flex items-start gap-4"
           >
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 space-y-2">
               <div class="flex items-center gap-2 mb-1 flex-wrap">
-                <span class="badge-item-type">{item.item_type}</span>
-                <span class={["status-badge", to_string(item.status)]}>{item.status}</span>
+                <span class="badge-item-type text-xs">{item.item_type}</span>
+                <span class={["status-badge text-xs", to_string(item.status)]}>{item.status}</span>
               </div>
-              <p class="font-body text-sm" style="color: var(--color-lilac);">{item.title}</p>
-              <p class="kiroku-handle text-xs mt-0.5">{item.handle || item.id}</p>
+              <p class="font-body text-sm font-medium" style="color: var(--color-lilac);">
+                {item.title}
+              </p>
+              <p class="kiroku-handle text-xs">{item.handle || item.id}</p>
+
+              <%!-- Abstract (truncated) --%>
+              <%= if item.abstract do %>
+                <% abstract_text = item.abstract
+
+                truncated_abstract =
+                  if String.length(abstract_text) > 120 do
+                    String.slice(abstract_text, 0, 117) <> "..."
+                  else
+                    abstract_text
+                  end %>
+                <p
+                  class="text-xs leading-relaxed line-clamp-2"
+                  style="color: var(--color-quill);"
+                >
+                  {truncated_abstract}
+                </p>
+              <% end %>
+
+              <%!-- Author information --%>
+              <%= if item.student_name do %>
+                <div class="flex items-center gap-2">
+                  <div
+                    class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold"
+                    style="background: rgba(123,79,166,0.2); color: var(--color-patchouli);"
+                  >
+                    {String.first(item.student_name)}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-xs truncate" style="color: var(--color-wisteria);">
+                      {item.student_name}
+                    </p>
+                    <%= if item.student_id do %>
+                      <p class="font-mono text-[10px] truncate" style="color: var(--color-quill);">
+                        NPM: {item.student_id}
+                      </p>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+
+              <%!-- Academic information --%>
+              <div class="flex flex-wrap gap-1.5 text-[10px]" style="color: var(--color-quill);">
+                <%= if item.program_study do %>
+                  <span class="px-1.5 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+                    {item.program_study}
+                  </span>
+                <% end %>
+                <%= if item.faculty do %>
+                  <span class="px-1.5 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
+                    {item.faculty}
+                  </span>
+                <% end %>
+              </div>
+
+              <%!-- Date information --%>
+              <%= if not is_nil(item.date_submitted) or not is_nil(item.published_at) or not is_nil(item.inserted_at) do %>
+                <% display_date =
+                  cond do
+                    not is_nil(item.date_submitted) -> item.date_submitted
+                    not is_nil(item.published_at) -> item.published_at
+                    not is_nil(item.inserted_at) -> item.inserted_at
+                    true -> nil
+                  end
+
+                date_label =
+                  cond do
+                    not is_nil(item.date_submitted) -> "Submitted"
+                    not is_nil(item.published_at) -> "Published"
+                    not is_nil(item.inserted_at) -> "Created"
+                    true -> ""
+                  end %>
+                <%= if display_date do %>
+                  <div class="flex items-center gap-1.5">
+                    <.icon
+                      name="hero-calendar"
+                      class="w-3 h-3 shrink-0"
+                      style="color: var(--color-dust);"
+                    />
+                    <span class="font-mono text-[10px]" style="color: var(--color-dust);">
+                      {date_label}: {Calendar.strftime(display_date, "%d %b %Y")}
+                    </span>
+                  </div>
+                <% end %>
+              <% end %>
             </div>
             <.link
               navigate={~p"/admin/items/#{item.id}"}
@@ -82,6 +254,19 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
             </.link>
           </div>
         </div>
+
+        <%!-- Results count --%>
+        <p class="text-xs text-center" style="color: var(--color-quill);">
+          Showing {@pagination.total_count} item{if @pagination.total_count != 1, do: "s"}
+        </p>
+
+        <.pagination
+          pagination={@pagination}
+          path="/admin/items"
+          params={
+            %{"status" => @status_filter, "search" => @search_query, "item_type" => @item_type_filter}
+          }
+        />
       </div>
     </Layouts.admin>
     """
@@ -231,31 +416,44 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
     {:ok,
      socket
      |> assign(:status_filter, nil)
+     |> assign(:search_query, "")
+     |> assign(:item_type_filter, "")
      |> assign(:statuses, @statuses)
+     |> assign(:item_types, @item_types)
      |> assign(:collections, collections)
      |> assign(:selected_type, "skripsi")
      |> assign(:form, nil)
-     |> stream(:items, Repository.list_items(%{}))}
+     |> assign(:search_form, to_form(%{}))
+     |> assign(:filter_form, to_form(%{}))
+     |> stream(:items, [])}
   end
 
   def handle_params(params, _uri, socket) do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, %{"status" => status}) do
-    items = Repository.list_items(%{status: status})
+  defp apply_action(socket, :index, params) do
+    status_filter = Map.get(params, "status")
+    search_query = Map.get(params, "search", "")
+    item_type_filter = Map.get(params, "item_type", "")
+    page = String.to_integer(Map.get(params, "page", "1"))
+
+    filters =
+      %{}
+      |> maybe_put_status(status_filter)
+      |> maybe_put_search(search_query)
+      |> maybe_put_item_type(item_type_filter)
+
+    {items, pagination} =
+      Repository.list_items_for_display_pagination(filters, page: page, per_page: 15)
 
     socket
-    |> assign(:status_filter, status)
+    |> assign(:status_filter, status_filter)
+    |> assign(:search_query, search_query)
+    |> assign(:item_type_filter, item_type_filter)
+    |> assign(:pagination, pagination)
     |> assign(:page_title, "Items")
     |> stream(:items, items, reset: true)
-  end
-
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:status_filter, nil)
-    |> assign(:page_title, "Items")
-    |> stream(:items, Repository.list_items(%{}), reset: true)
   end
 
   defp apply_action(socket, :new, _params) do
@@ -271,6 +469,42 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
 
   def handle_event("type_changed", %{"item" => %{"item_type" => type}}, socket) do
     {:noreply, assign(socket, :selected_type, type)}
+  end
+
+  def handle_event("search", %{"search" => search}, socket) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         ~p"/admin/items?search=#{search}&status=#{socket.assigns.status_filter}&item_type=#{socket.assigns.item_type_filter}"
+     )}
+  end
+
+  def handle_event("filter", %{"item_type" => item_type}, socket) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         ~p"/admin/items?item_type=#{item_type}&search=#{socket.assigns.search_query}&status=#{socket.assigns.status_filter}"
+     )}
+  end
+
+  def handle_event("clear_search", _, socket) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         ~p"/admin/items?status=#{socket.assigns.status_filter}&item_type=#{socket.assigns.item_type_filter}"
+     )}
+  end
+
+  def handle_event("clear_type_filter", _, socket) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         ~p"/admin/items?search=#{socket.assigns.search_query}&status=#{socket.assigns.status_filter}"
+     )}
+  end
+
+  def handle_event("clear_all_filters", _, socket) do
+    {:noreply, push_patch(socket, to: ~p"/admin/items")}
   end
 
   def handle_event("validate", %{"item" => params}, socket) do
@@ -304,9 +538,16 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp list_all_collections do
-    Repository.list_communities()
-    |> Enum.flat_map(fn community ->
-      Repository.list_collections_for_community(community.id)
-    end)
+    Repository.list_collections()
+    |> Enum.filter(& &1.is_active)
   end
+
+  defp maybe_put_status(filters, nil), do: filters
+  defp maybe_put_status(filters, status), do: Map.put(filters, :status, status)
+
+  defp maybe_put_search(filters, ""), do: filters
+  defp maybe_put_search(filters, search), do: Map.put(filters, :search, search)
+
+  defp maybe_put_item_type(filters, ""), do: filters
+  defp maybe_put_item_type(filters, item_type), do: Map.put(filters, :item_type, item_type)
 end

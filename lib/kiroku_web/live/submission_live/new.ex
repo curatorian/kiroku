@@ -405,9 +405,6 @@ defmodule KirokuWeb.SubmissionLive.New do
   defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
 
   defp list_all_collections do
-    Repository.list_communities()
-    |> Enum.flat_map(fn community ->
-      Repository.list_collections_for_community(community.id)
-    end)
+    Repository.list_active_collections()
   end
 end

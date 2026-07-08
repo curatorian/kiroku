@@ -5,7 +5,7 @@ defmodule Kiroku.Accounts.User do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @user_types ~w(submitter reviewer admin superadmin)a
+  @user_types ~w(submitter internal reviewer admin superadmin)a
 
   schema "users" do
     field :email, :string

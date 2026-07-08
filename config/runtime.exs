@@ -25,14 +25,43 @@ config :kiroku, KirokuWeb.Endpoint,
 
 if config_env() == :prod do
   # MSSQL legacy read-only import database (import-time only)
-  config :kiroku, Kiroku.LegacyRepo,
-    adapter: Ecto.Adapters.Tds,
-    hostname: System.get_env("MSSQL_HOST"),
-    database: System.get_env("MSSQL_DB"),
-    username: System.get_env("MSSQL_USER"),
-    password: System.get_env("MSSQL_PASS"),
-    port: String.to_integer(System.get_env("MSSQL_PORT", "1433")),
-    pool_size: 2
+  #
+  # The entire sync/MSSQL feature is OPTIONAL. When MSSQL_HOST is not set,
+  # the legacy repo config is skipped, Oban sync cron jobs are excluded,
+  # and the UI hides sync-related sections. Set MSSQL_HOST and related
+  # vars only if you need to import from a legacy MSSQL database.
+  if System.get_env("MSSQL_HOST") not in [nil, ""] do
+    config :kiroku, Kiroku.LegacyRepo,
+      adapter: Ecto.Adapters.Tds,
+      hostname: System.get_env("MSSQL_HOST"),
+      database: System.get_env("MSSQL_DB"),
+      username: System.get_env("MSSQL_USER"),
+      password: System.get_env("MSSQL_PASS"),
+      port: String.to_integer(System.get_env("MSSQL_PORT", "1433")),
+      pool_size: 2
+  end
+
+  # Rebuild Oban crontab at runtime so releases respect MSSQL_HOST
+  embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+  sync_cron = System.get_env("SYNC_CRON", "0 */6 * * *")
+
+  sync_crontab =
+    if System.get_env("MSSQL_HOST") not in [nil, ""] do
+      [
+        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
+        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
+        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
+        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
+      ]
+    else
+      []
+    end
+
+  config :kiroku, Oban,
+    plugins: [
+      {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+      {Oban.Plugins.Cron, crontab: [{embargo_cron, Kiroku.Embargo.LifterWorker} | sync_crontab]}
+    ]
 
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -43,9 +72,15 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # Encrypt the database connection. Strongly recommended when Postgres is
+  # reached over a network (e.g. a separate database VM). Defaults to true
+  # to avoid leaking credentials/data over the wire; set ECTO_DB_SSL=false
+  # to disable (e.g. loopback, or a DB that does not support TLS).
+  db_ssl? = System.get_env("ECTO_DB_SSL") not in ~w(false 0)
+
   config :kiroku, Kiroku.Repo,
-    # ssl: true,
     url: database_url,
+    ssl: db_ssl?,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,

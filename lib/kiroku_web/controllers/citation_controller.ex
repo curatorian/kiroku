@@ -12,10 +12,23 @@ defmodule KirokuWeb.CitationController do
 
   alias Kiroku.{Repository, Export}
 
-  @supported_formats ~w(apa mla chicago ieee bibtex ris)
+  # Map of allowed URL formats to the atoms `Kiroku.Export.Citation` expects.
+  # Spelling the atoms here as literals guarantees they always exist in the
+  # atom table, so we never need String.to_atom/to_existing_atom on request
+  # input (which would leak atoms or raise on unknown values).
+  @format_atoms %{
+    "apa" => :apa,
+    "mla" => :mla,
+    "chicago" => :chicago,
+    "ieee" => :ieee,
+    "bibtex" => :bibtex,
+    "ris" => :ris
+  }
+
+  @supported_formats Map.keys(@format_atoms)
 
   def show(conn, %{"id" => id, "format" => format}) when format in @supported_formats do
-    format_atom = String.to_existing_atom(format)
+    format_atom = @format_atoms[format]
 
     case Repository.get_item(id) do
       nil ->

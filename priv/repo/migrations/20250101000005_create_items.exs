@@ -9,8 +9,8 @@ defmodule Kiroku.Repo.Migrations.CreateItems do
       add :idpustaka, :string
 
       # Bibliographic
-      add :title, :string, null: false
-      add :title_alt, :string
+      add :title, :text, null: false
+      add :title_alt, :text
       add :abstract, :text
       add :abstract_alt, :text
       add :language, :string, default: "id"

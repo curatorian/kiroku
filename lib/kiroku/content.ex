@@ -63,6 +63,9 @@ defmodule Kiroku.Content do
       user_is_staff?(user) ->
         true
 
+      bitstream_locked?(bitstream) and not user_is_internal?(user) ->
+        false
+
       Item.files_embargoed?(item) and not abstract?(bitstream) ->
         false
 
@@ -70,6 +73,16 @@ defmodule Kiroku.Content do
         access_level_allows?(bitstream.access_level, item.access_level, user)
     end
   end
+
+  @doc """
+  Returns true if the bitstream's description matches a globally locked
+  pattern (configured in admin settings).
+  """
+  def bitstream_locked?(%Bitstream{description: description}) when is_binary(description) do
+    description in Kiroku.Settings.locked_bitstream_descriptions()
+  end
+
+  def bitstream_locked?(_), do: false
 
   # ORIGINAL bundle, sequence 1 is the abstract PDF — exempt from embargo.
   defp abstract?(%Bitstream{bundle_name: :ORIGINAL, sequence: 1}), do: true
@@ -86,4 +99,7 @@ defmodule Kiroku.Content do
 
   defp user_is_staff?(%{user_type: type}), do: type in [:reviewer, :admin, :superadmin]
   defp user_is_staff?(_), do: false
+
+  defp user_is_internal?(%{user_type: :internal}), do: true
+  defp user_is_internal?(_), do: false
 end

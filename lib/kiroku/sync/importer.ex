@@ -6,9 +6,8 @@ defmodule Kiroku.Sync.Importer do
   duplicated (and diverged) between `mix kiroku.import_from_mssql` and
   `Kiroku.Workers.MssqlSyncWorker`. It is used by:
 
-    - `Mix.Tasks.Kiroku.ImportFromMssql` — full import from the CLI
+    - `Mix.Tasks.Kiroku.ImportFromMssql` — full import (the canonical CLI path)
     - `Kiroku.Workers.MssqlSyncWorker` — incremental sync (cron + manual)
-    - `Kiroku.Workers.ImportWorker` — full import triggered from the dashboard
 
   Records arrive as `Kiroku.LegacyView` structs loaded by Ecto, so fields use
   **atom keys** (`record.Judul`). Access helpers tolerate string keys too, for
@@ -21,7 +20,6 @@ defmodule Kiroku.Sync.Importer do
   alias Kiroku.{Content, LegacyRepo, LegacyView, Repo, Repository, Sync}
   alias Kiroku.Repository.{Collection, Community}
 
-  @root_handle "123456789/unpad-ta"
   @root_name "Tugas Akhir Mahasiswa Universitas Padjadjaran"
 
   @views [
@@ -46,6 +44,9 @@ defmodule Kiroku.Sync.Importer do
       per-record tracking rows to. When omitted, no tracking is written.
     * `:batch_size` (default `100`) — streaming chunk size.
     * `:log` (default `false`) — emit per-record info logs.
+    * `:limit` (default `nil`) — cap the number of records processed. Useful
+      for dry-run sampling. When set, only the first `limit` records (by `NPM`
+      ascending) are read.
 
   Returns a stats map:
 
@@ -58,35 +59,68 @@ defmodule Kiroku.Sync.Importer do
     sync_run = Keyword.get(opts, :sync_run)
     batch_size = Keyword.get(opts, :batch_size, 100)
     log? = Keyword.get(opts, :log, false)
+    limit = Keyword.get(opts, :limit)
 
     root = get_or_create_root_community(dry_run?)
-    total = count_records(view_name)
+    actual_total = count_records(view_name)
+    total = if limit, do: min(limit, actual_total), else: actual_total
 
-    if log?, do: Logger.info("[Importer] #{view_name}: #{total} records found")
+    if log? do
+      if limit && limit < actual_total do
+        Logger.info("[Importer] #{view_name}: sampling #{total} of #{actual_total} records")
+      else
+        Logger.info("[Importer] #{view_name}: #{total} records found")
+      end
+    end
 
     initial = %{total: total, processed: 0, inserted: 0, updated: 0, skipped: 0, failed: 0}
 
-    result =
-      LegacyRepo.transaction(
-        fn ->
-          from(v in {view_name, LegacyView})
-          |> LegacyRepo.stream(max_rows: batch_size)
-          |> Enum.reduce({initial, %{}}, fn record, {acc, cache} ->
-            process_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc)
-          end)
-        end,
-        timeout: :infinity
-      )
+    effective_batch = if limit, do: min(batch_size, limit), else: batch_size
 
-    case result do
-      {:ok, {stats, _cache}} ->
-        stats
+    stream = paginate_records(view_name, effective_batch)
+    stream = if limit, do: Stream.take(stream, limit), else: stream
 
-      {:error, reason} ->
-        Logger.error("[Importer] view #{view_name} transaction failed: #{inspect(reason)}")
-        Map.merge(initial, %{failed: total})
-    end
+    {stats, _cache} =
+      stream
+      |> Enum.reduce({initial, %{}}, fn record, {acc, cache} ->
+        process_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc)
+      end)
+
+    stats
   end
+
+  # The Tds adapter (MSSQL) does not support `Repo.stream/1`, so we paginate by
+  # the `NPM` primary key. Keyset pagination is stable (no skipped/duplicated
+  # rows) and its per-page cost is flat regardless of how deep we are.
+  defp paginate_records(view_name, batch_size) do
+    Stream.resource(
+      fn -> nil end,
+      fn
+        :done ->
+          {:halt, nil}
+
+        last_npm ->
+          records =
+            from(v in {view_name, LegacyView})
+            |> npm_after(last_npm)
+            |> order_by([v], asc: field(v, :NPM))
+            |> limit(^batch_size)
+            |> LegacyRepo.all(timeout: :infinity)
+
+          if records == [] do
+            {:halt, nil}
+          else
+            next = records |> List.last() |> field(:NPM)
+            state = if length(records) < batch_size, do: :done, else: next
+            {records, state}
+          end
+      end,
+      fn _ -> :ok end
+    )
+  end
+
+  defp npm_after(query, nil), do: query
+  defp npm_after(query, npm), do: where(query, [v], field(v, :NPM) > ^npm)
 
   @doc """
   Returns the legacy_id of the most recent record in a view (by NPM desc).
@@ -219,43 +253,50 @@ defmodule Kiroku.Sync.Importer do
         existing_item = Repository.get_item_by_handle(attrs.handle)
         action = if existing_item, do: :updated, else: :inserted
 
-        case Repository.import_item(attrs) do
-          {:ok, item} ->
-            create_bitstreams_for_record(item, record)
+        try do
+          case Repository.import_item(attrs) do
+            {:ok, item} ->
+              create_bitstreams_for_record(item, record)
 
-            if sync_run do
-              Sync.create_record_tracking(%{
-                sync_run_id: sync_run.id,
-                legacy_id: legacy_id,
-                item_id: item.id,
-                action: to_string(action),
-                synced_at: DateTime.utc_now(),
-                checksum: checksum
-              })
-            end
+              if sync_run do
+                Sync.create_record_tracking(%{
+                  sync_run_id: sync_run.id,
+                  legacy_id: legacy_id,
+                  item_id: item.id,
+                  action: to_string(action),
+                  synced_at: DateTime.utc_now(),
+                  checksum: checksum
+                })
+              end
 
-            {action, new_cache}
+              {action, new_cache}
 
-          {:error, changeset} ->
-            npm = field(record, :NPM)
-
-            Logger.warning(
-              "[Importer] failed NPM=#{npm} legacy_id=#{legacy_id}: #{inspect(changeset.errors)}"
-            )
-
-            if sync_run do
-              Sync.create_record_tracking(%{
-                sync_run_id: sync_run.id,
-                legacy_id: legacy_id,
-                action: "failed",
-                synced_at: DateTime.utc_now(),
-                error_message: inspect(changeset.errors),
-                checksum: checksum
-              })
-            end
-
+            {:error, changeset} ->
+              record_failure(record, sync_run, legacy_id, checksum, inspect(changeset.errors))
+              {:error, new_cache}
+          end
+        rescue
+          error ->
+            record_failure(record, sync_run, legacy_id, checksum, Exception.message(error))
             {:error, new_cache}
         end
+    end
+  end
+
+  defp record_failure(record, sync_run, legacy_id, checksum, message) do
+    npm = field(record, :NPM)
+
+    Logger.warning("[Importer] failed NPM=#{npm} legacy_id=#{legacy_id}: #{message}")
+
+    if sync_run do
+      Sync.create_record_tracking(%{
+        sync_run_id: sync_run.id,
+        legacy_id: legacy_id,
+        action: "failed",
+        synced_at: DateTime.utc_now(),
+        error_message: message,
+        checksum: checksum
+      })
     end
   end
 
@@ -266,18 +307,21 @@ defmodule Kiroku.Sync.Importer do
   end
 
   defp get_or_create_root_community(false) do
-    case Repo.get_by(Community, handle: @root_handle) do
+    handle = root_handle()
+
+    case Repo.get_by(Community, handle: handle) do
       nil ->
-        {:ok, c} =
+        Logger.info("[Importer] Created root community: #{@root_name}")
+
+        handle_insert_result(
           Repository.create_community(%{
             name: @root_name,
-            handle: @root_handle,
+            handle: handle,
             short_description: "Kumpulan tugas akhir mahasiswa Universitas Padjadjaran",
             is_active: true
-          })
-
-        Logger.info("[Importer] Created root community: #{@root_name}")
-        c
+          }),
+          handle
+        )
 
       existing ->
         existing
@@ -329,17 +373,20 @@ defmodule Kiroku.Sync.Importer do
   end
 
   defp get_or_create_fakultas(root_id, fakultas) do
-    handle = "123456789/fak-#{slugify(fakultas)}"
+    handle = "fakultas-#{slugify(fakultas)}"
 
     case Repo.get_by(Community, handle: handle) do
       nil ->
-        {:ok, c} =
-          Repository.create_community(%{
-            name: "Fakultas #{fakultas}",
-            handle: handle,
-            parent_community_id: root_id,
-            is_active: true
-          })
+        c =
+          handle_insert_result(
+            Repository.create_community(%{
+              name: "Fakultas #{fakultas}",
+              handle: handle,
+              parent_community_id: root_id,
+              is_active: true
+            }),
+            handle
+          )
 
         Logger.info("[Importer]   + Fakultas #{fakultas}")
         c
@@ -350,17 +397,20 @@ defmodule Kiroku.Sync.Importer do
   end
 
   defp get_or_create_jenjang(fakultas_id, fakultas, jenjang) do
-    handle = "123456789/fak-#{slugify(fakultas)}/#{slugify(jenjang)}"
+    handle = "#{slugify(fakultas)}-#{abbrev_jenjang(jenjang)}"
 
     case Repo.get_by(Community, handle: handle) do
       nil ->
-        {:ok, c} =
-          Repository.create_community(%{
-            name: jenjang,
-            handle: handle,
-            parent_community_id: fakultas_id,
-            is_active: true
-          })
+        c =
+          handle_insert_result(
+            Repository.create_community(%{
+              name: jenjang,
+              handle: handle,
+              parent_community_id: fakultas_id,
+              is_active: true
+            }),
+            handle
+          )
 
         Logger.info("[Importer]     + #{jenjang} (Fakultas #{fakultas})")
         c
@@ -370,21 +420,23 @@ defmodule Kiroku.Sync.Importer do
     end
   end
 
-  defp get_or_create_prodi_collection(jenjang_id, fakultas, jenjang, program_studi) do
-    handle =
-      "123456789/fak-#{slugify(fakultas)}/#{slugify(jenjang)}/#{slugify(program_studi)}"
+  defp get_or_create_prodi_collection(jenjang_id, _fakultas, jenjang, program_studi) do
+    handle = "#{abbrev_jenjang(jenjang)}-#{slugify(program_studi)}"
 
     collection_name = "#{jenjang} #{program_studi}"
 
     case Repo.get_by(Collection, handle: handle) do
       nil ->
-        {:ok, coll} =
-          Repository.create_collection(%{
-            name: collection_name,
-            handle: handle,
-            community_id: jenjang_id,
-            is_active: true
-          })
+        coll =
+          handle_insert_result(
+            Repository.create_collection(%{
+              name: collection_name,
+              handle: handle,
+              community_id: jenjang_id,
+              is_active: true
+            }),
+            handle
+          )
 
         Logger.info("[Importer]       + Collection: #{collection_name}")
         coll
@@ -394,11 +446,42 @@ defmodule Kiroku.Sync.Importer do
     end
   end
 
+  # Idempotency guard for the community/collection hierarchy.
+  #
+  # Communities and collections are derived from the data (fakultas / jenjang /
+  # program studi), so a unique-handle conflict always means "another writer
+  # already created this exact entity" — either a prior/partial run, or a race
+  # against a concurrent sync worker. In that case we re-fetch and reuse the
+  # existing row instead of crashing, which makes the import re-runnable and
+  # resumable. Non-handle validation errors still raise (genuine bad data).
+  defp handle_insert_result({:ok, struct}, _handle), do: struct
+
+  defp handle_insert_result({:error, changeset}, handle) do
+    if unique_handle_conflict?(changeset) do
+      Logger.warning(
+        "[Importer] handle '#{handle}' already exists; reusing existing " <>
+          inspect(changeset.data.__struct__)
+      )
+
+      Repo.get_by!(changeset.data.__struct__, handle: handle)
+    else
+      raise Ecto.InvalidChangesetError, action: :insert, changeset: changeset
+    end
+  end
+
+  defp unique_handle_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:handle, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
+  end
+
   # ── Item attributes + bitstreams ───────────────────────────────────────────
 
   defp build_item_attrs(r, item_type, collection_id) do
     npm = field(r, :NPM)
     idpustaka = field(r, :idpustaka)
+    idpustaka_str = if is_integer(idpustaka), do: Integer.to_string(idpustaka)
 
     status =
       map_status(
@@ -408,9 +491,9 @@ defmodule Kiroku.Sync.Importer do
       )
 
     %{
-      handle: build_handle(idpustaka, npm),
+      handle: build_handle(npm),
       legacy_id: build_legacy_id(field(r, :Jenis), npm),
-      idpustaka: idpustaka,
+      idpustaka: idpustaka_str,
       title: field(r, :Judul),
       abstract: field(r, :Abstrak),
       language: :id,
@@ -422,14 +505,42 @@ defmodule Kiroku.Sync.Importer do
       degree_level: map_degree(field(r, :Jenjang)),
       item_type: item_type,
       date_submitted: date_from_datetime(field(r, :Tgl_Upload)),
-      subject_classification: field(r, :TagPustaka),
+      subject_classification: to_string(field(r, :TagPustaka)),
       status: status,
       discoverable: status == :published,
+      published_at: if(status == :published, do: field(r, :Tgl_Upload)),
       access_level: :open,
       base_url: field(r, :LinkPath),
       institution: institution_name(),
       collection_id: collection_id
     }
+    |> truncate_for_storage()
+  end
+
+  # Caps every varchar field to 255 characters so legacy records with
+  # oversized values still insert cleanly. `:title` and `:abstract` are `text`
+  # columns (unlimited) and are left intact.
+  defp truncate_for_storage(attrs) do
+    legacy_id = attrs[:legacy_id]
+
+    Map.new(attrs, fn
+      {key, value} when key in [:title, :abstract] ->
+        {key, value}
+
+      {key, value} when is_binary(value) and byte_size(value) > 255 ->
+        len = String.length(value)
+
+        if len > 255 do
+          Logger.warning("[Importer] truncated :#{key} from #{len} to 255 chars for #{legacy_id}")
+
+          {key, String.slice(value, 0, 255)}
+        else
+          {key, value}
+        end
+
+      {key, value} ->
+        {key, value}
+    end)
   end
 
   defp create_bitstreams_for_record(item, r) do
@@ -507,14 +618,9 @@ defmodule Kiroku.Sync.Importer do
     end
   end
 
-  defp map_status(1, 1, v) when v >= 1, do: :published
-  defp map_status(1, 1, _), do: :under_review
-  defp map_status(1, _, _), do: :submitted
-  defp map_status(_, _, _), do: :submitted
+  defp map_status(_stPublikasi, _verifikasi, _validasi), do: :published
 
-  defp build_handle(nil, npm), do: "123456789/legacy-#{npm}"
-  defp build_handle("", npm), do: "123456789/legacy-#{npm}"
-  defp build_handle(h, _), do: h
+  defp build_handle(npm), do: npm
 
   defp build_legacy_id(nil, npm), do: "unknown/#{npm}"
   defp build_legacy_id("", npm), do: "unknown/#{npm}"
@@ -560,9 +666,73 @@ defmodule Kiroku.Sync.Importer do
     Application.get_env(:kiroku, :institution_name, "Universitas Padjadjaran")
   end
 
+  defp root_handle, do: "unpad-ta"
+
+  defp abbrev_jenjang("Sarjana"), do: "s1"
+  defp abbrev_jenjang("Sarjana Terapan"), do: "s1t"
+  defp abbrev_jenjang("Magister"), do: "s2"
+  defp abbrev_jenjang("Doktor"), do: "s3"
+  defp abbrev_jenjang("Diploma III"), do: "d3"
+  defp abbrev_jenjang("Diploma IV"), do: "d4"
+  defp abbrev_jenjang(other), do: slugify(other)
+
   # Key-agnostic field accessor. `Kiroku.LegacyView` is an Ecto schema so records
   # arrive with atom keys, but we tolerate string-keyed maps defensively.
+  # All string values are sanitized from Windows-1252 (CP1252) to UTF-8 — the
+  # legacy MSSQL database stores `varchar` data in a Windows codepage, so bytes
+  # like 0x92 (') are not valid UTF-8 and would crash PostgreSQL inserts.
   defp field(record, key) when is_atom(key) do
-    Map.get(record, key) || Map.get(record, Atom.to_string(key))
+    value = Map.get(record, key) || Map.get(record, Atom.to_string(key))
+    sanitize_text(value)
+  end
+
+  defp sanitize_text(value) when is_binary(value) do
+    if String.valid?(value), do: value, else: cp1252_to_utf8(value)
+  end
+
+  defp sanitize_text(value), do: value
+
+  # CP1252 → UTF-8 conversion. CP1252 is identical to ISO-8859-1 except for the
+  # 0x80-0x9F range (Windows punctuation/symbols). MSSQL varchar is single-byte,
+  # so every byte maps to exactly one Unicode codepoint — no multi-byte UTF-8
+  # sequences exist in the source to be corrupted.
+  @cp1252_extras %{
+    0x80 => "\u20AC",
+    0x82 => "\u201A",
+    0x83 => "\u0192",
+    0x84 => "\u201E",
+    0x85 => "\u2026",
+    0x86 => "\u2020",
+    0x87 => "\u2021",
+    0x88 => "\u02C6",
+    0x89 => "\u2030",
+    0x8A => "\u0160",
+    0x8B => "\u2039",
+    0x8C => "\u0152",
+    0x8E => "\u017D",
+    0x91 => "\u2018",
+    0x92 => "\u2019",
+    0x93 => "\u201C",
+    0x94 => "\u201D",
+    0x95 => "\u2022",
+    0x96 => "\u2013",
+    0x97 => "\u2014",
+    0x98 => "\u02DC",
+    0x99 => "\u2122",
+    0x9A => "\u0161",
+    0x9B => "\u203A",
+    0x9C => "\u0153",
+    0x9E => "\u017E",
+    0x9F => "\u0178"
+  }
+
+  defp cp1252_to_utf8(binary) do
+    for byte <- :binary.bin_to_list(binary), into: <<>> do
+      cond do
+        byte < 0x80 -> <<byte>>
+        Map.has_key?(@cp1252_extras, byte) -> Map.fetch!(@cp1252_extras, byte)
+        true -> <<byte::utf8>>
+      end
+    end
   end
 end
