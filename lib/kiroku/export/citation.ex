@@ -18,6 +18,8 @@ defmodule Kiroku.Export.Citation do
   Returns `{:ok, citation_string}` or `{:error, reason}`.
   """
   def generate(%Item{} = item, format, preloads \\ %{}) do
+    preloads = normalize_preloads(item, preloads)
+
     try do
       citation = format(item, format, preloads)
       {:ok, citation}
@@ -44,7 +46,7 @@ defmodule Kiroku.Export.Citation do
 
   defp format(item, :apa, preloads) do
     authors = format_authors_apa(preloads[:authors] || [])
-    year = item.publication_year || "n.d."
+    year = citation_year(item) || "n.d."
     title = item.title || "Untitled"
     institution = item.institution || item.department || ""
     url = item_url(item)
@@ -80,7 +82,7 @@ defmodule Kiroku.Export.Citation do
   defp format(item, :mla, preloads) do
     authors = format_authors_mla(preloads[:authors] || [])
     title = item.title || "Untitled"
-    year = item.publication_year || "n.d."
+    year = citation_year(item) || "n.d."
     institution = item.institution || item.department || ""
     url = item_url(item)
 
@@ -114,7 +116,7 @@ defmodule Kiroku.Export.Citation do
   defp format(item, :chicago, preloads) do
     authors = format_authors_chicago(preloads[:authors] || [])
     title = item.title || "Untitled"
-    year = item.publication_year || "n.d."
+    year = citation_year(item) || "n.d."
     institution = item.institution || item.department || ""
     url = item_url(item)
 
@@ -149,7 +151,7 @@ defmodule Kiroku.Export.Citation do
   defp format(item, :ieee, preloads) do
     authors = format_authors_ieee(preloads[:authors] || [])
     title = item.title || "Untitled"
-    year = item.publication_year || "n.d."
+    year = citation_year(item) || "n.d."
     institution = item.institution || item.department || ""
     url = item_url(item)
 
@@ -185,7 +187,7 @@ defmodule Kiroku.Export.Citation do
   defp format(item, :bibtex, preloads) do
     authors = format_authors_bibtex(preloads[:authors] || [])
     key = bibtex_key(item, preloads[:authors] || [])
-    year = item.publication_year || "0"
+    year = citation_year(item) || "0"
     title = item.title || "Untitled"
     institution = item.institution || item.department || ""
     url = item_url(item)
@@ -231,7 +233,7 @@ defmodule Kiroku.Export.Citation do
 
   defp format(item, :ris, preloads) do
     authors = preloads[:authors] || []
-    year = item.publication_year || "0000"
+    year = citation_year(item) || "0000"
     title = item.title || "Untitled"
     institution = item.institution || item.department || ""
     url = item_url(item)
@@ -383,6 +385,33 @@ defmodule Kiroku.Export.Citation do
 
   # ── Misc helpers ──────────────────────────────────────────────────────────
 
+  # Legacy/imported items often store the author only in `student_name` rather
+  # than in the `item_authors` association. Fall back to it so citations don't
+  # render "Unknown".
+  defp normalize_preloads(item, preloads) do
+    authors =
+      case Map.get(preloads, :authors) do
+        authors when is_list(authors) and authors != [] -> authors
+        _ -> if item.student_name, do: [%{author_name: item.student_name}], else: []
+      end
+
+    Map.put(preloads, :authors, authors)
+  end
+
+  # `publication_year` is frequently nil for imported items; cascade through the
+  # available date fields so the citation always shows a real year.
+  defp citation_year(item) do
+    item.publication_year ||
+      year_from_date(item.date_issued) ||
+      year_from_date(item.date_submitted) ||
+      year_from_date(item.date_available) ||
+      year_from_date(item.published_at)
+  end
+
+  defp year_from_date(nil), do: nil
+  defp year_from_date(%Date{year: year}), do: year
+  defp year_from_date(%NaiveDateTime{year: year}), do: year
+
   defp format_pages(nil, nil), do: ""
   defp format_pages(start, nil), do: to_string(start)
   defp format_pages(start, stop), do: "#{start}–#{stop}"
@@ -404,13 +433,13 @@ defmodule Kiroku.Export.Citation do
   defp degree_label(_), do: "Thesis"
 
   defp bibtex_key(item, []) do
-    year = item.publication_year || "0000"
+    year = citation_year(item) || "0000"
     slug = item.title |> String.downcase() |> String.slice(0, 20) |> String.replace(~r/[^\w]/, "")
     "kiroku#{year}#{slug}"
   end
 
   defp bibtex_key(item, [first_author | _]) do
-    year = item.publication_year || "0000"
+    year = citation_year(item) || "0000"
     last = first_author.author_name |> String.split(" ") |> List.last() |> String.downcase()
     "#{last}#{year}"
   end

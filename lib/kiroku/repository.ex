@@ -397,6 +397,16 @@ defmodule Kiroku.Repository do
     Repo.preload(item, @item_preloads)
   end
 
+  def get_item_with_preloads(id_or_handle) do
+    item =
+      case Ecto.UUID.cast(id_or_handle) do
+        {:ok, _} -> Repo.get(Item, id_or_handle)
+        :error -> Repo.get_by(Item, handle: id_or_handle)
+      end
+
+    if item, do: Repo.preload(item, @item_preloads)
+  end
+
   def list_items(%{} = filters) do
     query = from i in Item, order_by: [desc: i.inserted_at]
 
@@ -641,37 +651,71 @@ defmodule Kiroku.Repository do
   @doc """
   Paginated version of `list_items_for_collection/2`.
   Returns `{items, %Pagination{}}`.
+
+  In addition to `:page` / `:per_page`, accepts filter options:
+
+    * `:term`         — full-text search over title + abstract
+    * `:item_type`     — atom exact match (e.g. `:skripsi`)
+    * `:year`          — integer exact match on `publication_year`
+    * `:faculty`       — string exact match
+    * `:department`    — string exact match
+    * `:degree_level`  — atom exact match (e.g. `:s1`)
+
   """
   def list_items_for_collection_pagination(collection_id, opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    term = Keyword.get(opts, :term)
+    item_type = Keyword.get(opts, :item_type)
+    year = Keyword.get(opts, :year)
+    faculty = Keyword.get(opts, :faculty)
+    department = Keyword.get(opts, :department)
+    degree_level = Keyword.get(opts, :degree_level)
 
-    count =
-      Repo.one(
-        from i in Item,
-          where:
-            i.collection_id == ^collection_id and
-              i.status == :published and
-              i.discoverable == true,
-          select: count(i.id)
+    base =
+      from(i in Item,
+        where:
+          i.collection_id == ^collection_id and
+            i.status == :published and
+            i.discoverable == true
       )
+      |> maybe_full_text_filter(term)
+      |> maybe_filter(:item_type, item_type)
+      |> maybe_filter(:publication_year, year)
+      |> maybe_filter(:faculty, faculty)
+      |> maybe_filter(:department, department)
+      |> maybe_filter(:degree_level, degree_level)
 
+    count = Repo.aggregate(base, :count, :id)
     pagination = Pagination.build(count, page, per_page)
 
     items =
-      Repo.all(
-        from i in Item,
-          where:
-            i.collection_id == ^collection_id and
-              i.status == :published and
-              i.discoverable == true,
-          order_by: [desc: i.published_at],
-          limit: ^per_page,
-          offset: ^Pagination.offset(pagination),
-          select: ^@item_display_fields
-      )
+      base
+      |> order_by([i], desc: i.published_at)
+      |> limit(^per_page)
+      |> offset(^Pagination.offset(pagination))
+      |> select([i], ^@item_display_fields)
+      |> Repo.all()
 
     {items, pagination}
+  end
+
+  @doc """
+  Returns the distinct, non-nil values of `field` among published & discoverable
+  items in the given collection. Used to populate filter dropdowns.
+  """
+  def list_distinct_values_for_collection(collection_id, field) do
+    Repo.all(
+      from i in Item,
+        where:
+          i.collection_id == ^collection_id and
+            i.status == :published and
+            i.discoverable == true and
+            not is_nil(field(i, ^field)),
+        select: field(i, ^field),
+        distinct: true,
+        order_by: field(i, ^field)
+    )
   end
 
   def list_items_by_submitter(user_id) do
