@@ -8,6 +8,9 @@
 #         podman compose run --rm app bin/migrate
 #    4. Run seeds (first time only):
 #         podman compose run --rm app bin/seeds
+#    5. Import from MSSQL:
+#         podman compose run --rm app bin/import_from_mssql --check-connection
+#         podman compose run --rm app bin/import_from_mssql --dry-run
 #
 #  View logs:   podman compose logs -f app
 #  Stop:        podman compose down

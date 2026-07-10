@@ -138,6 +138,11 @@ DATABASE_URL=ecto://kiroku_user:YOUR_PASSWORD@DB_MACHINE_IP/kiroku
 # Your domain or the app machine's public IP
 PHX_HOST=kiroku.yourdomain.ac.id
 
+# URL scheme/port for external URL generation (emails, OAI-PMH, redirects).
+# Defaults to https / 443. Override only when accessing via IP without SSL:
+#   PHX_SCHEME=http
+#   PHX_URL_PORT=4000
+
 # ── Defaults (usually fine as-is) ────────────────────────
 
 PHX_SERVER=true          # starts the HTTP server on boot
@@ -242,6 +247,32 @@ Open `http://APP_MACHINE_IP:4000` in your browser. On first boot, the app redire
 
 Once the wizard is complete, all routes become accessible.
 
+#### Accessing via IP before the domain is configured
+
+If you don't have a domain or reverse proxy yet, set these in `.env` so Phoenix generates correct URLs (otherwise redirects will point to `https://your-domain:443` and fail):
+
+```bash
+PHX_HOST=xxx.xxx.xxx.xxx       # the app machine's IP
+PHX_SCHEME=http
+PHX_URL_PORT=4000
+```
+
+Rebuild after changing `.env`:
+
+```bash
+podman compose down
+podman compose up -d --build
+```
+
+When IT points the domain and you set up a reverse proxy with TLS, switch back to defaults:
+
+```bash
+PHX_HOST=kiroku.yourdomain.ac.id
+# Remove or comment out PHX_SCHEME and PHX_URL_PORT — they default to https / 443
+```
+
+Then rebuild again.
+
 ---
 
 ## 5. Reverse Proxy (recommended for production)
@@ -299,31 +330,33 @@ PHX_HOST=kiroku.yourdomain.ac.id
 If migrating data from the old MSSQL system, set the `MSSQL_*` env vars in `.env` and restart:
 
 ```bash
-podman compose up -d   # restart with new env vars
+podman compose down
+podman compose up -d --build
 ```
 
-Then run the import:
+Then run the import using the `bin/import_from_mssql` overlay script (ships inside the release — no Mix needed):
 
 ```bash
 # Test the connection first
-podman compose run --rm app bin/kiroku eval \
-  'Mix.Task.run("kiroku.import_from_mssql", ["--check-connection"])'
+podman compose run --rm app bin/import_from_mssql --check-connection
 
 # Dry run (5 records per view, no writes)
-podman compose run --rm app bin/kiroku eval \
-  'Mix.Task.run("kiroku.import_from_mssql", ["--dry-run"])'
+podman compose run --rm app bin/import_from_mssql --dry-run
+
+# Dry run with a custom sample size
+podman compose run --rm app bin/import_from_mssql --dry-run --limit 20
 
 # Full import (all four views)
-podman compose run --rm app bin/kiroku eval \
-  'Mix.Task.run("kiroku.import_from_mssql", [])'
+podman compose run --rm app bin/import_from_mssql
 
 # Single view only
-podman compose run --rm app bin/kiroku eval \
-  'Mix.Task.run("kiroku.import_from_mssql", ["--view", "Skripsi"])'
+podman compose run --rm app bin/import_from_mssql --view Skripsi
 
 # Incremental sync (only changed records since last run)
-podman compose run --rm app bin/kiroku eval \
-  'Mix.Task.run("kiroku.import_from_mssql", ["--incremental"])'
+podman compose run --rm app bin/import_from_mssql --incremental
+
+# Custom batch size
+podman compose run --rm app bin/import_from_mssql --batch-size 500
 ```
 
 Alternatively, use the `bin/sync_mssql` script from the host (it has a container mode):
@@ -332,7 +365,9 @@ Alternatively, use the `bin/sync_mssql` script from the host (it has a container
 KIROKU_CONTAINER=kiroku_app bin/sync_mssql --dry-run
 ```
 
-When `MSSQL_HOST` is set, Oban cron jobs automatically run incremental syncs every 6 hours. Adjust with `SYNC_CRON` if needed.
+> **Note:** `Mix.Task.run/2` is not available inside production releases. Always
+> use `bin/import_from_mssql` (or `bin/kiroku eval "Kiroku.Release.import_from_mssql([...]"`)
+> — never `bin/kiroku eval 'Mix.Task.run(...)'`.
 
 ---
 
@@ -360,6 +395,21 @@ podman compose up -d --build
 # Run any new migrations
 podman compose run --rm app bin/migrate
 ```
+
+### Change `.env` and apply changes
+
+Environment variables are read at container start time. After editing `.env`, you must recreate the container for changes to take effect:
+
+```bash
+podman compose down
+podman compose up -d --build
+```
+
+> **You do not need to rebuild the image just for `.env` changes.** The `.env`
+> file is read at runtime, not baked into the image. However, `podman compose up`
+> alone may not pick up env changes if the container already exists — use
+> `down` + `up` (or `--force-recreate`) to be safe. Use `--build` only when code
+> or config files inside the image changed (e.g., after `git pull`).
 
 ### Stop / start
 
@@ -448,13 +498,26 @@ sudo ufw allow from APP_MACHINE_IP to any port 5432
 
 Also verify `pg_hba.conf` has an entry for the app machine's IP (see §2.2).
 
-### Force SSL redirect loop
+### Redirects to wrong host / HTTPS when accessing via IP
 
-If accessing directly via IP (not behind a reverse proxy), `force_ssl` is excluded for `localhost` and `127.0.0.1`. For direct IP access without a proxy, either:
+If you set `PHX_HOST` to your eventual domain but are still accessing via `http://10.x.xxx.xx:4000`, Phoenix generates redirect URLs pointing to `https://your-domain:443/...`, which fail. Fix this by setting the URL scheme and port to match your actual access URL:
 
-- Access via `http://localhost:4000` (from the app machine itself), or
-- Put a reverse proxy in front (see §5), or
-- Temporarily comment out `force_ssl` in `config/prod.exs`
+```bash
+# In .env — temporary until the domain + reverse proxy are ready
+PHX_HOST=10.x.xxx.xx
+PHX_SCHEME=http
+PHX_URL_PORT=4000
+```
+
+Then rebuild:
+
+```bash
+podman compose down && podman compose up -d --build
+```
+
+When the domain and reverse proxy are ready, switch `PHX_HOST` back to the domain and remove `PHX_SCHEME` / `PHX_URL_PORT` (they default to `https` / `443`).
+
+> **Note:** The app's `force_ssl` uses `rewrite_on: [:x_forwarded_proto]`, which only redirects behind a reverse proxy (when the `X-Forwarded-Proto` header is present). Direct HTTP access does not trigger `force_ssl`.
 
 ---
 
@@ -465,6 +528,8 @@ If accessing directly via IP (not behind a reverse proxy), `force_ssl` is exclud
 | `SECRET_KEY_BASE` | **Yes** | — | Signs/encrypts cookies and secrets |
 | `DATABASE_URL` | **Yes** | — | Ecto connection URL (`ecto://user:pass@host/db`) |
 | `PHX_HOST` | **Yes** | `example.com` | Public hostname for URL generation |
+| `PHX_SCHEME` | No | `https` | URL scheme for external links (`http` or `https`) |
+| `PHX_URL_PORT` | No | `443` | URL port for external links (not the listen port) |
 | `PHX_SERVER` | No | `true` | Starts the HTTP endpoint on boot |
 | `PORT` | No | `4000` | HTTP listen port |
 | `ECTO_DB_SSL` | No | `true` | Encrypts PostgreSQL connection |
@@ -493,4 +558,3 @@ If accessing directly via IP (not behind a reverse proxy), `force_ssl` is exclud
 | `SMTP_PASSWORD` | No | — | SMTP password |
 | `DNS_CLUSTER_QUERY` | No | — | DNS-based node discovery (multi-node) |
 | `EMBARGO_CRON` | No | `0 2 * * *` | Embargo lifter cron schedule |
-| `SYNC_CRON` | No | `0 */6 * * *` | MSSQL sync cron schedule (per view) |
