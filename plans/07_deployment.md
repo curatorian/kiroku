@@ -277,7 +277,7 @@ Then rebuild again.
 
 ## 5. Reverse Proxy (recommended for production)
 
-For TLS termination and proper domain handling, put a reverse proxy in front of the app. The app's `force_ssl` is configured to respect the `X-Forwarded-Proto` header.
+For TLS termination and proper domain handling, put a reverse proxy in front of the app. The app does **not** use `force_ssl` — the reverse proxy is responsible for HTTP→HTTPS redirect and HSTS headers.
 
 ### 5.1 Caddy (simplest — automatic HTTPS)
 
@@ -517,7 +517,9 @@ podman compose down && podman compose up -d --build
 
 When the domain and reverse proxy are ready, switch `PHX_HOST` back to the domain and remove `PHX_SCHEME` / `PHX_URL_PORT` (they default to `https` / `443`).
 
-> **Note:** The app's `force_ssl` uses `rewrite_on: [:x_forwarded_proto]`, which only redirects behind a reverse proxy (when the `X-Forwarded-Proto` header is present). Direct HTTP access does not trigger `force_ssl`.
+> **Note:** The app does NOT use `force_ssl` — HTTP→HTTPS redirect and HSTS are
+> handled by the reverse proxy (Caddy/Nginx). This allows direct HTTP access
+> during initial setup before the domain and TLS are configured.
 
 ---
 
