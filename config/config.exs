@@ -16,22 +16,11 @@ config :kiroku,
   institution_domain: "unpad.ac.id"
 
 # Oban background job processing
+#
+# MSSQL sync is manual-only: trigger it from Admin → Sync or the
+# `mix kiroku.import_from_mssql` task. Only the embargo lifter runs on a
+# schedule. In prod releases, runtime.exs re-evaluates the embargo cron.
 embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
-sync_cron = System.get_env("SYNC_CRON", "0 */6 * * *")
-
-# Sync cron entries are only included when the MSSQL legacy source is
-# configured. In prod releases, runtime.exs re-evaluates this and overrides.
-sync_crontab =
-  if System.get_env("MSSQL_HOST") not in [nil, ""] do
-    [
-      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
-      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
-      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
-      {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
-    ]
-  else
-    []
-  end
 
 config :kiroku, Oban,
   repo: Kiroku.Repo,
@@ -40,7 +29,7 @@ config :kiroku, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       {embargo_cron, Kiroku.Embargo.LifterWorker} | sync_crontab
+       {embargo_cron, Kiroku.Embargo.LifterWorker}
      ]}
   ]
 
