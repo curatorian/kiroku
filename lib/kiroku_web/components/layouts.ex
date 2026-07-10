@@ -103,6 +103,8 @@ defmodule KirokuWeb.Layouts do
       {render_slot(@inner_block)}
     </main>
 
+    <.public_footer brand={@brand} />
+
     <.flash_group flash={@flash} />
     """
   end
@@ -206,6 +208,15 @@ defmodule KirokuWeb.Layouts do
             />
           <% end %>
           <div class="admin-sidebar-divider" />
+          <%= if @current_scope && @current_scope.user_type == :superadmin do %>
+            <.admin_nav_item
+              icon="hero-key"
+              label="API Tokens"
+              href={~p"/admin/api-tokens"}
+              current_path={@page_title}
+              match="API Tokens"
+            />
+          <% end %>
           <.admin_nav_item
             icon="hero-cog-6-tooth"
             label="Settings"
@@ -263,6 +274,8 @@ defmodule KirokuWeb.Layouts do
         <main class="admin-content">
           {render_slot(@inner_block)}
         </main>
+
+        <.admin_footer brand={@brand} />
       </div>
     </div>
 
@@ -494,6 +507,186 @@ defmodule KirokuWeb.Layouts do
       <.icon name={@icon} class="size-4 flex-shrink-0" />
       {@label}
     </.link>
+    """
+  end
+
+  @doc """
+  Public-facing site footer with brand info, navigation links, and contact details.
+  """
+  attr :brand, :map, default: %{}
+
+  def public_footer(assigns) do
+    assigns =
+      assigns
+      |> assign(:year, DateTime.utc_now().year)
+
+    ~H"""
+    <footer style="background: var(--color-grimoire); border-top: 1px solid rgba(155,126,200,0.12);">
+      <div class="kiroku-ribbon"></div>
+
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <%!-- Brand column --%>
+          <div class="space-y-3">
+            <a href={~p"/"} class="flex items-center gap-2">
+              <%= if @brand[:logo_url] do %>
+                <img src={@brand[:logo_url]} alt={@brand[:name]} class="h-7 w-auto object-contain" />
+              <% else %>
+                <span class="kiroku-kanji text-xl leading-none">記</span>
+                <span class="kiroku-wordmark text-lg leading-none">{@brand[:name] || "Kiroku"}</span>
+              <% end %>
+            </a>
+            <p class="text-sm font-body italic" style="color: var(--color-dust);">
+              {@brand[:tagline] || "Every work recorded. Every scholar remembered."}
+            </p>
+            <p class="text-xs font-ui" style="color: var(--color-quill);">
+              {@brand[:name] || "Kiroku"}
+            </p>
+          </div>
+
+          <%!-- Links column --%>
+          <div class="space-y-2">
+            <h3
+              class="text-xs font-ui font-semibold uppercase tracking-wider"
+              style="color: var(--color-quill);"
+            >
+              Explore
+            </h3>
+            <ul class="space-y-1.5 text-sm">
+              <li>
+                <.link
+                  navigate={~p"/communities"}
+                  class="transition-colors hover:text-patchouli"
+                  style="color: var(--color-wisteria);"
+                >
+                  Communities
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/search"}
+                  class="transition-colors hover:text-patchouli"
+                  style="color: var(--color-wisteria);"
+                >
+                  Search
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/browse"}
+                  class="transition-colors hover:text-patchouli"
+                  style="color: var(--color-wisteria);"
+                >
+                  Browse
+                </.link>
+              </li>
+            </ul>
+          </div>
+
+          <%!-- Contact + API column --%>
+          <div class="space-y-2">
+            <h3
+              class="text-xs font-ui font-semibold uppercase tracking-wider"
+              style="color: var(--color-quill);"
+            >
+              Contact
+            </h3>
+            <ul class="space-y-1.5 text-sm" style="color: var(--color-wisteria);">
+              <li :if={@brand[:contact_email]}>
+                <a
+                  href={"mailto:#{@brand[:contact_email]}"}
+                  class="flex items-center gap-1.5 transition-colors hover:text-patchouli"
+                >
+                  <.icon name="hero-envelope" class="size-3.5 flex-shrink-0" />
+                  {@brand[:contact_email]}
+                </a>
+              </li>
+              <li :if={@brand[:contact_phone]}>
+                <span class="flex items-center gap-1.5">
+                  <.icon name="hero-phone" class="size-3.5 flex-shrink-0" />
+                  {@brand[:contact_phone]}
+                </span>
+              </li>
+            </ul>
+
+            <div class="pt-3 space-y-1.5">
+              <h3
+                class="text-xs font-ui font-semibold uppercase tracking-wider"
+                style="color: var(--color-quill);"
+              >
+                Developer
+              </h3>
+              <ul class="space-y-1.5 text-sm">
+                <li>
+                  <.link
+                    navigate={~p"/api-info"}
+                    class="transition-colors hover:text-patchouli"
+                    style="color: var(--color-wisteria);"
+                  >
+                    API Documentation
+                  </.link>
+                </li>
+                <li>
+                  <.link
+                    navigate={~p"/oai?verb=Identify"}
+                    class="transition-colors hover:text-patchouli"
+                    style="color: var(--color-wisteria);"
+                  >
+                    OAI-PMH
+                  </.link>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Bottom bar --%>
+        <div
+          class="flex flex-col sm:flex-row items-center justify-between gap-2 pt-6 mt-8 text-xs font-ui"
+          style="border-top: 1px solid rgba(155,126,200,0.08); color: var(--color-quill);"
+        >
+          <p>&copy; {@year} {@brand[:name]}. All rights reserved.</p>
+          <p class="flex items-center gap-1.5">
+            Powered by
+            <a href="https://github.com/curatorian/kiroku">
+              <span class="kiroku-wordmark text-sm" style="color: var(--color-dust);">Kiroku</span>
+              Curatorian
+            </a>
+          </p>
+        </div>
+      </div>
+    </footer>
+    """
+  end
+
+  @doc """
+  Minimal footer for the admin/dashboard layout.
+  """
+  attr :brand, :map, default: %{}
+
+  def admin_footer(assigns) do
+    assigns =
+      assigns
+      |> assign(:year, DateTime.utc_now().year)
+
+    ~H"""
+    <footer
+      class="flex items-center justify-between px-6 py-3 text-xs font-ui"
+      style="border-top: 1px solid rgba(155,126,200,0.08); color: var(--color-quill);"
+    >
+      <p>&copy; {@year} {@brand[:name]}. All rights reserved.</p>
+      <div class="flex items-center gap-4">
+        <.link navigate={~p"/"} class="transition-colors hover:text-patchouli">
+          View site
+        </.link>
+        <span class="flex items-center gap-1">
+          <span class="kiroku-wordmark text-sm" style="color: var(--color-dust);">
+            {@brand[:name] || "Kiroku"}
+          </span>
+          <span style="color: var(--color-quill);">v0.1.0</span>
+        </span>
+      </div>
+    </footer>
     """
   end
 

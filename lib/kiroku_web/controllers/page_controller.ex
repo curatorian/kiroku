@@ -36,4 +36,11 @@ defmodule KirokuWeb.PageController do
       brand: Kiroku.Settings.brand_settings()
     )
   end
+
+  def api_info(conn, _params) do
+    render(conn, :api_info,
+      current_user: conn.assigns[:current_user],
+      brand: Kiroku.Settings.brand_settings()
+    )
+  end
 end

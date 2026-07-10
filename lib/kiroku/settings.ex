@@ -88,28 +88,28 @@ defmodule Kiroku.Settings do
 
   @doc """
   Returns the S3 region.
-  Priority: DB setting → AWS_REGION env var → "ap-southeast-1".
+  Priority: DB setting → S3_REGION env var → "ap-southeast-1".
   """
   def storage_region do
     get("storage_region") ||
-      System.get_env("AWS_REGION") ||
+      System.get_env("S3_REGION") ||
       "ap-southeast-1"
   end
 
   @doc """
   Returns the S3 access key ID.
-  Priority: DB setting → AWS_ACCESS_KEY_ID env var.
+  Priority: DB setting → S3_ACCESS_KEY_ID env var.
   """
   def storage_access_key_id do
-    get("storage_access_key_id") || System.get_env("AWS_ACCESS_KEY_ID")
+    get("storage_access_key_id") || System.get_env("S3_ACCESS_KEY_ID")
   end
 
   @doc """
   Returns the S3 secret access key.
-  Priority: DB setting → AWS_SECRET_ACCESS_KEY env var.
+  Priority: DB setting → S3_SECRET_ACCESS_KEY env var.
   """
   def storage_secret_access_key do
-    get("storage_secret_access_key") || System.get_env("AWS_SECRET_ACCESS_KEY")
+    get("storage_secret_access_key") || System.get_env("S3_SECRET_ACCESS_KEY")
   end
 
   @doc """

@@ -5,7 +5,7 @@ defmodule Kiroku.Storage.Uploader do
   Supports :s3 (AWS S3 or any S3-compatible service) and :local adapters.
 
   S3 operations use ExAws.S3. Configure credentials via DB settings or env vars:
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET, S3_ENDPOINT
+    S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_REGION, S3_BUCKET, S3_ENDPOINT
   """
 
   require Logger
