@@ -112,6 +112,14 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Disable force_ssl when serving over HTTP (no reverse proxy / SSL yet).
+  # The prod.exs default enables force_ssl with rewrite_on: [:x_forwarded_proto],
+  # but that still redirects if a proxy injects x-forwarded-proto headers.
+  # When PHX_SCHEME=http, we bypass force_ssl entirely so the app is reachable.
+  if url_scheme == "http" do
+    config :kiroku, KirokuWeb.Endpoint, force_ssl: false
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
