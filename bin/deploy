@@ -60,6 +60,9 @@ $COMPOSE build $NO_CACHE
 ok "Image built."
 
 info "Restarting container…"
+# podman-compose 1.0.6 doesn't auto-recreate containers when the image
+# changes. We must explicitly stop + remove the old container first.
+$COMPOSE down || true
 $COMPOSE up -d
 ok "Container started."
 
