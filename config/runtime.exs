@@ -89,10 +89,20 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
 
+  # URL scheme/port for generating external URLs (emails, OAI-PMH, redirects).
+  # Defaults to https/443 for production. Override during interim setup
+  # (e.g., accessing via private IP without SSL):
+  #
+  #     PHX_HOST=10.x.xxx.xx
+  #     PHX_SCHEME=http
+  #     PHX_URL_PORT=4000
+  url_scheme = System.get_env("PHX_SCHEME") || "https"
+  url_port = String.to_integer(System.get_env("PHX_URL_PORT") || "443")
+
   config :kiroku, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :kiroku, KirokuWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: host, port: url_port, scheme: url_scheme],
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.

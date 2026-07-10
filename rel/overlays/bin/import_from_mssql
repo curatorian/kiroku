@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+cd -P -- "$(dirname -- "$0")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# bin/import_from_mssql — release overlay script
+#
+# Runs the MSSQL → Kiroku import from inside a production release (no Mix).
+# Accepts the same flags as `mix kiroku.import_from_mssql`:
+#
+#   bin/import_from_mssql --check-connection
+#   bin/import_from_mssql --dry-run
+#   bin/import_from_mssql --dry-run --limit 20
+#   bin/import_from_mssql --batch-size 500
+#   bin/import_from_mssql --view Skripsi
+#   bin/import_from_mssql --incremental
+#
+# In a container:
+#   podman compose run --rm app bin/import_from_mssql --check-connection
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build an Elixir list literal from the shell args, e.g. ["--dry-run","--limit","5"]
+if [ $# -gt 0 ]; then
+  _args=""
+  for _arg in "$@"; do
+    _args="${_args}\"${_arg}\","
+  done
+  _args="[${_args%,}]"
+else
+  _args="[]"
+fi
+
+exec ./kiroku eval "Kiroku.Release.import_from_mssql(${_args})"

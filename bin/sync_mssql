@@ -77,6 +77,10 @@ if [[ -n "${KIROKU_CONTAINER:-}" ]]; then
   CONTAINER_CMD="docker"
   command -v podman &>/dev/null && CONTAINER_CMD="podman"
 
+  # Build an Elixir list literal for the eval call.
+  # jq -R . | jq -s . produces ["arg1","arg2"] which is valid Elixir syntax.
+  EVAL_ARGS=$(printf '%s\n' "${EXTRA_ARGS[@]:-}" | jq -R . | jq -s .)
+
   $CONTAINER_CMD exec \
     -e MSSQL_HOST="$MSSQL_HOST" \
     -e MSSQL_DB="$MSSQL_DB" \
@@ -84,7 +88,7 @@ if [[ -n "${KIROKU_CONTAINER:-}" ]]; then
     -e MSSQL_PASS="$MSSQL_PASS" \
     -e MSSQL_PORT="${MSSQL_PORT:-1433}" \
     "$KIROKU_CONTAINER" \
-    /app/bin/kiroku eval "Mix.Task.run(\"${TASK}\", $(printf '%s\n' "${EXTRA_ARGS[@]:-}" | jq -R . | jq -s .))"
+    /app/bin/kiroku eval "Kiroku.Release.import_from_mssql(${EVAL_ARGS})"
 
   log "Done (container mode)."
   exit 0
@@ -114,7 +118,7 @@ if [[ -n "${KIROKU_RELEASE:-}" ]] || [[ -n "${KIROKU_RELEASE_BIN:-}" ]]; then
   MSSQL_USER="$MSSQL_USER" \
   MSSQL_PASS="$MSSQL_PASS" \
   MSSQL_PORT="${MSSQL_PORT:-1433}" \
-  "$RELEASE_BIN" eval "Mix.Task.run(\"${TASK}\", ${ELIXIR_ARGS})"
+  "$RELEASE_BIN" eval "Kiroku.Release.import_from_mssql(${ELIXIR_ARGS})"
 
   log "Done (release mode)."
   exit 0

@@ -57,6 +57,27 @@ defmodule Kiroku.Release do
     end
   end
 
+  @doc """
+  Imports legacy thesis records from MSSQL views.
+
+  Accepts the same string args as `mix kiroku.import_from_mssql`:
+
+      bin/import_from_mssql --check-connection
+      bin/import_from_mssql --dry-run
+      bin/import_from_mssql --dry-run --limit 20
+      bin/import_from_mssql --batch-size 500
+      bin/import_from_mssql --view Skripsi
+      bin/import_from_mssql --incremental
+
+  Or via eval:
+
+      bin/kiroku eval "Kiroku.Release.import_from_mssql([\"--check-connection\"])"
+  """
+  def import_from_mssql(args \\ []) do
+    load_app()
+    Kiroku.Sync.Importer.run_import(args)
+  end
+
   defp repos, do: Application.fetch_env!(@app, :ecto_repos)
   defp load_app, do: Application.load(@app)
 end

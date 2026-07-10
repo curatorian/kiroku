@@ -29,8 +29,220 @@ defmodule Kiroku.Sync.Importer do
     {"Tugas-Akhir", :tugas_akhir}
   ]
 
+  @import_opts [
+    strict: [
+      batch_size: :integer,
+      dry_run: :boolean,
+      view: :string,
+      incremental: :boolean,
+      check_connection: :boolean,
+      limit: :integer
+    ]
+  ]
+
   def views, do: @views
   def valid_view?(name), do: Enum.any?(@views, fn {v, _} -> v == name end)
+
+  @doc """
+  Full import orchestration — the canonical CLI entry point.
+
+  Called by both the Mix task (`mix kiroku.import_from_mssql`) and the release
+  overlay (`bin/import_from_mssql`). This function is Mix-free so it works in
+  production releases where `Mix` is unavailable.
+
+  Accepts the same string args as the CLI:
+
+      ["--check-connection"]
+      ["--dry-run"]
+      ["--dry-run", "--limit", "20"]
+      ["--batch-size", "500"]
+      ["--view", "Skripsi"]
+      ["--incremental"]
+
+  Returns the final aggregated stats map.
+  """
+  def run_import(args) when is_list(args) do
+    {opts, _, _} = OptionParser.parse(args, @import_opts)
+
+    batch_size = Keyword.get(opts, :batch_size, 100)
+    dry_run? = Keyword.get(opts, :dry_run, false)
+    incremental? = Keyword.get(opts, :incremental, false)
+    only_view = Keyword.get(opts, :view)
+    check_connection? = Keyword.get(opts, :check_connection, false)
+    explicit_limit = Keyword.get(opts, :limit)
+
+    limit =
+      cond do
+        explicit_limit -> explicit_limit
+        dry_run? -> 5
+        true -> nil
+      end
+
+    if check_connection? do
+      check_mssql_connection()
+      System.halt(0)
+    end
+
+    IO.puts("Starting LegacyRepo…")
+
+    case LegacyRepo.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+      {:error, reason} -> raise "Cannot start LegacyRepo: #{inspect(reason)}"
+    end
+
+    if dry_run?, do: IO.puts("[DRY RUN] — no database writes will occur")
+    if incremental?, do: IO.puts("[INCREMENTAL] — only syncing changed records")
+
+    views_to_run =
+      case only_view do
+        nil -> views()
+        name -> Enum.filter(views(), fn {v, _} -> v == name end)
+      end
+
+    if views_to_run == [] do
+      valid = Enum.map_join(views(), ", ", fn {v, _} -> v end)
+      raise "No matching view. Valid values: #{valid}"
+    end
+
+    final_stats =
+      Enum.reduce(
+        views_to_run,
+        %{inserted: 0, updated: 0, skipped: 0, failed: 0},
+        fn {view_name, _}, acc ->
+          IO.puts("\n── View: #{view_name} ──")
+
+          sync_run =
+            if dry_run? do
+              nil
+            else
+              {:ok, run} =
+                Sync.start_sync_run(view_name, %{
+                  run_type: "import",
+                  triggered_by: "cli"
+                })
+
+              run
+            end
+
+          view_stats =
+            run_view(view_name,
+              dry_run: dry_run?,
+              incremental: incremental?,
+              sync_run: sync_run,
+              batch_size: batch_size,
+              limit: limit,
+              log: true
+            )
+
+          if sync_run do
+            complete_or_fail(sync_run, view_stats)
+          end
+
+          %{
+            inserted: acc.inserted + view_stats.inserted,
+            updated: acc.updated + view_stats.updated,
+            skipped: acc.skipped + view_stats.skipped,
+            failed: acc.failed + view_stats.failed
+          }
+        end
+      )
+
+    IO.puts("""
+
+    Import complete.
+      Inserted : #{final_stats.inserted}
+      Updated  : #{final_stats.updated}
+      Skipped  : #{final_stats.skipped}
+      Errors   : #{final_stats.failed}
+    """)
+
+    final_stats
+  end
+
+  defp complete_or_fail(sync_run, %{failed: failed, total: total})
+       when failed > 0 and total > 0 and failed >= total do
+    Sync.fail_sync_run(sync_run, "all #{failed} records failed")
+  end
+
+  defp complete_or_fail(sync_run, view_stats) do
+    Sync.complete_sync_run(sync_run, %{
+      processed: view_stats.processed,
+      inserted: view_stats.inserted,
+      updated: view_stats.updated,
+      failed: view_stats.failed,
+      last_synced_at: DateTime.utc_now(),
+      last_synced_legacy_id: last_legacy_id(sync_run.source_view)
+    })
+  end
+
+  defp check_mssql_connection do
+    IO.puts("Checking MSSQL connection status…")
+    IO.puts("")
+
+    config = Kiroku.LegacyRepo.Inspector.get_config()
+
+    if !config.configured? do
+      IO.puts(:stderr, "❌ MSSQL connection is not configured.")
+      IO.puts("")
+      IO.puts("Required environment variables:")
+      IO.puts("  • MSSQL_HOST")
+      IO.puts("  • MSSQL_DB")
+      IO.puts("  • MSSQL_USER")
+      IO.puts("  • MSSQL_PASS")
+      IO.puts("  • MSSQL_PORT (optional, default: 1433)")
+      IO.puts("")
+      IO.puts("Please set these environment variables and try again.")
+      System.halt(1)
+    end
+
+    IO.puts("Connection Configuration:")
+    IO.puts("  • Hostname: #{config.hostname}")
+    IO.puts("  • Database: #{config.database}")
+    IO.puts("  • Port: #{config.port}")
+    IO.puts("  • Username: #{config.username}")
+    IO.puts("  • Pool Size: #{config.pool_size}")
+    IO.puts("")
+
+    case Kiroku.LegacyRepo.Inspector.test_connection() do
+      {:ok, info} ->
+        IO.puts("✅ Connection successful!")
+        IO.puts("  • Server Version: #{info.version}")
+        IO.puts("  • Connected at: #{info.connected_at}")
+        IO.puts("")
+        IO.puts("The MSSQL database is accessible and ready for import.")
+
+      {:error, :repo_not_started} ->
+        IO.puts(:stderr, "❌ Connection failed: LegacyRepo could not be started.")
+        IO.puts("")
+        IO.puts("This may be due to:")
+        IO.puts("  • Network connectivity issues")
+        IO.puts("  • Incorrect database credentials")
+        IO.puts("  • Firewall blocking the connection")
+        IO.puts("  • MSSQL server not running")
+        IO.puts("")
+        IO.puts(:stderr, "Please check your configuration and try again.")
+        System.halt(1)
+
+      {:error, :connection_failed} ->
+        IO.puts(:stderr, "❌ Connection failed: Unable to reach MSSQL server.")
+        IO.puts("")
+        IO.puts("This may be due to:")
+        IO.puts("  • Network connectivity issues")
+        IO.puts("  • Incorrect database credentials")
+        IO.puts("  • Firewall blocking the connection")
+        IO.puts("  • MSSQL server not running")
+        IO.puts("")
+        IO.puts(:stderr, "Please check your configuration and try again.")
+        System.halt(1)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "❌ Connection failed: #{inspect(reason)}")
+        IO.puts("")
+        IO.puts(:stderr, "Please check your configuration and try again.")
+        System.halt(1)
+    end
+  end
 
   @doc """
   Processes a single legacy view end-to-end.
