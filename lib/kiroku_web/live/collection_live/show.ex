@@ -351,7 +351,7 @@ defmodule KirokuWeb.CollectionLive.Show do
       <%= for opt <- @options do %>
         <% val = to_string(opt) %>
         <option value={val} selected={to_string(@value) == val}>
-          <%= if @formatter, do: @formatter.(opt), else: opt %>
+          {if @formatter, do: @formatter.(opt), else: opt}
         </option>
       <% end %>
     </select>

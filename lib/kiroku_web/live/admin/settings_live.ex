@@ -93,7 +93,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
               >
                 <p class="text-xs" style="color: var(--color-quill);">
                   Leave fields blank to use environment variables
-                  (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET, S3_ENDPOINT, S3_PUBLIC_URL).
+                  (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_REGION, S3_BUCKET, S3_ENDPOINT, S3_PUBLIC_URL).
                 </p>
 
                 <.input
@@ -107,7 +107,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
                   field={@storage_form[:region]}
                   type="text"
                   label="AWS Region"
-                  placeholder="ap-southeast-1 (or $AWS_REGION)"
+                  placeholder="ap-southeast-1 (or $S3_REGION)"
                 />
 
                 <.input
@@ -133,14 +133,14 @@ defmodule KirokuWeb.Admin.SettingsLive do
                   field={@storage_form[:access_key_id]}
                   type="text"
                   label="Access Key ID"
-                  placeholder="(leave blank to use $AWS_ACCESS_KEY_ID)"
+                  placeholder="(leave blank to use $S3_ACCESS_KEY_ID)"
                 />
 
                 <.input
                   field={@storage_form[:secret_access_key]}
                   type="password"
                   label="Secret Access Key"
-                  placeholder="(leave blank to use $AWS_SECRET_ACCESS_KEY)"
+                  placeholder="(leave blank to use $S3_SECRET_ACCESS_KEY)"
                 />
               </div>
             <% end %>

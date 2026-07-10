@@ -166,7 +166,7 @@ defmodule KirokuWeb.SetupLive do
               />
               <p class="text-xs" style="color: var(--color-quill);">
                 Fields left blank fall back to environment variables
-                (<code>AWS_ACCESS_KEY_ID</code>, <code>S3_BUCKET</code>, etc.).
+                (<code>S3_ACCESS_KEY_ID</code>, <code>S3_BUCKET</code>, etc.).
               </p>
             <% end %>
 

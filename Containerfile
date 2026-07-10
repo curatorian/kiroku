@@ -76,17 +76,20 @@ RUN mix release
 FROM ${RUNNER_IMAGE} AS runner
 
 # Runtime libraries:
-#   libstdc++6  → C++ ABI used by the BEAM JIT
-#   libssl3     → :crypto / TLS for DB, S3, PAuS, Req
 #   libncurses6 → enables `bin/kiroku remote` for live debugging
-#   locales + ca-certificates → UTF-8 + verifying outbound TLS
+#   locales     → UTF-8 support
+# libssl3 / libcrypto / ca-certificates are copied from the builder below to
+# avoid intermittent 403s from Debian security mirrors behind proxies.
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    libstdc++6 \
-    libssl3 \
     libncurses6 \
     locales \
-    ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+
+# SSL libraries + CA certificates from the builder image (which already has them).
+# Needed by :crypto, TLS connections (Postgres, S3, PAuS, Req).
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /etc/ssl/certs /etc/ssl/certs
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG="en_US.UTF-8" \
@@ -98,6 +101,10 @@ RUN useradd --create-home --uid 10001 app
 
 WORKDIR /app
 RUN chown app:app /app
+
+# Create the local uploads directory so STORAGE_ADAPTER=local works
+# immediately and so named volumes mounted here inherit app ownership.
+RUN mkdir -p /app/priv/uploads && chown app:app /app/priv/uploads
 
 # Copy the assembled release from the builder.
 COPY --from=builder --chown=app:app /app/_build/prod/rel/kiroku ./

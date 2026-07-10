@@ -264,7 +264,7 @@ defmodule Kiroku.Repository.Item do
     item
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required([:title])
-    |> validate_length(:title, min: 1, max: 500)
+    |> validate_length(:title, min: 1)
     |> unique_constraint(:handle)
     |> unique_constraint(:legacy_id)
   end

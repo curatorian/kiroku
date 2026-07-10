@@ -19,12 +19,26 @@ defmodule KirokuWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :authenticated_api do
+    plug :accepts, ["json"]
+    plug KirokuWeb.Plugs.ApiAuth
+    plug KirokuWeb.Plugs.RequireApiToken
+  end
+
+  # ── Health check (container liveness/readiness probe) ─────────────────────────
+  scope "/", KirokuWeb do
+    pipe_through :api
+
+    get "/health", HealthController, :show
+  end
+
   # ── Public routes (no auth required) ──────────────────────────────────────────
 
   scope "/", KirokuWeb do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/api-info", PageController, :api_info
 
     # First-run onboarding wizard (gated by SetupGuard)
     live_session :setup do
@@ -55,10 +69,10 @@ defmodule KirokuWeb.Router do
     end
   end
 
-  # ── REST API v1 ────────────────────────────────────────────────────────────────
+  # ── REST API v1 (requires API token) ─────────────────────────────────────────
 
   scope "/api/v1", KirokuWeb.Api.V1 do
-    pipe_through :api
+    pipe_through :authenticated_api
 
     resources "/communities", CommunityController, only: [:index, :show]
     resources "/collections", CollectionController, only: [:index, :show]
@@ -154,6 +168,17 @@ defmodule KirokuWeb.Router do
 
       # Storage settings
       live "/settings", SettingsLive, :index
+    end
+  end
+
+  # API Token management — superadmin only. Kept outside the KirokuWeb.Admin
+  # scope to avoid aliasing to KirokuWeb.Admin.*.
+  scope "/admin", KirokuWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin_api_tokens,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      live "/api-tokens", Admin.ApiTokenLive, :index
     end
   end
 

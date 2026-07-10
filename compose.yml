@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Kiroku – Podman Compose deployment
+#
+#  Usage:
+#    1. Copy .env.example → .env and fill in your values
+#    2. podman compose up -d --build
+#    3. Run migrations (first time only):
+#         podman compose run --rm app bin/migrate
+#    4. Run seeds (first time only):
+#         podman compose run --rm app bin/seeds
+#
+#  View logs:   podman compose logs -f app
+#  Stop:        podman compose down
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: kiroku:latest
+    container_name: kiroku_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-4000}:4000"
+    volumes:
+      # Persist uploaded files when using STORAGE_ADAPTER=local
+      - kiroku_uploads:/app/priv/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "bin/kiroku pid 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  kiroku_uploads:
