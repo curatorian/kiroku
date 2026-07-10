@@ -532,7 +532,6 @@ defmodule KirokuWeb.Layouts do
               <%= if @brand[:logo_url] do %>
                 <img src={@brand[:logo_url]} alt={@brand[:name]} class="h-7 w-auto object-contain" />
               <% else %>
-                <span class="kiroku-kanji text-xl leading-none">記</span>
                 <span class="kiroku-wordmark text-lg leading-none">{@brand[:name] || "Kiroku"}</span>
               <% end %>
             </a>
