@@ -75,6 +75,16 @@ defmodule Kiroku.Release do
   """
   def import_from_mssql(args \\ []) do
     load_app()
+
+    # `bin/kiroku eval` does NOT start the application or its dependencies
+    # (unlike Mix's `@requirements ["app.start"]`). We must start the full app
+    # so Kiroku.Repo (Postgres) and :db_connection / :tds are running before
+    # LegacyRepo.start_link() is called inside Importer.run_import/1.
+    #
+    # This is safe in a `podman compose run --rm` container because it gets
+    # its own network namespace (no port conflict with the running app).
+    Application.ensure_all_started(:kiroku)
+
     Kiroku.Sync.Importer.run_import(args)
   end
 
