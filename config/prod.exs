@@ -7,17 +7,13 @@ import Config
 # before starting your production server.
 config :kiroku, KirokuWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
-# Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
-config :kiroku, KirokuWeb.Endpoint,
-  force_ssl: [
-    rewrite_on: [:x_forwarded_proto],
-    exclude: [
-      paths: ["/health"],
-      hosts: ["localhost", "127.0.0.1"]
-    ]
-  ]
+# SSL redirect and HSTS are handled by the reverse proxy (Caddy/Nginx) in
+# production, not by the application. This allows direct HTTP access during
+# initial setup (e.g., via IP address before the domain and TLS are configured).
+# The reverse proxy should:
+#   1. Terminate TLS and forward to the app on port 4000
+#   2. Set X-Forwarded-Proto: https so the app knows the original scheme
+#   3. Handle HTTP → HTTPS redirects and HSTS headers
 
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req

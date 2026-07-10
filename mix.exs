@@ -41,16 +41,16 @@ defmodule Kiroku.MixProject do
   defp deps do
     [
       # ── Phoenix Core ──────────────────────────────────────────────────────
-      {:phoenix, "~> 1.8.5"},
+      {:phoenix, "~> 1.8.9"},
       {:phoenix_ecto, "~> 4.5"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_view, "~> 1.1.0"},
       {:phoenix_live_dashboard, "~> 0.8.3"},
-      {:bandit, "~> 1.5"},
+      {:bandit, "~> 1.12.0"},
 
       # ── Ecto + Database ───────────────────────────────────────────────────
       {:ecto_sql, "~> 3.13"},
-      {:postgrex, ">= 0.0.0"},
+      {:postgrex, "~> 0.22.3"},
       {:tds, "~> 2.3"},
 
       # ── Authentication ────────────────────────────────────────────────────
@@ -67,12 +67,21 @@ defmodule Kiroku.MixProject do
       {:tzdata, "~> 1.1"},
 
       # ── Email ─────────────────────────────────────────────────────────────
-      {:swoosh, "~> 1.16"},
+      {:swoosh, "~> 1.26.0"},
       # SMTP adapter for Swoosh (required by Swoosh.Adapters.SMTP)
       {:gen_smtp, "~> 1.2"},
 
       # ── HTTP ──────────────────────────────────────────────────────────────
-      {:req, "~> 0.5"},
+      {:req, "~> 0.6.0"},
+
+      # ── Security-pinned transitive deps ───────────────────────────────────
+      # These are transitive deps of phoenix/ecto/req/etc that have known
+      # CVEs in older versions. We pin them here so `mix deps.get` always
+      # resolves to patched releases.
+      {:decimal, "~> 2.4", override: true},
+      {:plug, "~> 1.20.0", override: true},
+      {:mint, "~> 1.9.0", override: true},
+      {:hpax, "~> 1.0.4", override: true},
 
       # ── Observability ─────────────────────────────────────────────────────
       {:telemetry_metrics, "~> 1.0"},
