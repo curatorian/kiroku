@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+#  bin/deploy — Kiroku deployment helper for Podman Compose
+#
+#  Usage:
+#    bin/deploy                Pull, rebuild, restart
+#    bin/deploy --no-cache     Rebuild without layer cache (use after deps change)
+#    bin/deploy --migrate      Also run pending database migrations
+#    bin/deploy --status       Show container status and recent logs
+#    bin/deploy --logs         Follow app logs
+#    bin/deploy --shell        Open a remote IEx shell inside the container
+#
+#  Run from the project root (where compose.yml lives).
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+c_reset="\033[0m"
+c_blue="\033[0;34m"
+c_green="\033[0;32m"
+c_yellow="\033[0;33m"
+c_red="\033[0;31m"
+
+info()  { echo -e "${c_blue}▶${c_reset} $*"; }
+ok()    { echo -e "${c_green}✓${c_reset} $*"; }
+warn()  { echo -e "${c_yellow}⚠${c_reset} $*"; }
+fail()  { echo -e "${c_red}✗${c_reset} $*" >&2; exit 1; }
+
+# Ensure we're in the project root.
+[[ -f compose.yml ]] || [[ -f compose.yaml ]] || fail "Run this from the project root (compose.yml not found)."
+
+COMPOSE="podman compose"
+NO_CACHE=""
+RUN_MIGRATE=""
+
+# ── Parse args ───────────────────────────────────────────────────────────────
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-cache)  NO_CACHE="--no-cache" ;;
+    --migrate)   RUN_MIGRATE=1 ;;
+    --status)    info "Container status"; $COMPOSE ps; echo; \
+                 info "Recent logs"; $COMPOSE logs --tail 30 app; exit 0 ;;
+    --logs)      exec $COMPOSE logs -f app ;;
+    --shell)     exec podman exec -it kiroku_app bin/kiroku remote ;;
+    --help|-h)   head -15 "$0" | tail -13; exit 0 ;;
+    *) fail "Unknown option: $arg (try --help)" ;;
+  esac
+done
+
+# ── Deploy ───────────────────────────────────────────────────────────────────
+
+info "Pulling latest code…"
+git pull --ff-only
+ok "Code up to date."
+
+info "Rebuilding image…"
+$COMPOSE build $NO_CACHE
+ok "Image built."
+
+info "Restarting container…"
+$COMPOSE up -d
+ok "Container started."
+
+# Wait for health check to pass (max 60s).
+info "Waiting for health check…"
+for i in $(seq 1 12); do
+  status=$(podman inspect --format='{{.State.Health.Status}}' kiroku_app 2>/dev/null || echo "starting")
+  if [[ "$status" == "healthy" ]]; then
+    ok "App is healthy."
+    break
+  fi
+  sleep 5
+  [[ $i -eq 12 ]] && warn "Health check still '$status' after 60s — check logs: $COMPOSE logs --tail 50 app"
+done
+
+# Run migrations if requested (or if the container just started for the first time).
+if [[ -n "$RUN_MIGRATE" ]]; then
+  info "Running migrations…"
+  $COMPOSE run --rm app bin/migrate
+  ok "Migrations complete."
+fi
+
+echo
+ok "Deploy complete."
+$COMPOSE ps

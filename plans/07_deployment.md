@@ -389,11 +389,27 @@ podman compose restart app
 ### Update to a new version
 
 ```bash
-git pull
-podman compose up -d --build
+bin/deploy                 # pull, rebuild, restart
+```
 
-# Run any new migrations
-podman compose run --rm app bin/migrate
+After updating dependencies (`mix.exs`/`mix.lock` changes), add `--no-cache`:
+
+```bash
+bin/deploy --no-cache      # full rebuild, no layer cache
+```
+
+If there are new database migrations:
+
+```bash
+bin/deploy --migrate       # rebuild + restart + run migrations
+```
+
+Other commands:
+
+```bash
+bin/deploy --status        # show container status + recent logs
+bin/deploy --logs          # follow app logs (Ctrl-C to stop)
+bin/deploy --shell         # open a remote IEx shell inside the container
 ```
 
 ### Change `.env` and apply changes

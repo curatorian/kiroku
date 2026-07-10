@@ -16,7 +16,7 @@
       <%= if @brand.logo_url do %>
         <img src={@brand.logo_url} alt={@brand.name} class="h-20 w-auto mx-auto object-contain" />
       <% else %>
-        <h1 class="kiroku-wordmark" style="font-size: 4rem;">記 {@brand.name}</h1>
+        <h1 class="kiroku-wordmark" style="font-size: 4rem;">{@brand.name}</h1>
       <% end %>
       <p class="font-body text-xl" style="color: var(--color-wisteria);">
         {@brand.tagline}
