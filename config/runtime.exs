@@ -41,26 +41,15 @@ if config_env() == :prod do
       pool_size: 2
   end
 
-  # Rebuild Oban crontab at runtime so releases respect MSSQL_HOST
+  # Rebuild Oban crontab at runtime so releases respect env vars.
+  # MSSQL sync is manual-only (Admin → Sync or mix task); only the embargo
+  # lifter is scheduled here.
   embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
-  sync_cron = System.get_env("SYNC_CRON", "0 */6 * * *")
-
-  sync_crontab =
-    if System.get_env("MSSQL_HOST") not in [nil, ""] do
-      [
-        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
-        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
-        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
-        {sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
-      ]
-    else
-      []
-    end
 
   config :kiroku, Oban,
     plugins: [
       {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
-      {Oban.Plugins.Cron, crontab: [{embargo_cron, Kiroku.Embargo.LifterWorker} | sync_crontab]}
+      {Oban.Plugins.Cron, crontab: [{embargo_cron, Kiroku.Embargo.LifterWorker}]}
     ]
 
   database_url =

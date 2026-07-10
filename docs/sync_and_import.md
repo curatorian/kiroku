@@ -204,19 +204,12 @@ Options:
 | `--batch-size N` | int | `100` | Streaming chunk size. |
 | `--check-connection` | bool | `false` | Test MSSQL connectivity and exit. |
 
-### 3. Scheduled Cron Jobs
+### 3. Scheduled Jobs
 
-Configured in `config/config.exs` (override with the `SYNC_CRON` env var,
-default `0 */6 * * *` — every 6 hours):
-
-```elixir
-{sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Skripsi"}},
-{sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tesis"}},
-{sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Disertasi"}},
-{sync_cron, Kiroku.Workers.MssqlSyncWorker, args: %{"view" => "Tugas-Akhir"}}
-```
-
-These enqueue four `MssqlSyncWorker` jobs per tick (incremental mode).
+MSSQL sync is **manual-only** — there is no cron schedule for it. Trigger syncs
+from Admin → Sync (one button per view, plus "Sync all") or the
+`mix kiroku.import_from_mssql` task. Only the embargo lifter runs on a schedule
+(daily at 02:00 by default, overridable via the `EMBARGO_CRON` env var).
 
 ---
 
@@ -349,8 +342,9 @@ queues: [default: 10, embargo: 2, notifications: 5, sync: 2, sync_retries: 1]
 
 | Env var | Default | Controls |
 |---|---|---|
-| `SYNC_CRON` | `0 */6 * * *` | Incremental sync schedule |
 | `EMBARGO_CRON` | `0 2 * * *` | Embargo lifter (unrelated to import) |
+
+MSSQL sync has no cron — it is manual-only (Admin → Sync or mix task).
 
 ---
 
