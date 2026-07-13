@@ -19,6 +19,17 @@ defmodule KirokuWeb.Admin.CollectionLive.Show do
           <span class="kiroku-handle">{@collection.handle}</span>
         </div>
         <div class="kiroku-card p-6 space-y-4">
+          <div class="flex items-center gap-2 flex-wrap">
+            <%= if @collection.is_active do %>
+              <span class="status-badge published">Active</span>
+            <% else %>
+              <span class="status-badge withdrawn">Inactive</span>
+            <% end %>
+            <span class="status-badge submitted">Visibility: {@collection.access_level}</span>
+            <span class="status-badge draft">
+              New items default to: {@collection.default_item_access_level}
+            </span>
+          </div>
           <%= if @collection.short_description do %>
             <p style="color: var(--color-quill);">{@collection.short_description}</p>
           <% end %>

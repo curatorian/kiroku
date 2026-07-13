@@ -5,18 +5,24 @@ defmodule Kiroku.RepositoryTest do
 
   # ── Fixtures ───────────────────────────────────────────────────────────────
 
-  defp create_collection do
+  defp create_collection(opts \\ []) do
     handle = "comm-#{System.unique_integer([:positive])}"
 
     {:ok, community} =
       Repository.create_community(%{"name" => "Community", "handle" => handle})
 
-    {:ok, collection} =
-      Repository.create_collection(%{
-        "name" => "Collection",
-        "community_id" => community.id,
-        "handle" => "coll-#{System.unique_integer([:positive])}"
-      })
+    base = %{
+      "name" => "Collection",
+      "community_id" => community.id,
+      "handle" => "coll-#{System.unique_integer([:positive])}"
+    }
+
+    attrs =
+      Enum.reduce(opts, base, fn {k, v}, acc ->
+        Map.put(acc, to_string(k), v)
+      end)
+
+    {:ok, collection} = Repository.create_collection(attrs)
 
     collection
   end
@@ -166,6 +172,180 @@ defmodule Kiroku.RepositoryTest do
 
       {:ok, item} = Repository.approve_item(item, a)
       assert item.status == :published
+    end
+  end
+
+  # ── Visibility scope in discovery ──────────────────────────────────────────
+
+  describe "visibility scope filtering" do
+    defp published_item(attrs) do
+      create_item(
+        Map.merge(
+          %{"status" => "published", "discoverable" => true, "access_level" => "open"},
+          attrs
+        )
+      )
+    end
+
+    test "public scope only sees :open items" do
+      published_item(%{"title" => "Open One"})
+      published_item(%{"title" => "Internal One", "access_level" => "internal"})
+      published_item(%{"title" => "Restricted One", "access_level" => "restricted"})
+
+      items = Repository.list_published_items(scope: :public)
+      titles = Enum.map(items, & &1.title)
+
+      assert "Open One" in titles
+      refute "Internal One" in titles
+      refute "Restricted One" in titles
+    end
+
+    test "internal scope sees :open and :internal items" do
+      published_item(%{"title" => "Open Two"})
+      published_item(%{"title" => "Internal Two", "access_level" => "internal"})
+      published_item(%{"title" => "Restricted Two", "access_level" => "restricted"})
+
+      items = Repository.list_published_items(scope: :internal)
+      titles = Enum.map(items, & &1.title)
+
+      assert "Open Two" in titles
+      assert "Internal Two" in titles
+      refute "Restricted Two" in titles
+    end
+
+    test "staff scope sees all published items" do
+      published_item(%{"title" => "Open Three"})
+      published_item(%{"title" => "Internal Three", "access_level" => "internal"})
+      published_item(%{"title" => "Restricted Three", "access_level" => "restricted"})
+      published_item(%{"title" => "Closed Three", "access_level" => "closed"})
+
+      items = Repository.list_published_items(scope: :staff)
+      titles = Enum.map(items, & &1.title)
+
+      assert "Open Three" in titles
+      assert "Internal Three" in titles
+      assert "Restricted Three" in titles
+      assert "Closed Three" in titles
+    end
+
+    test "search respects scope" do
+      published_item(%{"title" => "Quantum Mechanics", "access_level" => "internal"})
+      published_item(%{"title" => "Quantum Field Theory", "access_level" => "open"})
+
+      public_results = Repository.search_items(%{term: "Quantum", scope: :public})
+      internal_results = Repository.search_items(%{term: "Quantum", scope: :internal})
+
+      assert Enum.count(public_results) == 1
+      assert hd(public_results).title == "Quantum Field Theory"
+      assert Enum.count(internal_results) == 2
+    end
+  end
+
+  # ── Collection default access inheritance ──────────────────────────────────
+
+  describe "collection default_item_access_level inheritance" do
+    test "new item inherits collection default when access_level not specified" do
+      collection = create_collection(default_item_access_level: "internal")
+
+      {:ok, item} =
+        Repository.create_item(%{"title" => "Inherited Item", "collection_id" => collection.id})
+
+      assert item.access_level == :internal
+    end
+
+    test "explicit access_level overrides collection default" do
+      collection = create_collection(default_item_access_level: "internal")
+
+      {:ok, item} =
+        Repository.create_item(%{
+          "title" => "Explicit Item",
+          "collection_id" => collection.id,
+          "access_level" => "open"
+        })
+
+      assert item.access_level == :open
+    end
+  end
+
+  # ── Community & Collection browse visibility ───────────────────────────────
+
+  describe "community browse visibility" do
+    defp create_community(attrs) do
+      handle = "comm-#{System.unique_integer([:positive])}"
+
+      {:ok, community} =
+        Repository.create_community(
+          Map.merge(%{"name" => "Community", "handle" => handle}, attrs)
+        )
+
+      community
+    end
+
+    test "public scope hides non-open communities" do
+      create_community(%{"name" => "Open C", "access_level" => "open"})
+      create_community(%{"name" => "Internal C", "access_level" => "internal"})
+      create_community(%{"name" => "Restricted C", "access_level" => "restricted"})
+
+      names = Repository.list_communities(scope: :public) |> Enum.map(& &1.name)
+
+      assert "Open C" in names
+      refute "Internal C" in names
+      refute "Restricted C" in names
+    end
+
+    test "internal scope sees open and internal communities" do
+      create_community(%{"name" => "Open R", "access_level" => "open"})
+      create_community(%{"name" => "Internal R", "access_level" => "internal"})
+      create_community(%{"name" => "Restricted R", "access_level" => "restricted"})
+
+      names = Repository.list_communities(scope: :internal) |> Enum.map(& &1.name)
+
+      assert "Open R" in names
+      assert "Internal R" in names
+      refute "Restricted R" in names
+    end
+
+    test "staff scope sees all active communities" do
+      create_community(%{"name" => "Closed S", "access_level" => "closed"})
+
+      names = Repository.list_communities(scope: :staff) |> Enum.map(& &1.name)
+
+      assert "Closed S" in names
+    end
+  end
+
+  describe "collection browse visibility" do
+    test "public scope hides non-open collections" do
+      community = create_community(%{"access_level" => "open"})
+
+      {:ok, _} =
+        Repository.create_collection(%{
+          "name" => "Open Coll",
+          "community_id" => community.id,
+          "handle" => "coll-#{System.unique_integer([:positive])}",
+          "access_level" => "open"
+        })
+
+      {:ok, _} =
+        Repository.create_collection(%{
+          "name" => "Internal Coll",
+          "community_id" => community.id,
+          "handle" => "coll-#{System.unique_integer([:positive])}",
+          "access_level" => "internal"
+        })
+
+      names =
+        Repository.list_collections_for_community(community.id, scope: :public)
+        |> Enum.map(& &1.name)
+
+      assert "Open Coll" in names
+      refute "Internal Coll" in names
+
+      internal_names =
+        Repository.list_collections_for_community(community.id, scope: :internal)
+        |> Enum.map(& &1.name)
+
+      assert "Internal Coll" in internal_names
     end
   end
 end

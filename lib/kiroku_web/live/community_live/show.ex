@@ -2,19 +2,26 @@ defmodule KirokuWeb.CommunityLive.Show do
   use KirokuWeb, :live_view
 
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
 
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
     community = Repository.get_community_with_relations_by_handle!(handle)
-    collections = Repository.list_collections_for_community(community.id)
-    ancestor_chain = Repository.community_ancestor_chain(community.id)
 
-    {:ok,
-     socket
-     |> assign(:page_title, "#{community.name} — Kiroku")
-     |> assign(:community, community)
-     |> assign(:collections, collections)
-     |> assign(:ancestor_chain, ancestor_chain)}
+    if Authorization.can?(socket.assigns[:current_user], :read, community) do
+      scope = Authorization.visibility_scope(socket.assigns[:current_user])
+      collections = Repository.list_collections_for_community(community.id, scope: scope)
+      ancestor_chain = Repository.community_ancestor_chain(community.id)
+
+      {:ok,
+       socket
+       |> assign(:page_title, "#{community.name} — Kiroku")
+       |> assign(:community, community)
+       |> assign(:collections, collections)
+       |> assign(:ancestor_chain, ancestor_chain)}
+    else
+      {:ok, push_navigate(socket, to: ~p"/")}
+    end
   end
 
   @impl true

@@ -39,6 +39,22 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
             />
             <.input field={@form[:short_description]} type="text" label="Short Description" />
             <.input field={@form[:description]} type="textarea" label="Description" />
+            <.input
+              field={@form[:access_level]}
+              type="select"
+              label="Visibility"
+              options={[
+                {"Open — visible to everyone", "open"},
+                {"Internal — logged-in users only", "internal"},
+                {"Restricted — staff only", "restricted"},
+                {"Closed — hidden (admin only)", "closed"}
+              ]}
+            />
+            <.input
+              field={@form[:is_active]}
+              type="checkbox"
+              label="Active (visible in public browse)"
+            />
             <div class="flex gap-3 pt-2">
               <button
                 type="submit"
@@ -94,6 +110,9 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
                 <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
                   Active
                 </th>
+                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
+                  Visibility
+                </th>
                 <th class="px-4 py-3"></th>
               </tr>
             </thead>
@@ -116,6 +135,11 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
                   <% else %>
                     <span class="status-badge withdrawn">Inactive</span>
                   <% end %>
+                </td>
+                <td class="px-4 py-3">
+                  <span class={"status-badge #{access_badge_class(community.access_level)}"}>
+                    {community.access_level}
+                  </span>
                 </td>
                 <td class="px-4 py-3 text-right flex items-center gap-3 justify-end">
                   <.link
@@ -167,7 +191,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    communities = Repository.list_communities_tree()
+    communities = Repository.list_communities_tree(scope: :staff)
 
     socket
     |> assign(:form, nil)
@@ -258,7 +282,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     {:ok, _} = Repository.delete_community(community)
 
     # Re-stream the tree since deleting a node reshuffles the hierarchy.
-    communities = Repository.list_communities_tree()
+    communities = Repository.list_communities_tree(scope: :staff)
 
     {:noreply,
      socket
@@ -270,4 +294,10 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   defp normalize_parent_id(""), do: :root
   defp normalize_parent_id(nil), do: :root
   defp normalize_parent_id(id), do: id
+
+  defp access_badge_class(:open), do: "published"
+  defp access_badge_class(:internal), do: "submitted"
+  defp access_badge_class(:restricted), do: "embargoed"
+  defp access_badge_class(:closed), do: "withdrawn"
+  defp access_badge_class(_), do: "draft"
 end

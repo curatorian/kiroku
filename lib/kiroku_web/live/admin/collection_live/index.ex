@@ -50,6 +50,33 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
               </select>
             </div>
             <.input field={@form[:short_description]} type="text" label="Short Description" />
+            <.input
+              field={@form[:access_level]}
+              type="select"
+              label="Visibility"
+              options={[
+                {"Open — visible to everyone", "open"},
+                {"Internal — logged-in users only", "internal"},
+                {"Restricted — staff only", "restricted"},
+                {"Closed — hidden (admin only)", "closed"}
+              ]}
+            />
+            <.input
+              field={@form[:default_item_access_level]}
+              type="select"
+              label="Default item visibility"
+              options={[
+                {"Open — items public by default", "open"},
+                {"Internal — items visible to logged-in users", "internal"},
+                {"Restricted — items staff-only", "restricted"},
+                {"Closed — items hidden (admin only)", "closed"}
+              ]}
+            />
+            <.input
+              field={@form[:is_active]}
+              type="checkbox"
+              label="Active (visible in public browse)"
+            />
             <div class="flex gap-3 pt-2">
               <button
                 type="submit"
@@ -100,6 +127,12 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
                 <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
                   Community
                 </th>
+                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
+                  Active
+                </th>
+                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
+                  Visibility
+                </th>
                 <th class="px-4 py-3"></th>
               </tr>
             </thead>
@@ -115,6 +148,18 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
                   <%= if Ecto.assoc_loaded?(collection.community) do %>
                     {collection.community.name}
                   <% end %>
+                </td>
+                <td class="px-4 py-3">
+                  <%= if collection.is_active do %>
+                    <span class="status-badge published">Active</span>
+                  <% else %>
+                    <span class="status-badge withdrawn">Inactive</span>
+                  <% end %>
+                </td>
+                <td class="px-4 py-3">
+                  <span class={"status-badge #{access_badge_class(collection.access_level)}"}>
+                    {collection.access_level}
+                  </span>
                 </td>
                 <td class="px-4 py-3 text-right flex items-center gap-3 justify-end">
                   <.link
@@ -153,7 +198,7 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
   end
 
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities()
+    communities = Repository.list_communities(scope: :staff)
 
     {:ok,
      socket
@@ -170,7 +215,7 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
     page = parse_page(params["page"])
 
     {collections, pagination} =
-      Repository.list_collections_pagination(page: page, per_page: 20)
+      Repository.list_collections_pagination(page: page, per_page: 20, scope: :staff)
 
     collections = Kiroku.Repo.preload(collections, :community)
 
@@ -254,4 +299,10 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
       _ -> 1
     end
   end
+
+  defp access_badge_class(:open), do: "published"
+  defp access_badge_class(:internal), do: "submitted"
+  defp access_badge_class(:restricted), do: "embargoed"
+  defp access_badge_class(:closed), do: "withdrawn"
+  defp access_badge_class(_), do: "draft"
 end

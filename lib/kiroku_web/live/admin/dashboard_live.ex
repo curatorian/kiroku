@@ -515,7 +515,7 @@ defmodule KirokuWeb.Admin.DashboardLive do
      socket
      |> assign(:stats, Map.put(stats, :users, user_count))
      |> assign(:pending_items, Repository.list_pending_items(10))
-     |> assign(:recent_published, Repository.list_recent_published(5))
+     |> assign(:recent_published, Repository.list_recent_published(limit: 5, scope: :staff))
      |> assign(:sync_enabled, Kiroku.Sync.enabled?())
      |> assign(:sync_health, maybe_sync_health())}
   end

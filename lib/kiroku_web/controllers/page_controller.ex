@@ -3,23 +3,32 @@ defmodule KirokuWeb.PageController do
 
   import Ecto.Query
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
   alias Kiroku.Repository.Community
   alias Kiroku.Repo
 
   def home(conn, _params) do
+    scope = Authorization.visibility_scope(conn.assigns[:current_user])
+    levels = Authorization.visible_access_levels(scope)
+
     ordered_subcommunities =
-      from(c in Community, where: c.is_active == true, order_by: c.position)
+      from(c in Community,
+        where: c.is_active == true and c.access_level in ^levels,
+        order_by: c.position
+      )
 
     ordered_collections =
       from(c in Kiroku.Repository.Collection,
-        where: c.is_active == true,
+        where: c.is_active == true and c.access_level in ^levels,
         order_by: c.position
       )
 
     communities =
       Repo.all(
         from c in Community,
-          where: c.is_active == true and is_nil(c.parent_community_id),
+          where:
+            c.is_active == true and is_nil(c.parent_community_id) and
+              c.access_level in ^levels,
           order_by: c.position,
           preload: [
             subcommunities: ^{ordered_subcommunities, [collections: ordered_collections]},
@@ -27,7 +36,7 @@ defmodule KirokuWeb.PageController do
           ]
       )
 
-    recent_items = Repository.list_published_items(per_page: 5)
+    recent_items = Repository.list_published_items(per_page: 5, scope: scope)
 
     render(conn, :home,
       communities: communities,

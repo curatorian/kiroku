@@ -5,6 +5,7 @@ defmodule KirokuWeb.SearchLive do
   import KirokuWeb.KirokuComponents
 
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
   alias Kiroku.Pagination
 
   @impl true
@@ -31,9 +32,11 @@ defmodule KirokuWeb.SearchLive do
       page: parse_page(params["page"])
     }
 
+    scope = Authorization.visibility_scope(socket.assigns[:current_user])
+
     {items, pagination} =
       if query || Enum.any?(filters, fn {_k, v} -> v not in [nil, 1] end) do
-        Repository.search_items_pagination(Map.merge(filters, %{term: query}))
+        Repository.search_items_pagination(Map.merge(filters, %{term: query, scope: scope}))
       else
         {[], Pagination.build(0, 1, 20)}
       end

@@ -22,6 +22,7 @@ defmodule Kiroku.Accounts.User do
 
     has_many :items, Kiroku.Repository.Item, foreign_key: :submitter_id
     has_many :tokens, Kiroku.Accounts.UserToken
+    has_many :rbac_policies, Kiroku.Access.RbacPolicy
 
     timestamps()
   end

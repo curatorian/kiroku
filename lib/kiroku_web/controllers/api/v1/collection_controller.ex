@@ -9,15 +9,17 @@ defmodule KirokuWeb.Api.V1.CollectionController do
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Repo}
+  alias Kiroku.Access.Authorization
 
   def index(conn, params) do
     community_id = params["community_id"]
+    scope = Authorization.visibility_scope(conn.assigns[:current_user])
 
     collections =
       if community_id do
-        Repository.list_collections_for_community(community_id)
+        Repository.list_collections_for_community(community_id, scope: scope)
       else
-        Repository.list_collections()
+        Repository.list_collections(scope: scope)
       end
 
     json(conn, %{data: Enum.map(collections, &collection_json/1)})
@@ -31,12 +33,19 @@ defmodule KirokuWeb.Api.V1.CollectionController do
         |> json(%{error: "Collection not found"})
 
       collection ->
-        collection = Repo.preload(collection, :community)
-        item_count = Repository.count_items_for_collection(collection.id)
+        if Authorization.can?(conn.assigns[:current_user], :read, collection) do
+          scope = Authorization.visibility_scope(conn.assigns[:current_user])
+          collection = Repo.preload(collection, :community)
+          item_count = Repository.count_items_for_collection(collection.id, scope: scope)
 
-        json(conn, %{
-          data: collection_json(collection, item_count: item_count, include_community: true)
-        })
+          json(conn, %{
+            data: collection_json(collection, item_count: item_count, include_community: true)
+          })
+        else
+          conn
+          |> put_status(:not_found)
+          |> json(%{error: "Collection not found"})
+        end
     end
   end
 

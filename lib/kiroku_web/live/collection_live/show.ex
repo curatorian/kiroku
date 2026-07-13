@@ -5,6 +5,7 @@ defmodule KirokuWeb.CollectionLive.Show do
   import KirokuWeb.KirokuComponents
 
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
   alias Kiroku.Pagination
 
   @per_page 20
@@ -13,28 +14,35 @@ defmodule KirokuWeb.CollectionLive.Show do
   def mount(%{"handle" => handle}, _session, socket) do
     collection = Repository.get_collection_by_handle!(handle)
     collection = Kiroku.Repo.preload(collection, :community)
-    item_count = Repository.count_items_for_collection(collection.id)
-    ancestor_chain = Repository.community_ancestor_chain(collection.community_id)
 
-    # Distinct values used to populate the filter dropdowns
-    filter_options = %{
-      item_types: Repository.list_distinct_values_for_collection(collection.id, :item_type),
-      years: Repository.list_distinct_values_for_collection(collection.id, :publication_year),
-      faculties: Repository.list_distinct_values_for_collection(collection.id, :faculty),
-      departments: Repository.list_distinct_values_for_collection(collection.id, :department),
-      degree_levels: Repository.list_distinct_values_for_collection(collection.id, :degree_level)
-    }
+    if Authorization.can?(socket.assigns[:current_user], :read, collection) do
+      scope = Authorization.visibility_scope(socket.assigns[:current_user])
+      item_count = Repository.count_items_for_collection(collection.id, scope: scope)
+      ancestor_chain = Repository.community_ancestor_chain(collection.community_id)
 
-    {:ok,
-     socket
-     |> assign(:page_title, "#{collection.name} — Kiroku")
-     |> assign(:collection, collection)
-     |> assign(:item_count, item_count)
-     |> assign(:ancestor_chain, ancestor_chain)
-     |> assign(:filter_options, filter_options)
-     |> assign(:items, [])
-     |> assign(:filters, %{})
-     |> assign(:pagination, Pagination.build(item_count, 1, @per_page))}
+      # Distinct values used to populate the filter dropdowns
+      filter_options = %{
+        item_types: Repository.list_distinct_values_for_collection(collection.id, :item_type),
+        years: Repository.list_distinct_values_for_collection(collection.id, :publication_year),
+        faculties: Repository.list_distinct_values_for_collection(collection.id, :faculty),
+        departments: Repository.list_distinct_values_for_collection(collection.id, :department),
+        degree_levels:
+          Repository.list_distinct_values_for_collection(collection.id, :degree_level)
+      }
+
+      {:ok,
+       socket
+       |> assign(:page_title, "#{collection.name} — Kiroku")
+       |> assign(:collection, collection)
+       |> assign(:item_count, item_count)
+       |> assign(:ancestor_chain, ancestor_chain)
+       |> assign(:filter_options, filter_options)
+       |> assign(:items, [])
+       |> assign(:filters, %{})
+       |> assign(:pagination, Pagination.build(item_count, 1, @per_page))}
+    else
+      {:ok, push_navigate(socket, to: ~p"/")}
+    end
   end
 
   @impl true
@@ -51,11 +59,12 @@ defmodule KirokuWeb.CollectionLive.Show do
     }
 
     page = parse_page(params["page"])
+    scope = Authorization.visibility_scope(socket.assigns[:current_user])
 
     {items, pagination} =
       Repository.list_items_for_collection_pagination(
         collection.id,
-        Keyword.put(filter_opts(filters), :page, page)
+        filter_opts(filters) |> Keyword.put(:page, page) |> Keyword.put(:scope, scope)
       )
 
     {:noreply,

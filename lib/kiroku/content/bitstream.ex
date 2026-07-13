@@ -6,7 +6,7 @@ defmodule Kiroku.Content.Bitstream do
   @foreign_key_type :binary_id
 
   @bundle_names ~w(ORIGINAL THUMBNAIL CHAPTER SUPPLEMENTAL ADMINISTRATIVE LICENSE MEDIA SOURCE)a
-  @access_values ~w(open inherit restricted closed)a
+  @access_values ~w(open internal inherit restricted closed)a
   @storage_types ~w(url s3 local)a
 
   schema "bitstreams" do

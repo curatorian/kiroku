@@ -20,9 +20,11 @@ defmodule KirokuWeb.Api.V1.ItemController do
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Content}
+  alias Kiroku.Access.Authorization
 
   def index(conn, params) do
     per_page = min(String.to_integer(params["per_page"] || "20"), 100)
+    scope = Authorization.visibility_scope(conn.assigns[:current_user])
 
     search_params = %{
       term: params["q"],
@@ -32,7 +34,8 @@ defmodule KirokuWeb.Api.V1.ItemController do
       year: params["year"] && String.to_integer(params["year"]),
       collection_id: params["collection_id"],
       page: String.to_integer(params["page"] || "1"),
-      per_page: per_page
+      per_page: per_page,
+      scope: scope
     }
 
     items = Repository.search_items(search_params)
@@ -47,7 +50,8 @@ defmodule KirokuWeb.Api.V1.ItemController do
   def show(conn, %{"id" => id}) do
     item = Repository.get_item_with_preloads!(id)
 
-    if item.status == :published and item.discoverable do
+    if item.status == :published and item.discoverable and
+         Authorization.can?(conn.assigns[:current_user], :read, item) do
       json(conn, %{data: item_full_json(item)})
     else
       conn

@@ -31,6 +31,14 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
         </div>
 
         <div class="kiroku-card p-6 space-y-4">
+          <div class="flex items-center gap-2 flex-wrap">
+            <%= if @community.is_active do %>
+              <span class="status-badge published">Active</span>
+            <% else %>
+              <span class="status-badge withdrawn">Inactive</span>
+            <% end %>
+            <span class="status-badge submitted">Visibility: {@community.access_level}</span>
+          </div>
           <%= if @community.short_description do %>
             <p style="color: var(--color-quill);">{@community.short_description}</p>
           <% end %>
@@ -85,7 +93,7 @@ defmodule KirokuWeb.Admin.CommunityLive.Show do
 
   def mount(%{"id" => id}, _session, socket) do
     if superadmin?(socket) do
-      community = Repository.get_community_with_relations!(id)
+      community = Repository.get_community_with_relations!(id, scope: :staff)
       {:ok, assign(socket, :community, community)}
     else
       {:ok,

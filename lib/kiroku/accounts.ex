@@ -295,7 +295,9 @@ defmodule Kiroku.Accounts do
 
   def get_user_by_session_token(token) do
     {:ok, query} = UserToken.verify_session_token_query(token)
-    Repo.one(query)
+    # Preload RBAC policies so Authorization.can?/3 can consult them without a
+    # per-call DB query. One indexed query per authenticated request.
+    Repo.one(query) |> Repo.preload(:rbac_policies)
   end
 
   def delete_user_session_token(token) do

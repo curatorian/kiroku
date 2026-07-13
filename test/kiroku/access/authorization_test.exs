@@ -2,11 +2,25 @@ defmodule Kiroku.Access.AuthorizationTest do
   use ExUnit.Case, async: true
 
   alias Kiroku.Access.Authorization
+  alias Kiroku.Access.RbacPolicy
   alias Kiroku.Accounts.User
   alias Kiroku.Repository.{Community, Collection, Item}
 
   defp user(type, id \\ Ecto.UUID.generate()) do
     %User{id: id, user_type: type}
+  end
+
+  # A user carrying a list of in-memory policy grants (mirrors the preloaded
+  # `:rbac_policies` association on a real authenticated request).
+  defp user_with_policies(type, policies) do
+    %User{id: Ecto.UUID.generate(), user_type: type, rbac_policies: policies}
+  end
+
+  defp policy(overrides) do
+    struct!(
+      RbacPolicy,
+      Map.merge(%{action: :read, resource_type: :global, resource_id: nil}, overrides)
+    )
   end
 
   defp community, do: %Community{}
@@ -72,6 +86,57 @@ defmodule Kiroku.Access.AuthorizationTest do
     end
   end
 
+  # ── Community & Collection read visibility ─────────────────────────────────
+
+  describe "community read visibility" do
+    test "open community readable by anyone" do
+      assert Authorization.can?(nil, :read, %Community{access_level: :open})
+      assert Authorization.can?(user(:submitter), :read, %Community{access_level: :open})
+    end
+
+    test "internal community hidden from anonymous, visible to logged-in" do
+      c = %Community{access_level: :internal}
+      refute Authorization.can?(nil, :read, c)
+      assert Authorization.can?(user(:submitter), :read, c)
+      assert Authorization.can?(user(:admin), :read, c)
+    end
+
+    test "restricted community staff-only" do
+      c = %Community{access_level: :restricted}
+      refute Authorization.can?(nil, :read, c)
+      refute Authorization.can?(user(:internal), :read, c)
+      assert Authorization.can?(user(:reviewer), :read, c)
+    end
+
+    test "inactive community staff-only" do
+      c = %Community{is_active: false}
+      refute Authorization.can?(nil, :read, c)
+      refute Authorization.can?(user(:internal), :read, c)
+      assert Authorization.can?(user(:admin), :read, c)
+    end
+  end
+
+  describe "collection read visibility" do
+    test "internal collection hidden from anonymous" do
+      c = %Collection{access_level: :internal}
+      refute Authorization.can?(nil, :read, c)
+      assert Authorization.can?(user(:internal), :read, c)
+    end
+
+    test "closed collection staff-only" do
+      c = %Collection{access_level: :closed}
+      refute Authorization.can?(nil, :read, c)
+      refute Authorization.can?(user(:submitter), :read, c)
+      assert Authorization.can?(user(:admin), :read, c)
+    end
+
+    test "inactive collection staff-only" do
+      c = %Collection{is_active: false}
+      refute Authorization.can?(nil, :read, c)
+      assert Authorization.can?(user(:reviewer), :read, c)
+    end
+  end
+
   # ── Item read ──────────────────────────────────────────────────────────────
 
   describe "item read permissions" do
@@ -97,6 +162,73 @@ defmodule Kiroku.Access.AuthorizationTest do
       submitter = user(:submitter)
       others_draft = item(%{submitter_id: Ecto.UUID.generate(), status: :draft})
       refute Authorization.can?(submitter, :read, others_draft)
+    end
+
+    test "published :internal item hidden from anonymous, visible to logged-in" do
+      internal_item = item(%{access_level: :internal})
+
+      refute Authorization.can?(nil, :read, internal_item)
+      assert Authorization.can?(user(:submitter), :read, internal_item)
+      assert Authorization.can?(user(:internal), :read, internal_item)
+      assert Authorization.can?(user(:reviewer), :read, internal_item)
+    end
+
+    test "published :restricted item only visible to staff" do
+      restricted = item(%{access_level: :restricted})
+
+      refute Authorization.can?(nil, :read, restricted)
+      refute Authorization.can?(user(:submitter), :read, restricted)
+      refute Authorization.can?(user(:internal), :read, restricted)
+      assert Authorization.can?(user(:reviewer), :read, restricted)
+      assert Authorization.can?(user(:admin), :read, restricted)
+    end
+
+    test "published :closed item only visible to staff" do
+      closed = item(%{access_level: :closed})
+
+      refute Authorization.can?(nil, :read, closed)
+      refute Authorization.can?(user(:internal), :read, closed)
+      assert Authorization.can?(user(:admin), :read, closed)
+    end
+
+    test "internal user can read non-published items" do
+      internal = user(:internal)
+      assert Authorization.can?(internal, :read, item(%{status: :draft}))
+      assert Authorization.can?(internal, :read, item(%{status: :submitted}))
+    end
+  end
+
+  # ── Visibility scope ──────────────────────────────────────────────────────
+
+  describe "visibility_scope/1" do
+    test "nil user is public" do
+      assert Authorization.visibility_scope(nil) == :public
+    end
+
+    test "submitter and internal are internal scope" do
+      assert Authorization.visibility_scope(user(:submitter)) == :internal
+      assert Authorization.visibility_scope(user(:internal)) == :internal
+    end
+
+    test "reviewer, admin, superadmin are staff scope" do
+      assert Authorization.visibility_scope(user(:reviewer)) == :staff
+      assert Authorization.visibility_scope(user(:admin)) == :staff
+      assert Authorization.visibility_scope(user(:superadmin)) == :staff
+    end
+  end
+
+  describe "visible_access_levels/1" do
+    test "public sees only open" do
+      assert Authorization.visible_access_levels(:public) == [:open]
+    end
+
+    test "internal sees open and internal" do
+      assert Authorization.visible_access_levels(:internal) == [:open, :internal]
+    end
+
+    test "staff sees all levels" do
+      assert Authorization.visible_access_levels(:staff) ==
+               [:open, :internal, :restricted, :closed]
     end
   end
 
@@ -183,6 +315,187 @@ defmodule Kiroku.Access.AuthorizationTest do
     test "nil user denied for non-public" do
       refute Authorization.can?(nil, :create, item())
       refute Authorization.can?(nil, :update, item())
+    end
+  end
+
+  # ── RBAC policy grants ─────────────────────────────────────────────────────
+
+  describe "RBAC policy grants — item read" do
+    test "collection-scoped :read policy grants read on a restricted item" do
+      coll_id = Ecto.UUID.generate()
+
+      restricted =
+        item(%{collection_id: coll_id, access_level: :restricted})
+
+      submitter =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :collection,
+            resource_id: coll_id,
+            action: :read
+          })
+        ])
+
+      # Without the policy a submitter cannot read a restricted item.
+      refute Authorization.can?(user(:submitter), :read, restricted)
+      # With the policy, they can.
+      assert Authorization.can?(submitter, :read, restricted)
+    end
+
+    test "policy on one collection does not leak into another" do
+      coll_a = Ecto.UUID.generate()
+      coll_b = Ecto.UUID.generate()
+
+      item_b = item(%{collection_id: coll_b, access_level: :restricted})
+
+      submitter =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :collection,
+            resource_id: coll_a,
+            action: :read
+          })
+        ])
+
+      refute Authorization.can?(submitter, :read, item_b)
+    end
+
+    test "item-scoped :read policy grants read on that specific item" do
+      item_id = Ecto.UUID.generate()
+      closed = item(%{id: item_id, access_level: :closed})
+
+      submitter =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :item,
+            resource_id: item_id,
+            action: :read
+          })
+        ])
+
+      assert Authorization.can?(submitter, :read, closed)
+    end
+  end
+
+  describe "RBAC policy grants — workflow actions" do
+    test "collection-scoped :review policy grants review on items in it" do
+      coll_id = Ecto.UUID.generate()
+      item_in_coll = item(%{collection_id: coll_id, status: :submitted})
+
+      liaison =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :collection,
+            resource_id: coll_id,
+            action: :review
+          })
+        ])
+
+      # A plain submitter cannot review.
+      refute Authorization.can?(user(:submitter), :review, item_in_coll)
+      # The liaison can review, withdraw, and lift embargo.
+      assert Authorization.can?(liaison, :review, item_in_coll)
+      assert Authorization.can?(liaison, :withdraw, item_in_coll)
+      assert Authorization.can?(liaison, :lift_embargo, item_in_coll)
+    end
+
+    test ":review policy does not grant :publish" do
+      coll_id = Ecto.UUID.generate()
+      item_in_coll = item(%{collection_id: coll_id})
+
+      liaison =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :collection,
+            resource_id: coll_id,
+            action: :review
+          })
+        ])
+
+      refute Authorization.can?(liaison, :publish, item_in_coll)
+    end
+
+    test ":manage policy grants every workflow action" do
+      coll_id = Ecto.UUID.generate()
+      item_in_coll = item(%{collection_id: coll_id})
+
+      manager =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :collection,
+            resource_id: coll_id,
+            action: :manage
+          })
+        ])
+
+      assert Authorization.can?(manager, :review, item_in_coll)
+      assert Authorization.can?(manager, :publish, item_in_coll)
+      assert Authorization.can?(manager, :withdraw, item_in_coll)
+      assert Authorization.can?(manager, :read, item_in_coll)
+    end
+  end
+
+  describe "RBAC policy grants — hierarchy" do
+    test "community-scoped policy covers collections in that community" do
+      comm_id = Ecto.UUID.generate()
+
+      coll = %Collection{
+        id: Ecto.UUID.generate(),
+        community_id: comm_id,
+        access_level: :restricted
+      }
+
+      viewer =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :community,
+            resource_id: comm_id,
+            action: :read
+          })
+        ])
+
+      assert Authorization.can?(viewer, :read, coll)
+    end
+
+    test "community-scoped policy covers an item when its collection is preloaded" do
+      comm_id = Ecto.UUID.generate()
+      coll_id = Ecto.UUID.generate()
+
+      item_with_collection =
+        item(%{
+          collection_id: coll_id,
+          access_level: :restricted,
+          collection: %Collection{id: coll_id, community_id: comm_id}
+        })
+
+      viewer =
+        user_with_policies(:submitter, [
+          policy(%{
+            resource_type: :community,
+            resource_id: comm_id,
+            action: :read
+          })
+        ])
+
+      assert Authorization.can?(viewer, :read, item_with_collection)
+    end
+
+    test "global :read policy grants read on any resource" do
+      viewer = user_with_policies(:submitter, [policy(%{action: :read, resource_type: :global})])
+
+      assert Authorization.can?(viewer, :read, item(%{access_level: :closed}))
+      assert Authorization.can?(viewer, :read, %Collection{access_level: :restricted})
+    end
+  end
+
+  describe "RBAC policy — additive only" do
+    test "policy never revokes an existing role grant" do
+      admin = user_with_policies(:admin, [])
+      assert Authorization.can?(admin, :read, item())
+    end
+
+    test "user with no policies behaves as before" do
+      refute Authorization.can?(user(:submitter), :publish, item())
     end
   end
 end

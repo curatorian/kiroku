@@ -8,6 +8,7 @@ defmodule Kiroku.Repository do
   import Ecto.Query
   alias Kiroku.Repo
   alias Kiroku.Pagination
+  alias Kiroku.Access.Authorization
 
   alias Kiroku.Repository.{
     Community,
@@ -60,28 +61,49 @@ defmodule Kiroku.Repository do
 
   # ── Communities ─────────────────────────────────────────────────────────────
 
-  def list_communities do
-    Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
+  def list_communities(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    Repo.all(
+      from c in Community,
+        where: c.is_active == true and c.access_level in ^levels,
+        order_by: c.position
+    )
   end
 
   @doc """
   Returns top-level (root) communities — those without a parent.
+
+  Accepts a `:scope` opt (default `:public`) to restrict by access level.
   """
-  def list_root_communities do
+  def list_root_communities(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     Repo.all(
       from c in Community,
-        where: c.is_active == true and is_nil(c.parent_community_id),
+        where:
+          c.is_active == true and is_nil(c.parent_community_id) and
+            c.access_level in ^levels,
         order_by: c.position
     )
   end
 
   @doc """
   Returns the direct subcommunities of a given community.
+
+  Accepts a `:scope` opt (default `:public`) to restrict by access level.
   """
-  def list_subcommunities(community_id) do
+  def list_subcommunities(community_id, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     Repo.all(
       from c in Community,
-        where: c.parent_community_id == ^community_id and c.is_active == true,
+        where:
+          c.parent_community_id == ^community_id and c.is_active == true and
+            c.access_level in ^levels,
         order_by: c.position
     )
   end
@@ -91,31 +113,46 @@ defmodule Kiroku.Repository do
   `depth` field, ordered in hierarchy traversal order (parents before
   children). Used by the admin UI to render a tree with indentation.
   """
-  def list_communities_tree do
+  def list_communities_tree(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     communities =
-      Repo.all(from c in Community, where: c.is_active == true, order_by: c.position)
+      Repo.all(
+        from c in Community,
+          where: c.is_active == true and c.access_level in ^levels,
+          order_by: c.position
+      )
 
     build_community_tree(communities, nil, 0)
   end
 
   @doc """
-  Paginated version of `list_communities_tree/0`.
+  Paginated version of `list_communities_tree/1`.
   Returns `{communities, %Pagination{}}` as a flat paginated list of active
   communities (not a nested tree), ordered by position.
+
+  Accepts a `:scope` opt (default `:public`).
   """
   def list_communities_tree_pagination(opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
 
     count =
-      Repo.one(from c in Community, where: c.is_active == true, select: count(c.id))
+      Repo.one(
+        from c in Community,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: count(c.id)
+      )
 
     pagination = Pagination.build(count, page, per_page)
 
     communities =
       Repo.all(
         from c in Community,
-          where: c.is_active == true,
+          where: c.is_active == true and c.access_level in ^levels,
           order_by: c.position,
           limit: ^per_page,
           offset: ^Pagination.offset(pagination)
@@ -148,6 +185,8 @@ defmodule Kiroku.Repository do
   depth set on each struct). Excludes the community itself and its
   descendants to prevent cycles. Pass `nil` to list all active
   communities.
+
+  Always shows all access levels (admin-only selection aid).
   """
   def list_possible_parents_tree(community) do
     raw =
@@ -179,9 +218,19 @@ defmodule Kiroku.Repository do
 
   @doc """
   Fetches a community with its parent and subcommunities preloaded.
+
+  The subcommunities preload respects `:scope` (default `:public`) so that a
+  viewer only sees child communities they may access.
   """
-  def get_community_with_relations!(id) do
-    ordered_subq = from(c in Community, where: c.is_active == true, order_by: c.position)
+  def get_community_with_relations!(id, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    ordered_subq =
+      from(c in Community,
+        where: c.is_active == true and c.access_level in ^levels,
+        order_by: c.position
+      )
 
     Repo.get!(Community, id)
     |> Repo.preload(parent_community: :parent_community, subcommunities: ordered_subq)
@@ -189,9 +238,18 @@ defmodule Kiroku.Repository do
 
   @doc """
   Fetches a community by handle with its parent and subcommunities preloaded.
+
+  The subcommunities preload respects `:scope` (default `:public`).
   """
-  def get_community_with_relations_by_handle!(handle) do
-    ordered_subq = from(c in Community, where: c.is_active == true, order_by: c.position)
+  def get_community_with_relations_by_handle!(handle, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    ordered_subq =
+      from(c in Community,
+        where: c.is_active == true and c.access_level in ^levels,
+        order_by: c.position
+      )
 
     Repo.get_by!(Community, handle: handle)
     |> Repo.preload(subcommunities: ordered_subq)
@@ -278,24 +336,42 @@ defmodule Kiroku.Repository do
 
   # ── Collections ─────────────────────────────────────────────────────────────
 
-  def list_collections do
-    Repo.all(from c in Collection, order_by: c.name)
+  def list_collections(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    Repo.all(
+      from c in Collection,
+        where: c.access_level in ^levels,
+        order_by: c.name
+    )
   end
 
   @doc """
-  Paginated version of `list_collections/0`.
+  Paginated version of `list_collections/1`.
   Returns `{collections, %Pagination{}}`.
+
+  Accepts a `:scope` opt (default `:public`).
   """
   def list_collections_pagination(opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
 
-    count = Repo.aggregate(Collection, :count, :id)
+    count =
+      Repo.one(
+        from c in Collection,
+          where: c.access_level in ^levels,
+          select: count(c.id)
+      )
+
     pagination = Pagination.build(count, page, per_page)
 
     collections =
       Repo.all(
         from c in Collection,
+          where: c.access_level in ^levels,
           order_by: c.name,
           limit: ^per_page,
           offset: ^Pagination.offset(pagination)
@@ -307,6 +383,8 @@ defmodule Kiroku.Repository do
   @doc """
   Returns all active collections in a single query (avoids N+1 when paired
   with communities). Use `Enum.group_by(&1.community_id)` to associate them.
+
+  Not scope-filtered — used for submission dropdowns behind authentication.
   """
   def list_active_collections do
     Repo.all(
@@ -319,14 +397,21 @@ defmodule Kiroku.Repository do
   @doc """
   Returns all active communities with their active collections preloaded in
   exactly two queries (regardless of community count).
+
+  Both levels respect `:scope` (default `:public`) — internal/restricted
+  communities and collections are hidden from anonymous viewers.
   """
-  def list_communities_with_collections do
-    communities = list_communities()
+  def list_communities_with_collections(opts \\ []) do
+    communities = list_communities(opts)
+    levels = Authorization.visible_access_levels(Keyword.get(opts, :scope, :public))
 
     collections =
       Repo.all(
         from c in Collection,
-          where: c.is_active == true and c.community_id in ^Enum.map(communities, & &1.id),
+          where:
+            c.is_active == true and
+              c.access_level in ^levels and
+              c.community_id in ^Enum.map(communities, & &1.id),
           order_by: c.position
       )
 
@@ -337,10 +422,20 @@ defmodule Kiroku.Repository do
     end)
   end
 
-  def list_collections_for_community(community_id) do
+  @doc """
+  Returns active collections belonging to `community_id`.
+
+  Accepts a `:scope` opt (default `:public`).
+  """
+  def list_collections_for_community(community_id, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     Repo.all(
       from c in Collection,
-        where: c.community_id == ^community_id and c.is_active == true,
+        where:
+          c.community_id == ^community_id and c.is_active == true and
+            c.access_level in ^levels,
         order_by: c.position
     )
   end
@@ -574,11 +669,19 @@ defmodule Kiroku.Repository do
 
   @doc """
   Returns up to `limit` most recently published items.
+
+  Accepts `:limit` (default 5) and `:scope` (default `:public`) opts.
   """
-  def list_recent_published(limit \\ 5) do
+  def list_recent_published(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 5)
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     Repo.all(
       from i in Item,
-        where: i.status == :published,
+        where:
+          i.status == :published and
+            i.access_level in ^levels,
         order_by: [desc: i.published_at],
         limit: ^limit,
         select: ^@item_display_fields
@@ -588,11 +691,16 @@ defmodule Kiroku.Repository do
   def list_published_items(opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
     offset = (page - 1) * per_page
+    levels = Authorization.visible_access_levels(scope)
 
     Repo.all(
       from i in Item,
-        where: i.status == :published and i.discoverable == true,
+        where:
+          i.status == :published and
+            i.discoverable == true and
+            i.access_level in ^levels,
         order_by: [desc: i.published_at],
         limit: ^per_page,
         offset: ^offset,
@@ -603,15 +711,23 @@ defmodule Kiroku.Repository do
   @doc """
   Paginated version of `list_published_items/1`.
   Returns `{items, %Pagination{}}`.
+
+  Accepts a `:scope` opt (`:public` | `:internal` | `:staff`, default `:public`)
+  to restrict results to the access levels the viewer may see.
   """
   def list_published_items_pagination(opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
 
     count =
       Repo.one(
         from i in Item,
-          where: i.status == :published and i.discoverable == true,
+          where:
+            i.status == :published and
+              i.discoverable == true and
+              i.access_level in ^levels,
           select: count(i.id)
       )
 
@@ -620,7 +736,10 @@ defmodule Kiroku.Repository do
     items =
       Repo.all(
         from i in Item,
-          where: i.status == :published and i.discoverable == true,
+          where:
+            i.status == :published and
+              i.discoverable == true and
+              i.access_level in ^levels,
           order_by: [desc: i.published_at],
           limit: ^per_page,
           offset: ^Pagination.offset(pagination),
@@ -633,6 +752,8 @@ defmodule Kiroku.Repository do
   def list_items_for_collection(collection_id, opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
     offset = (page - 1) * per_page
 
     Repo.all(
@@ -640,7 +761,8 @@ defmodule Kiroku.Repository do
         where:
           i.collection_id == ^collection_id and
             i.status == :published and
-            i.discoverable == true,
+            i.discoverable == true and
+            i.access_level in ^levels,
         order_by: [desc: i.published_at],
         limit: ^per_page,
         offset: ^offset,
@@ -660,11 +782,13 @@ defmodule Kiroku.Repository do
     * `:faculty`       — string exact match
     * `:department`    — string exact match
     * `:degree_level`  — atom exact match (e.g. `:s1`)
+    * `:scope`         — visibility scope (default `:public`)
 
   """
   def list_items_for_collection_pagination(collection_id, opts \\ []) do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
+    scope = Keyword.get(opts, :scope, :public)
     term = Keyword.get(opts, :term)
     item_type = Keyword.get(opts, :item_type)
     year = Keyword.get(opts, :year)
@@ -679,6 +803,7 @@ defmodule Kiroku.Repository do
             i.status == :published and
             i.discoverable == true
       )
+      |> visibility_filter(scope)
       |> maybe_full_text_filter(term)
       |> maybe_filter(:item_type, item_type)
       |> maybe_filter(:publication_year, year)
@@ -757,10 +882,20 @@ defmodule Kiroku.Repository do
     {items, pagination}
   end
 
-  def count_items_for_collection(collection_id) do
+  @doc """
+  Counts published items in `collection_id` visible to `scope` (default
+  `:public`). Keeps the collection header count consistent with the scoped
+  item listing beneath it.
+  """
+  def count_items_for_collection(collection_id, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
     Repo.one(
       from i in Item,
-        where: i.collection_id == ^collection_id and i.status == :published,
+        where:
+          i.collection_id == ^collection_id and i.status == :published and
+            i.access_level in ^levels,
         select: count(i.id)
     )
   end
@@ -768,7 +903,10 @@ defmodule Kiroku.Repository do
   @doc """
   Full-text and filtered search over published, discoverable items.
   Accepted params: `:term`, `:department`, `:faculty`, `:year`, `:item_type`,
-  `:collection_id`, `:page`, `:per_page`.
+  `:collection_id`, `:page`, `:per_page`, `:scope`.
+
+  `:scope` (`:public` | `:internal` | `:staff`, default `:public`) restricts
+  results to the access levels the viewer may see.
   """
   def search_items(%{} = params) do
     term = Map.get(params, :term)
@@ -777,6 +915,7 @@ defmodule Kiroku.Repository do
     year = Map.get(params, :year)
     item_type = Map.get(params, :item_type)
     collection_id = Map.get(params, :collection_id)
+    scope = Map.get(params, :scope, :public)
     page = Map.get(params, :page, 1)
     per_page = Map.get(params, :per_page, 20)
     offset = (page - 1) * per_page
@@ -784,6 +923,7 @@ defmodule Kiroku.Repository do
     from(i in Item,
       where: i.status == :published and i.discoverable == true
     )
+    |> visibility_filter(scope)
     |> maybe_full_text_filter(term)
     |> maybe_filter(:department, department)
     |> maybe_filter(:faculty, faculty)
@@ -809,6 +949,7 @@ defmodule Kiroku.Repository do
     year = Map.get(params, :year)
     item_type = Map.get(params, :item_type)
     collection_id = Map.get(params, :collection_id)
+    scope = Map.get(params, :scope, :public)
     page = Map.get(params, :page, 1)
     per_page = Map.get(params, :per_page, 20)
 
@@ -816,6 +957,7 @@ defmodule Kiroku.Repository do
       from(i in Item,
         where: i.status == :published and i.discoverable == true
       )
+      |> visibility_filter(scope)
       |> maybe_full_text_filter(term)
       |> maybe_filter(:department, department)
       |> maybe_filter(:faculty, faculty)
@@ -859,10 +1001,57 @@ defmodule Kiroku.Repository do
     from i in query, where: field(i, ^field) == ^value
   end
 
+  # Restricts an item query to the access levels the given visibility scope may
+  # see. Combined with the `status: :published, discoverable: true` predicate
+  # this is what enforces the public / internal / private discovery model.
+  # See Kiroku.Access.Authorization for scope derivation.
+  defp visibility_filter(query, scope) do
+    levels = Authorization.visible_access_levels(scope)
+    from i in query, where: i.access_level in ^levels
+  end
+
   def create_item(attrs) do
-    %Item{}
-    |> Item.changeset(attrs)
-    |> Repo.insert()
+    attrs
+    |> maybe_apply_collection_default_access()
+    |> then(fn final_attrs ->
+      %Item{}
+      |> Item.changeset(final_attrs)
+      |> Repo.insert()
+    end)
+  end
+
+  # When the caller does not specify an access_level, inherit the collection's
+  # configured default. This lets a "Tugas Akhir" collection default all new
+  # submissions to :internal, for example. Explicit access_level values are
+  # always preserved.
+  defp maybe_apply_collection_default_access(attrs) do
+    has_level? = Map.has_key?(attrs, :access_level) or Map.has_key?(attrs, "access_level")
+
+    if has_level? do
+      attrs
+    else
+      collection_id = attrs[:collection_id] || attrs["collection_id"]
+
+      case collection_id && get_collection(collection_id) do
+        %Collection{default_item_access_level: level} when not is_nil(level) ->
+          # Preserve the key type already present in attrs — Ecto.cast rejects
+          # maps that mix atom and string keys.
+          Map.put(attrs, access_level_key(attrs), level)
+
+        _ ->
+          attrs
+      end
+    end
+  end
+
+  defp access_level_key(attrs) do
+    has_string_key? =
+      Enum.any?(attrs, fn
+        {k, _} when is_binary(k) -> true
+        _ -> false
+      end)
+
+    if has_string_key?, do: "access_level", else: :access_level
   end
 
   def update_item(%Item{} = item, attrs) do
