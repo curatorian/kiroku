@@ -500,6 +500,115 @@ defmodule KirokuWeb.Admin.DashboardLive do
                 </div>
               <% end %>
             </div>
+
+            <%!-- Fixity status --%>
+            <div class="space-y-3">
+              <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
+                File Integrity
+              </h2>
+              <div class="kiroku-card p-4 space-y-2 text-sm">
+                <div class="flex justify-between">
+                  <span style="color: var(--color-quill);">Verified OK</span>
+                  <span class="font-mono" style="color: var(--color-patchouli);">
+                    {@fixity.ok}
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span style="color: var(--color-quill);">Failed checks</span>
+                  <span
+                    class="font-mono"
+                    style={
+                      if @fixity.failed > 0,
+                        do: "color: var(--color-ribbon-red);",
+                        else: "color: var(--color-wisteria);"
+                    }
+                  >
+                    {@fixity.failed}
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span style="color: var(--color-quill);">Never checked</span>
+                  <span class="font-mono" style="color: var(--color-wisteria);">
+                    {@fixity.unchecked}
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span style="color: var(--color-quill);">Externally hosted</span>
+                  <span class="font-mono" style="color: var(--color-dust);">
+                    {@fixity.unverifiable}
+                  </span>
+                </div>
+                <p class="text-[10px] pt-1" style="color: var(--color-quill);">
+                  Checked daily via <code>FixityWorker</code> (cron <code>FIXITY_CRON</code>).
+                </p>
+              </div>
+            </div>
+
+            <%!-- Popular (views + downloads) --%>
+            <div class="space-y-3">
+              <h2 class="font-heading text-xl" style="color: var(--color-lilac);">
+                Popular
+              </h2>
+              <div class="kiroku-card p-4 space-y-3 text-sm">
+                <div>
+                  <p
+                    class="text-[10px] uppercase tracking-wider mb-1"
+                    style="color: var(--color-quill);"
+                  >
+                    Most viewed
+                  </p>
+                  <%= if @top_viewed == [] do %>
+                    <p class="text-xs" style="color: var(--color-quill);">No views recorded yet.</p>
+                  <% else %>
+                    <ul class="space-y-1">
+                      <li :for={entry <- @top_viewed} class="flex justify-between gap-2">
+                        <.link
+                          navigate={~p"/admin/items/#{entry.id}"}
+                          class="truncate hover:underline"
+                          style="color: var(--color-wisteria);"
+                        >
+                          {entry.title}
+                        </.link>
+                        <span class="font-mono shrink-0" style="color: var(--color-patchouli);">
+                          {entry.views}
+                        </span>
+                      </li>
+                    </ul>
+                  <% end %>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] uppercase tracking-wider mb-1"
+                    style="color: var(--color-quill);"
+                  >
+                    Most downloaded
+                  </p>
+                  <%= if @top_downloaded == [] do %>
+                    <p class="text-xs" style="color: var(--color-quill);">
+                      No downloads recorded yet.
+                    </p>
+                  <% else %>
+                    <ul class="space-y-1">
+                      <li :for={entry <- @top_downloaded} class="flex justify-between gap-2">
+                        <.link
+                          navigate={~p"/admin/items/#{entry.id}"}
+                          class="truncate hover:underline"
+                          style="color: var(--color-wisteria);"
+                        >
+                          {entry.title}
+                        </.link>
+                        <span class="font-mono shrink-0" style="color: var(--color-patchouli);">
+                          {entry.downloads}
+                        </span>
+                      </li>
+                    </ul>
+                  <% end %>
+                </div>
+                <p class="text-[10px] pt-1" style="color: var(--color-quill);">
+                  Counts exclude crawler user-agents.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -516,6 +625,9 @@ defmodule KirokuWeb.Admin.DashboardLive do
      |> assign(:stats, Map.put(stats, :users, user_count))
      |> assign(:pending_items, Repository.list_pending_items(10))
      |> assign(:recent_published, Repository.list_recent_published(limit: 5, scope: :staff))
+     |> assign(:fixity, Kiroku.Content.fixity_summary())
+     |> assign(:top_viewed, Kiroku.Analytics.top_viewed_with_items(5))
+     |> assign(:top_downloaded, Kiroku.Analytics.top_downloaded_with_items(5))
      |> assign(:sync_enabled, Kiroku.Sync.enabled?())
      |> assign(:sync_health, maybe_sync_health())}
   end

@@ -40,6 +40,10 @@ defmodule KirokuWeb.Router do
     get "/", PageController, :home
     get "/api-info", PageController, :api_info
 
+    # SEO / crawler discovery (dynamic so URLs use the configured base host)
+    get "/robots.txt", SeoController, :robots
+    get "/sitemap.xml", SeoController, :sitemap
+
     # First-run onboarding wizard (gated by SetupGuard)
     live_session :setup do
       live "/setup", SetupLive, :index
@@ -77,8 +81,9 @@ defmodule KirokuWeb.Router do
     resources "/communities", CommunityController, only: [:index, :show]
     resources "/collections", CollectionController, only: [:index, :show]
 
-    resources "/items", ItemController, only: [:index, :show] do
+    resources "/items", ItemController, only: [:index, :show, :create, :update] do
       get "/bitstreams", ItemController, :bitstreams, as: :bitstreams
+      post "/bitstreams", ItemController, :deposit_bitstream, as: :bitstreams
     end
   end
 

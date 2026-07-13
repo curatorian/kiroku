@@ -7,6 +7,10 @@ defmodule Kiroku.Oai.Builder do
 
   Supported verbs: Identify, ListMetadataFormats, ListSets, ListIdentifiers,
   ListRecords, GetRecord.
+
+  ListRecords / ListIdentifiers support `from`/`until` date selective
+  harvesting, `set` scoping (`com_<id>` community / `col_<id>` collection), and
+  `resumptionToken` pagination (stateless, base64-encoded cursor + parameters).
   """
 
   alias Kiroku.{Repo, Repository}
@@ -14,6 +18,9 @@ defmodule Kiroku.Oai.Builder do
   @repo_name Application.compile_env(:kiroku, :oai_repo_name, "Kiroku Institutional Repository")
   @repo_identifier Application.compile_env(:kiroku, :oai_repo_identifier, "oai:kiroku.ac.id")
   @admin_email Application.compile_env(:kiroku, :oai_admin_email, "admin@kiroku.ac.id")
+  @page_size Application.compile_env(:kiroku, :oai_page_size, 100)
+  @token_ttl_seconds 86_400
+
   @metadata_formats [
     %{
       prefix: "oai_dc",
@@ -25,9 +32,7 @@ defmodule Kiroku.Oai.Builder do
   # ── Public verb handlers ─────────────────────────────────────────────────
 
   def identify do
-    now = utc_now()
-
-    wrap_envelope("Identify", now, ~s(<request verb="Identify">#{base_url()}/oai</request>), """
+    wrap_envelope("Identify", ~s(<request verb="Identify">#{base_url()}/oai</request>), """
     <Identify>
       <repositoryName>#{@repo_name}</repositoryName>
       <baseURL>#{base_url()}/oai</baseURL>
@@ -41,8 +46,6 @@ defmodule Kiroku.Oai.Builder do
   end
 
   def list_metadata_formats do
-    now = utc_now()
-
     formats =
       Enum.map_join(@metadata_formats, "\n", fn f ->
         """
@@ -56,18 +59,16 @@ defmodule Kiroku.Oai.Builder do
 
     wrap_envelope(
       "ListMetadataFormats",
-      now,
       ~s(<request verb="ListMetadataFormats">#{base_url()}/oai</request>),
       "<ListMetadataFormats>#{formats}</ListMetadataFormats>"
     )
   end
 
   def list_sets do
-    now = utc_now()
-    communities = Repository.list_communities()
+    %{communities: communities, collections: collections} = Repository.oai_sets()
 
-    sets =
-      Enum.map_join(communities, "\n", fn c ->
+    comm_sets =
+      Enum.map(communities, fn c ->
         """
         <set>
           <setSpec>com_#{c.id}</setSpec>
@@ -76,80 +77,51 @@ defmodule Kiroku.Oai.Builder do
         """
       end)
 
-    wrap_envelope(
-      "ListSets",
-      now,
-      ~s(<request verb="ListSets">#{base_url()}/oai</request>),
-      "<ListSets>#{sets}</ListSets>"
-    )
-  end
-
-  def list_identifiers(%{"metadataPrefix" => "oai_dc"} = params) do
-    now = utc_now()
-    items = Repository.list_published_items()
-
-    headers =
-      Enum.map_join(items, "\n", fn item ->
+    coll_sets =
+      Enum.map(collections, fn c ->
         """
-        <header>
-          <identifier>#{@repo_identifier}:#{item.id}</identifier>
-          <datestamp>#{datestamp(item.published_at)}</datestamp>
-        </header>
+        <set>
+          <setSpec>col_#{c.id}</setSpec>
+          <setName>#{xml_escape(c.name)}</setName>
+        </set>
         """
       end)
 
-    from_attr = if params["from"], do: ~s( from="#{params["from"]}"), else: ""
-    until_attr = if params["until"], do: ~s( until="#{params["until"]}"), else: ""
-
     wrap_envelope(
-      "ListIdentifiers",
-      now,
-      ~s(<request verb="ListIdentifiers" metadataPrefix="oai_dc"#{from_attr}#{until_attr}>#{base_url()}/oai</request>),
-      "<ListIdentifiers>#{headers}</ListIdentifiers>"
+      "ListSets",
+      ~s(<request verb="ListSets">#{base_url()}/oai</request>),
+      "<ListSets>#{Enum.join(comm_sets ++ coll_sets, "\n")}</ListSets>"
     )
   end
 
-  def list_identifiers(_params) do
-    error("cannotDisseminateFormat", "Unsupported metadata format")
+  def list_identifiers(params) do
+    render_list("ListIdentifiers", params, fn items ->
+      Enum.map_join(items, "\n", &item_header_xml/1)
+    end)
   end
 
-  def list_records(%{"metadataPrefix" => "oai_dc"} = params) do
-    now = utc_now()
-    items = load_published_with_preloads()
-    records = Enum.map_join(items, "\n", &item_to_oai_dc/1)
-
-    from_attr = if params["from"], do: ~s( from="#{params["from"]}"), else: ""
-    until_attr = if params["until"], do: ~s( until="#{params["until"]}"), else: ""
-
-    wrap_envelope(
-      "ListRecords",
-      now,
-      ~s(<request verb="ListRecords" metadataPrefix="oai_dc"#{from_attr}#{until_attr}>#{base_url()}/oai</request>),
-      "<ListRecords>#{records}</ListRecords>"
-    )
-  end
-
-  def list_records(_params) do
-    error("cannotDisseminateFormat", "Unsupported metadata format")
+  def list_records(params) do
+    render_list("ListRecords", params, fn items ->
+      Enum.map_join(items, "\n", &item_to_oai_dc/1)
+    end)
   end
 
   def get_record(%{"metadataPrefix" => "oai_dc", "identifier" => identifier}) do
-    now = utc_now()
     item_id = String.replace(identifier, "#{@repo_identifier}:", "")
 
-    case Repo.get(Kiroku.Repository.Item, item_id) do
-      nil ->
-        error("idDoesNotExist", "Unknown identifier")
+    # Repo.get on a non-UUID string raises; validate first so malformed
+    # identifiers return idDoesNotExist instead of a 500.
+    with {:ok, _} <- Ecto.UUID.cast(item_id),
+         %Kiroku.Repository.Item{} = item <- Repo.get(Kiroku.Repository.Item, item_id) do
+      item = Repository.get_item_with_preloads!(item.id)
 
-      item ->
-        item = Repository.get_item_with_preloads!(item.id)
-
-        wrap_envelope(
-          "GetRecord",
-          now,
-          ~s(<request verb="GetRecord" identifier="#{identifier}" metadataPrefix="oai_dc">#{base_url()}/oai</request>),
-          "<GetRecord>#{item_to_oai_dc(item)}</GetRecord>"
-        )
+      wrap_envelope(
+        "GetRecord",
+        ~s(<request verb="GetRecord" identifier="#{xml_escape(identifier)}" metadataPrefix="oai_dc">#{base_url()}/oai</request>),
+        "<GetRecord>#{item_to_oai_dc(item)}</GetRecord>"
+      )
+    else
+      _ -> error("idDoesNotExist", "Unknown identifier")
     end
   end
 
@@ -158,31 +130,199 @@ defmodule Kiroku.Oai.Builder do
   end
 
   def error(code, message) do
-    now = utc_now()
-
     """
     <?xml version="1.0" encoding="UTF-8"?>
     <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
              xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
-      <responseDate>#{now}</responseDate>
+      <responseDate>#{utc_now()}</responseDate>
       <error code="#{code}">#{message}</error>
     </OAI-PMH>
     """
   end
 
-  # ── Private helpers ───────────────────────────────────────────────────────
+  # ── List pagination + filtering ──────────────────────────────────────────
 
-  defp wrap_envelope(_verb, now, request_el, body) do
+  # Shared engine for ListRecords / ListIdentifiers: parses the request (either
+  # a fresh harvest or a resumptionToken), queries a page, and renders the
+  # container with an optional resumptionToken.
+  defp render_list(verb, params, inner_fn) do
+    case oai_query(params) do
+      {:ok, %{items: [], total: 0, offset: 0}} ->
+        # Per OAI-PMH §3.2: a fresh request matching no records must error.
+        error("noRecordsMatch", "No records match the supplied criteria.")
+
+      {:ok, %{items: items, total: total, offset: offset, next_token: next_token, state: state}} ->
+        inner = inner_fn.(items)
+        token = resumption_token_xml(next_token, total, offset)
+        body = "<#{verb}>#{inner}#{token}</#{verb}>"
+
+        wrap_envelope(verb, request_element(verb, state), body)
+
+      {:error, code, message} ->
+        error(code, message)
+    end
+  end
+
+  defp oai_query(params) do
+    case parse_query(params) do
+      {:ok, state} ->
+        {items, total} =
+          Repository.oai_items(
+            from: state.from,
+            until: state.until,
+            set: state.set,
+            offset: state.offset,
+            limit: @page_size
+          )
+
+        returned = length(items)
+        next_offset = state.offset + returned
+
+        next_token =
+          if next_offset < total do
+            encode_token(next_offset, state)
+          else
+            nil
+          end
+
+        {:ok,
+         %{
+           items: items,
+           total: total,
+           offset: state.offset,
+           next_token: next_token,
+           state: state
+         }}
+
+      {:error, _, _} = err ->
+        err
+    end
+  end
+
+  # A token request carries the original params in the token; per spec the
+  # harvester sends only resumptionToken in that case. A fresh request must
+  # supply a valid metadataPrefix.
+  defp parse_query(%{"resumptionToken" => token}) when is_binary(token) and token != "" do
+    case decode_token(token) do
+      {:ok, state} ->
+        {:ok, %{state | token: token}}
+
+      :error ->
+        {:error, "badResumptionToken",
+         "The value of the resumptionToken argument is invalid or expired."}
+    end
+  end
+
+  defp parse_query(%{"metadataPrefix" => "oai_dc"} = params) do
+    {:ok,
+     %{
+       offset: 0,
+       from: parse_date(params["from"]),
+       until: parse_date(params["until"]),
+       set: params["set"],
+       prefix: "oai_dc",
+       token: nil
+     }}
+  end
+
+  defp parse_query(%{"metadataPrefix" => _other}) do
+    {:error, "cannotDisseminateFormat", "Unsupported metadata format"}
+  end
+
+  defp parse_query(_params) do
+    {:error, "badArgument", "Missing required argument: metadataPrefix"}
+  end
+
+  defp resumption_token_xml(nil, _total, _offset), do: ""
+
+  defp resumption_token_xml(token, total, offset) do
+    expiration =
+      DateTime.utc_now()
+      |> DateTime.add(@token_ttl_seconds, :second)
+      |> DateTime.to_iso8601()
+
+    "<resumptionToken completeListSize=\"#{total}\" cursor=\"#{offset}\" expirationDate=\"#{expiration}\">#{token}</resumptionToken>"
+  end
+
+  # ── Token encode/decode ────────────────────────────────────────────────────
+  #
+  # Stateless, opaque base64 of a tiny JSON map. OAI tokens are not a security
+  # mechanism — they only carry the cursor position and original filters so the
+  # harvester need not resend them. Not cryptographically signed.
+
+  defp encode_token(offset, state) do
+    %{
+      "o" => offset,
+      "f" => state.from && NaiveDateTime.to_iso8601(state.from),
+      "u" => state.until && NaiveDateTime.to_iso8601(state.until),
+      "s" => state.set,
+      "p" => state.prefix
+    }
+    |> Jason.encode!()
+    |> Base.url_encode64()
+  end
+
+  defp decode_token(token) do
+    with {:ok, json} <- Base.url_decode64(token),
+         {:ok, %{"o" => offset} = m} <- Jason.decode(json) do
+      {:ok,
+       %{
+         offset: offset,
+         from: parse_date(m["f"]),
+         until: parse_date(m["u"]),
+         set: m["s"],
+         prefix: m["p"],
+         token: nil
+       }}
+    else
+      _ -> :error
+    end
+  end
+
+  # ── Request element + date parsing ─────────────────────────────────────────
+
+  defp request_element(verb, %{token: token}) when is_binary(token) and token != "" do
+    ~s(<request verb="#{verb}" resumptionToken="#{xml_escape(token)}">#{base_url()}/oai</request>)
+  end
+
+  defp request_element(verb, state) do
+    attrs =
+      [~s(metadataPrefix="#{state.prefix}")]
+      |> add_attr("from", state.from && oai_date(state.from))
+      |> add_attr("until", state.until && oai_date(state.until))
+      |> add_attr("set", state.set)
+
+    ~s(<request verb="#{verb}" #{Enum.join(attrs, " ")}>#{base_url()}/oai</request>)
+  end
+
+  defp add_attr(list, _key, nil), do: list
+  defp add_attr(list, key, value), do: list ++ [~s(#{key}="#{value}")]
+
+  # Accepts both date-only ("2024-01-01") and full ("2024-01-01T00:00:00Z")
+  # strings as harvesters send both. Returns a UTC NaiveDateTime to match the
+  # items.updated_at column type.
+  defp parse_date(nil), do: nil
+
+  defp parse_date(str) when is_binary(str) do
+    normalized = if String.contains?(str, "T"), do: str, else: str <> "T00:00:00Z"
+
+    case DateTime.from_iso8601(normalized) do
+      {:ok, dt, _} -> DateTime.to_naive(dt)
+      {:error, _} -> nil
+    end
+  end
+
+  defp oai_date(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt) <> "Z"
+
+  # ── Record / header rendering ──────────────────────────────────────────────
+
+  defp item_header_xml(item) do
     """
-    <?xml version="1.0" encoding="UTF-8"?>
-    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"
-             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-             xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
-      <responseDate>#{now}</responseDate>
-      #{request_el}
-      #{body}
-    </OAI-PMH>
+    <header>
+      <identifier>#{@repo_identifier}:#{item.id}</identifier>
+      <datestamp>#{datestamp(item.updated_at)}</datestamp>
+    </header>
     """
   end
 
@@ -203,7 +343,7 @@ defmodule Kiroku.Oai.Builder do
     <record>
       <header>
         <identifier>#{@repo_identifier}:#{item.id}</identifier>
-        <datestamp>#{datestamp(item.published_at)}</datestamp>
+        <datestamp>#{datestamp(item.updated_at)}</datestamp>
       </header>
       <metadata>
         <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/"
@@ -213,7 +353,7 @@ defmodule Kiroku.Oai.Builder do
           <dc:title>#{xml_escape(item.title)}</dc:title>
           #{creators}
           #{keywords}
-          <dc:date>#{datestamp(item.published_at)}</dc:date>
+          <dc:date>#{dc_date(item)}</dc:date>
           #{if item.abstract, do: "<dc:description>#{xml_escape(item.abstract)}</dc:description>"}
           #{if item.doi, do: "<dc:identifier>#{xml_escape(item.doi)}</dc:identifier>"}
           <dc:identifier>#{base_url()}/items/#{item.handle || item.id}</dc:identifier>
@@ -228,14 +368,29 @@ defmodule Kiroku.Oai.Builder do
     """
   end
 
+  defp dc_date(%{date_issued: %Date{} = d}), do: Date.to_iso8601(d)
+  defp dc_date(%{publication_year: y}) when is_integer(y), do: to_string(y)
+  defp dc_date(%{updated_at: %NaiveDateTime{} = ndt}), do: NaiveDateTime.to_iso8601(ndt) <> "Z"
+  defp dc_date(_), do: ""
+
   defp rights_statement(%{access_level: :open}), do: "open"
   defp rights_statement(%{access_level: :internal}), do: "internal"
   defp rights_statement(%{access_level: :restricted}), do: "restricted"
   defp rights_statement(_), do: "metadata only"
 
-  defp load_published_with_preloads do
-    Repository.list_published_items()
-    |> Repo.preload([:item_authors, :item_keywords])
+  # ── XML helpers ────────────────────────────────────────────────────────────
+
+  defp wrap_envelope(_verb, request_el, body) do
+    """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/ http://www.openarchives.org/OAI/2.0/OAI-PMH.xsd">
+      <responseDate>#{utc_now()}</responseDate>
+      #{request_el}
+      #{body}
+    </OAI-PMH>
+    """
   end
 
   defp xml_escape(nil), do: ""

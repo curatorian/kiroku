@@ -4,6 +4,8 @@ defmodule KirokuWeb.ItemLive.Show do
   alias Kiroku.{Repository, Content, Analytics, Export}
   alias Kiroku.Access.Authorization
 
+  import KirokuWeb.SEO, only: [item_meta: 1]
+
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
     case Repository.get_item_with_preloads(handle) do
@@ -20,7 +22,11 @@ defmodule KirokuWeb.ItemLive.Show do
         unless Authorization.can?(current_user, :read, item) do
           {:ok, push_navigate(socket, to: ~p"/")}
         else
-          Analytics.record_view(item.id, current_user)
+          # Record the view only on the connected (websocket) mount — otherwise
+          # the disconnected SSR render would double-count every visit.
+          if connected?(socket) do
+            Analytics.record_view(item.id, current_user, view_meta(socket))
+          end
 
           ancestor_chain =
             if item.collection_id && item.collection do
@@ -35,6 +41,8 @@ defmodule KirokuWeb.ItemLive.Show do
            |> assign(:item, item)
            |> assign(:bitstreams, item.bitstreams)
            |> assign(:ancestor_chain, ancestor_chain)
+           |> assign(:view_count, Analytics.count_views(item.id))
+           |> assign(:download_count, Analytics.count_downloads_for_item(item.id))
            |> assign(:citation_formats, ~w(apa mla chicago ieee bibtex ris))
            |> assign(:active_citation_tab, "apa")
            |> assign(:citations, generate_citations(item))
@@ -63,10 +71,26 @@ defmodule KirokuWeb.ItemLive.Show do
     end)
   end
 
+  # Extracts the viewer's user-agent and (hashed) IP from the websocket
+  # connect info, for analytics + bot filtering.
+  defp view_meta(socket) do
+    user_agent = Phoenix.LiveView.get_connect_info(socket, :user_agent)
+
+    ip_hash =
+      case Phoenix.LiveView.get_connect_info(socket, :peer_data) do
+        %{address: address} -> Kiroku.Analytics.ip_hash(address)
+        _ -> nil
+      end
+
+    [user_agent: user_agent, ip_hash: ip_hash]
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
+      <%!-- Structured-data + social meta tags for search engines & Scholar --%>
+      <.item_meta item={@item} bitstreams={@bitstreams} />
       <%= if @not_found do %>
         <div class="max-w-2xl mx-auto py-16 px-4">
           <div class="kiroku-card-raised p-10 text-center">
@@ -372,6 +396,18 @@ defmodule KirokuWeb.ItemLive.Show do
                     <dt style="color: var(--color-quill);" class="shrink-0">Access</dt>
                     <dd style="color: var(--color-wisteria);" class="text-right">
                       {@item.access_level}
+                    </dd>
+                  </div>
+                  <div class="flex justify-between gap-2 text-xs">
+                    <dt style="color: var(--color-quill);" class="shrink-0">Views</dt>
+                    <dd class="font-mono text-right" style="color: var(--color-wisteria);">
+                      {@view_count}
+                    </dd>
+                  </div>
+                  <div class="flex justify-between gap-2 text-xs">
+                    <dt style="color: var(--color-quill);" class="shrink-0">Downloads</dt>
+                    <dd class="font-mono text-right" style="color: var(--color-wisteria);">
+                      {@download_count}
                     </dd>
                   </div>
                   <%= if @item.department do %>

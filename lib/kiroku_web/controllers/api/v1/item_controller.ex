@@ -2,9 +2,15 @@ defmodule KirokuWeb.Api.V1.ItemController do
   @moduledoc """
   REST API v1 — Items.
 
-  GET /api/v1/items                  — list published items (paginated)
-  GET /api/v1/items/:id              — show a single item with full metadata
-  GET /api/v1/items/:id/bitstreams   — list accessible bitstreams for an item
+  Read:
+    GET  /api/v1/items                  — list published items (paginated)
+    GET  /api/v1/items/:id              — show a single item with full metadata
+    GET  /api/v1/items/:id/bitstreams   — list accessible bitstreams for an item
+
+  Write (API-token-authenticated, authorized via Authorization.can?/3):
+    POST  /api/v1/items                 — create a draft item
+    PATCH /api/v1/items/:id             — update item metadata
+    POST  /api/v1/items/:id/bitstreams  — deposit a file (multipart upload)
 
   Supports query params for listing:
     q           — full-text search term
@@ -20,7 +26,11 @@ defmodule KirokuWeb.Api.V1.ItemController do
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Content}
+  alias Kiroku.Repository.Item
   alias Kiroku.Access.Authorization
+  alias Kiroku.Storage.Uploader
+
+  @valid_bundles ~w(ORIGINAL THUMBNAIL CHAPTER SUPPLEMENTAL ADMINISTRATIVE LICENSE MEDIA SOURCE)a
 
   def index(conn, params) do
     per_page = min(String.to_integer(params["per_page"] || "20"), 100)
@@ -83,6 +93,175 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
       json(conn, %{data: Enum.map(accessible, &bitstream_json/1)})
     end
+  end
+
+  # ── Write endpoints ───────────────────────────────────────────────────────
+
+  @doc """
+  POST /api/v1/items — create a draft item.
+
+  Body: `{"item": {"title": "...", "collection_id": "...", ...}}`.
+  The API user becomes the submitter. Requires `:create` permission.
+  """
+  def create(conn, %{"item" => item_params}) do
+    user = conn.assigns[:current_user]
+
+    if Authorization.can?(user, :create, %Item{}) do
+      params = Map.put(item_params, "submitter_id", user.id)
+
+      case Repository.create_item(params) do
+        {:ok, item} ->
+          item = Repository.get_item_with_preloads!(item.id)
+
+          conn
+          |> put_status(:created)
+          |> put_resp_header("location", "/api/v1/items/#{item.id}")
+          |> json(%{data: item_full_json(item)})
+
+        {:error, changeset} ->
+          unprocessable(conn, changeset)
+      end
+    else
+      forbidden(conn)
+    end
+  end
+
+  def create(conn, _params), do: bad_request(conn, "Missing 'item' parameter")
+
+  @doc """
+  PATCH /api/v1/items/:id — update item metadata.
+
+  Body: `{"item": {...}}`. Requires `:update` permission on the item.
+  """
+  def update(conn, %{"id" => id, "item" => item_params}) do
+    user = conn.assigns[:current_user]
+
+    with {:ok, item} <- fetch_item(id),
+         true <- Authorization.can?(user, :update, item) do
+      case Repository.update_item(item, item_params) do
+        {:ok, _} ->
+          json(conn, %{data: item_full_json(Repository.get_item_with_preloads!(id))})
+
+        {:error, changeset} ->
+          unprocessable(conn, changeset)
+      end
+    else
+      {:error, :not_found} -> not_found(conn, "Item not found")
+      false -> forbidden(conn)
+    end
+  end
+
+  def update(conn, _params), do: bad_request(conn, "Missing 'item' parameter")
+
+  @doc """
+  POST /api/v1/items/:id/bitstreams — deposit a file (multipart/form-data).
+
+  Form fields: `file` (required upload), plus optional `bundle_name`,
+  `description`, `sequence`, `access_level`. Requires `:update` permission.
+  """
+  def deposit_bitstream(conn, %{"item_id" => id, "file" => %Plug.Upload{} = upload}) do
+    user = conn.assigns[:current_user]
+
+    with {:ok, item} <- fetch_item(id),
+         true <- Authorization.can?(user, :update, item),
+         {:ok, bundle} <- parse_bundle(conn.params["bundle_name"]) do
+      deposit(conn, item, upload, bundle)
+    else
+      {:error, :not_found} -> not_found(conn, "Item not found")
+      {:error, :invalid_bundle} -> bad_request(conn, "Invalid bundle_name")
+      false -> forbidden(conn)
+    end
+  end
+
+  def deposit_bitstream(conn, _params), do: bad_request(conn, "Missing 'file' upload")
+
+  defp deposit(conn, item, %Plug.Upload{} = upload, bundle) do
+    content = File.read!(upload.path)
+    key = Uploader.storage_key(item.id, bundle, upload.filename)
+
+    case Uploader.upload(key, content,
+           mime_type: upload.content_type || "application/octet-stream"
+         ) do
+      {:ok, %{checksum: checksum, size: size}} ->
+        attrs =
+          %{
+            item_id: item.id,
+            filename: upload.filename,
+            bundle_name: bundle,
+            sequence: parse_seq(conn.params["sequence"]),
+            description: conn.params["description"],
+            mime_type: upload.content_type,
+            file_size: size,
+            storage_path: key,
+            checksum: checksum,
+            checksum_algorithm: "MD5",
+            access_level: conn.params["access_level"] || "inherit"
+          }
+          |> Map.merge(Uploader.record_attrs())
+
+        case Content.create_bitstream(attrs) do
+          {:ok, bs} ->
+            conn |> put_status(:created) |> json(%{data: bitstream_json(bs)})
+
+          {:error, changeset} ->
+            unprocessable(conn, changeset)
+        end
+
+      {:error, reason} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "Upload failed", detail: inspect(reason)})
+    end
+  end
+
+  # ── Helpers ───────────────────────────────────────────────────────────────
+
+  defp fetch_item(id) do
+    case Repository.get_item_with_preloads(id) do
+      nil -> {:error, :not_found}
+      item -> {:ok, item}
+    end
+  end
+
+  defp parse_bundle(nil), do: {:ok, :ORIGINAL}
+
+  defp parse_bundle(str) when is_binary(str) do
+    up = String.upcase(str)
+
+    if up in Enum.map(@valid_bundles, &Atom.to_string/1) do
+      {:ok, String.to_existing_atom(up)}
+    else
+      {:error, :invalid_bundle}
+    end
+  end
+
+  defp parse_seq(nil), do: 1
+
+  defp parse_seq(str) when is_binary(str) do
+    case Integer.parse(str) do
+      {n, ""} -> n
+      _ -> 1
+    end
+  end
+
+  defp parse_seq(n) when is_integer(n), do: n
+
+  defp forbidden(conn), do: conn |> put_status(:forbidden) |> json(%{error: "Forbidden"})
+
+  defp not_found(conn, msg), do: conn |> put_status(:not_found) |> json(%{error: msg})
+
+  defp bad_request(conn, msg), do: conn |> put_status(:bad_request) |> json(%{error: msg})
+
+  defp unprocessable(conn, changeset) do
+    conn |> put_status(:unprocessable_entity) |> json(%{errors: error_map(changeset)})
+  end
+
+  defp error_map(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {k, v}, acc ->
+        String.replace(acc, "%{#{k}}", to_string(v))
+      end)
+    end)
   end
 
   # ── JSON serializers ──────────────────────────────────────────────────────

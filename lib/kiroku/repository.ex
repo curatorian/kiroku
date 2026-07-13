@@ -653,6 +653,64 @@ defmodule Kiroku.Repository do
   end
 
   @doc """
+  Returns lightweight records for the public sitemap: published, discoverable,
+  :open items plus active, :open communities and collections. Selects only the
+  fields needed (handle + updated_at) to keep the payload small for large repos.
+  """
+  def sitemap_entries do
+    levels = Authorization.visible_access_levels(:public)
+
+    items =
+      Repo.all(
+        from i in Item,
+          where:
+            i.status == :published and i.discoverable == true and
+              i.access_level in ^levels,
+          select: %{handle: i.handle, updated_at: i.updated_at}
+      )
+
+    communities =
+      Repo.all(
+        from c in Community,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: %{handle: c.handle, updated_at: c.updated_at}
+      )
+
+    collections =
+      Repo.all(
+        from c in Collection,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: %{handle: c.handle, updated_at: c.updated_at}
+      )
+
+    %{items: items, communities: communities, collections: collections}
+  end
+
+  @doc """
+  Returns active, :open communities and collections as lightweight records for
+  the OAI-PMH ListSets verb. Each becomes a `com_<id>` / `col_<id>` set spec.
+  """
+  def oai_sets do
+    levels = Authorization.visible_access_levels(:public)
+
+    communities =
+      Repo.all(
+        from c in Community,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: %{id: c.id, name: c.name}
+      )
+
+    collections =
+      Repo.all(
+        from c in Collection,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: %{id: c.id, name: c.name}
+      )
+
+    %{communities: communities, collections: collections}
+  end
+
+  @doc """
   Returns up to `limit` submitted items, oldest first (most urgent for review),
   with the submitter association preloaded.
   """
@@ -687,6 +745,72 @@ defmodule Kiroku.Repository do
         select: ^@item_display_fields
     )
   end
+
+  @doc """
+  Returns a page of public items for OAI-PMH harvesting, filtered by an optional
+  date range (`from`/`until`, NaiveDateTime) and set (`"col_<id>"` collection or
+  `"com_<id>"` community). Ordered by `updated_at` for stable cursor-based
+  pagination. Returns `{items, total_count}` with `:item_authors` and
+  `:item_keywords` preloaded.
+
+  Only published, discoverable, `:open` items are exposed — OAI serves public
+  content to anonymous harvesters.
+  """
+  def oai_items(opts \\ []) do
+    from_dt = Keyword.get(opts, :from)
+    until_dt = Keyword.get(opts, :until)
+    set = Keyword.get(opts, :set)
+    offset = Keyword.get(opts, :offset, 0)
+    limit = Keyword.get(opts, :limit, 100)
+
+    base =
+      from(i in Item,
+        where:
+          i.status == :published and i.discoverable == true and
+            i.access_level == :open
+      )
+      |> apply_oai_set_filter(set)
+      |> apply_oai_date_filter(from_dt, until_dt)
+
+    total = Repo.aggregate(base, :count, :id)
+
+    items =
+      base
+      |> order_by([i], asc: i.updated_at, asc: i.id)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> preload([:item_authors, :item_keywords])
+      |> Repo.all()
+
+    {items, total}
+  end
+
+  defp apply_oai_set_filter(query, nil), do: query
+
+  defp apply_oai_set_filter(query, "col_" <> collection_id),
+    do: where(query, [i], i.collection_id == ^collection_id)
+
+  defp apply_oai_set_filter(query, "com_" <> community_id) do
+    query
+    |> join(:inner, [i], c in Collection, on: c.id == i.collection_id)
+    |> where([_, c], c.community_id == ^community_id)
+  end
+
+  defp apply_oai_set_filter(query, _invalid_set), do: query
+
+  defp apply_oai_date_filter(query, nil, nil), do: query
+
+  defp apply_oai_date_filter(query, from_dt, until_dt) do
+    query
+    |> maybe_oai_from(from_dt)
+    |> maybe_oai_until(until_dt)
+  end
+
+  defp maybe_oai_from(query, nil), do: query
+  defp maybe_oai_from(query, from_dt), do: where(query, [i], i.updated_at >= ^from_dt)
+
+  defp maybe_oai_until(query, nil), do: query
+  defp maybe_oai_until(query, until_dt), do: where(query, [i], i.updated_at <= ^until_dt)
 
   def list_published_items(opts \\ []) do
     page = Keyword.get(opts, :page, 1)
@@ -816,7 +940,7 @@ defmodule Kiroku.Repository do
 
     items =
       base
-      |> order_by([i], desc: i.published_at)
+      |> apply_search_ordering(term)
       |> limit(^per_page)
       |> offset(^Pagination.offset(pagination))
       |> select([i], ^@item_display_fields)
@@ -930,7 +1054,7 @@ defmodule Kiroku.Repository do
     |> maybe_filter(:publication_year, year)
     |> maybe_filter(:item_type, item_type)
     |> maybe_filter(:collection_id, collection_id)
-    |> order_by([i], desc: i.published_at)
+    |> apply_search_ordering(term)
     |> limit(^per_page)
     |> offset(^offset)
     |> select([i], ^@item_display_fields)
@@ -970,7 +1094,7 @@ defmodule Kiroku.Repository do
 
     items =
       base
-      |> order_by([i], desc: i.published_at)
+      |> apply_search_ordering(term)
       |> limit(^per_page)
       |> offset(^Pagination.offset(pagination))
       |> select([i], ^@item_display_fields)
@@ -981,18 +1105,24 @@ defmodule Kiroku.Repository do
 
   defp maybe_full_text_filter(query, nil), do: query
 
+  # Uses the GENERATED `search_vector` column (see migration
+  # add_search_vector_to_items) so the `@@` match is GIN-index-backed instead
+  # of recomputing the tsvector per row. `search_vector` is not an Ecto schema
+  # field, so it is referenced as a bare SQL column inside the fragment — safe
+  # because these queries are single-table over `items`.
   defp maybe_full_text_filter(query, term) do
     from i in query,
-      where:
-        fragment(
-          """
-          to_tsvector('indonesian', coalesce(?, '') || ' ' || coalesce(?, ''))
-          @@ plainto_tsquery('indonesian', ?)
-          """,
-          i.title,
-          i.abstract,
-          ^term
-        )
+      where: fragment("search_vector @@ plainto_tsquery('indonesian', ?)", ^term)
+  end
+
+  # When a search term is present, rank by relevance (ts_rank over the indexed
+  # search_vector); otherwise fall back to newest-first ordering.
+  defp apply_search_ordering(query, nil), do: order_by(query, [i], desc: i.published_at)
+
+  defp apply_search_ordering(query, term) do
+    order_by(query,
+      desc: fragment("ts_rank(search_vector, plainto_tsquery('indonesian', ?))", ^term)
+    )
   end
 
   defp maybe_filter(query, _field, nil), do: query

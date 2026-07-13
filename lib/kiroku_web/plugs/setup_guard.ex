@@ -30,9 +30,12 @@ defmodule KirokuWeb.Plugs.SetupGuard do
   end
 
   defp allowed_path?(path) do
+    # Public crawler/harvester endpoints must always respond — redirecting
+    # them to /setup would confuse crawlers and break harvesting.
     path == "/setup" or
       String.starts_with?(path, "/setup/") or
       String.starts_with?(path, "/phoenix") or
-      String.starts_with?(path, "/dev")
+      String.starts_with?(path, "/dev") or
+      path in ["/robots.txt", "/sitemap.xml", "/oai", "/health"]
   end
 end

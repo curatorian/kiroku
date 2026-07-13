@@ -42,3 +42,7 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Small OAI-PMH page size so resumptionToken pagination is testable with a
+# handful of fixture items.
+config :kiroku, oai_page_size: 3

@@ -28,6 +28,10 @@ defmodule Kiroku.Content.Bitstream do
     field :embargo_open_date, :date
     field :embargo_close_date, :date
 
+    # Denormalised last-fixity result (null = never checked).
+    field :last_fixity_at, :utc_datetime_usec
+    field :last_fixity_ok, :boolean
+
     belongs_to :item, Kiroku.Repository.Item
 
     timestamps()
