@@ -360,7 +360,7 @@ defmodule KirokuWeb.SubmissionLive.New do
           key = Uploader.storage_key(item.id, bundle, entry.client_name)
 
           case Uploader.upload(key, content, mime_type: entry.client_type) do
-            {:ok, _path} ->
+            {:ok, %{checksum: checksum}} ->
               storage_type = Kiroku.Settings.storage_adapter()
 
               Content.create_bitstream(%{
@@ -374,6 +374,8 @@ defmodule KirokuWeb.SubmissionLive.New do
                 storage_type: storage_type,
                 storage_path: key,
                 storage_bucket: bucket,
+                checksum: checksum,
+                checksum_algorithm: "MD5",
                 access_level: :inherit
               })
 

@@ -21,6 +21,7 @@ config :kiroku,
 # `mix kiroku.import_from_mssql` task. Only the embargo lifter runs on a
 # schedule. In prod releases, runtime.exs re-evaluates the embargo cron.
 embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+fixity_cron = System.get_env("FIXITY_CRON", "0 3 * * *")
 
 config :kiroku, Oban,
   repo: Kiroku.Repo,
@@ -29,7 +30,8 @@ config :kiroku, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       {embargo_cron, Kiroku.Embargo.LifterWorker}
+       {embargo_cron, Kiroku.Embargo.LifterWorker},
+       {fixity_cron, Kiroku.Workers.FixityWorker}
      ]}
   ]
 

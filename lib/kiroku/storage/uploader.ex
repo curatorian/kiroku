@@ -15,17 +15,60 @@ defmodule Kiroku.Storage.Uploader do
   # ── Upload ─────────────────────────────────────────────────────────────────
 
   @doc """
-  Uploads binary content to storage. Returns {:ok, storage_key} | {:error, reason}.
-  `key` is the full storage path/key, e.g. "items/abc123/fulltext.pdf"
+  Uploads binary content to storage.
+
+  Returns `{:ok, %{path: key, checksum: md5_hex, size: byte_size}}` on success —
+  the checksum and size are computed from the bytes before dispatch so callers
+  can persist them into the bitstream row for fixity checks. Returns
+  `{:error, reason}` on failure.
   """
   def upload(key, content, opts \\ []) do
     mime_type = Keyword.get(opts, :mime_type, "application/octet-stream")
+    checksum = checksum(content)
+    size = byte_size(content)
 
     case adapter() do
       :s3 -> upload_s3(key, content, mime_type)
       :local -> upload_local(key, content)
     end
+    |> case do
+      {:ok, ^key} -> {:ok, %{path: key, checksum: checksum, size: size}}
+      error -> error
+    end
   end
+
+  @doc "Lowercase-hex MD5 of `content`. Used by uploads and the fixity checker."
+  def checksum(content) when is_binary(content) do
+    :crypto.hash(:md5, content) |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  Reads the stored bytes of a bitstream back from storage for fixity
+  verification. Accepts a map/struct with `storage_type`, `storage_path` and
+  (for S3) `storage_bucket`.
+
+    * `:local` → reads from the uploads dir
+    * `:s3`    → fetches the object via ExAws
+    * `:url`   → `{:error, :url_not_verifiable}` (externally hosted)
+
+  Returns `{:ok, binary}` | `{:error, reason}`.
+  """
+  def read_bytes(%{storage_type: :local, storage_path: path}) do
+    case File.read(Path.join(@local_upload_dir, path)) do
+      {:ok, bytes} -> {:ok, bytes}
+      {:error, reason} -> {:error, {:local_read_failed, reason}}
+    end
+  end
+
+  def read_bytes(%{storage_type: :s3, storage_bucket: bucket, storage_path: path}) do
+    case ExAws.S3.get_object(bucket, path) |> ExAws.request(ex_aws_config()) do
+      {:ok, %{body: body}} -> {:ok, body}
+      {:error, reason} -> {:error, {:s3_read_failed, reason}}
+    end
+  end
+
+  def read_bytes(%{storage_type: :url}), do: {:error, :url_not_verifiable}
+  def read_bytes(_), do: {:error, :unknown_storage}
 
   # ── Presigned download URL ─────────────────────────────────────────────────
 

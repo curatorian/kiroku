@@ -1,13 +1,14 @@
 defmodule KirokuWeb.BitstreamController do
   use KirokuWeb, :controller
 
-  alias Kiroku.{Content, Repository}
+  alias Kiroku.{Analytics, Content, Repository}
   alias Kiroku.Content.Bitstream
   alias Kiroku.Storage.Uploader
 
   @doc """
   Serves a bitstream file. Enforces access control based on the bitstream's
-  bundle, item embargo status, and the requesting user's role.
+  bundle, item embargo status, and the requesting user's role. Records a
+  download event (non-bot) for analytics.
   """
   def show(conn, %{"item_id" => item_id, "id" => bitstream_id}) do
     item = Repository.get_item!(item_id)
@@ -16,12 +17,30 @@ defmodule KirokuWeb.BitstreamController do
     user = conn.assigns[:current_user]
 
     if bitstream.item_id == item.id and Content.accessible?(bitstream, user, item) do
+      record_download(conn, bitstream, item)
       serve_bitstream(conn, bitstream)
     else
       conn
       |> put_status(:forbidden)
       |> put_view(KirokuWeb.ErrorHTML)
       |> render(:"403")
+    end
+  end
+
+  defp record_download(conn, bitstream, item) do
+    meta = [
+      user_agent: user_agent(conn),
+      ip_hash: Analytics.ip_hash(conn.remote_ip),
+      referer: get_req_header(conn, "referer") |> List.first()
+    ]
+
+    Analytics.record_download(bitstream.id, item.id, conn.assigns[:current_user], meta)
+  end
+
+  defp user_agent(conn) do
+    case get_req_header(conn, "user-agent") do
+      [ua | _] -> ua
+      _ -> nil
     end
   end
 

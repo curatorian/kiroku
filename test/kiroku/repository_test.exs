@@ -239,6 +239,41 @@ defmodule Kiroku.RepositoryTest do
       assert hd(public_results).title == "Quantum Field Theory"
       assert Enum.count(internal_results) == 2
     end
+
+    test "search ranks by relevance (ts_rank) when a term is present" do
+      # Both match "ekonomi". The first repeats the term far more often, so its
+      # ts_rank is higher. It also has an OLDER published_at, so under a pure
+      # newest-first ordering it would rank second — proving relevance wins.
+      published_item(%{
+        "title" => "Analisis Ekonomi Makro",
+        "abstract" => String.duplicate("ekonomi ", 12),
+        "published_at" => ~N[2020-01-01 00:00:00]
+      })
+
+      published_item(%{
+        "title" => "Pengantar Ekonomi",
+        "abstract" => "Sebuah pengantar singkat tentang ekonomi.",
+        "published_at" => ~N[2024-01-01 00:00:00]
+      })
+
+      results = Repository.search_items(%{term: "ekonomi", scope: :public})
+
+      assert Enum.map(results, & &1.title) == [
+               "Analisis Ekonomi Makro",
+               "Pengantar Ekonomi"
+             ]
+    end
+
+    test "browse without a term still orders newest-first" do
+      published_item(%{"title" => "Alpha", "published_at" => ~N[2020-01-01 00:00:00]})
+      published_item(%{"title" => "Beta", "published_at" => ~N[2024-01-01 00:00:00]})
+
+      results = Repository.list_published_items(scope: :public)
+      titles = Enum.map(results, & &1.title)
+
+      assert Enum.find_index(titles, &(&1 == "Beta")) <
+               Enum.find_index(titles, &(&1 == "Alpha"))
+    end
   end
 
   # ── Collection default access inheritance ──────────────────────────────────

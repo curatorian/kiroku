@@ -42,14 +42,21 @@ if config_env() == :prod do
   end
 
   # Rebuild Oban crontab at runtime so releases respect env vars.
-  # MSSQL sync is manual-only (Admin → Sync or mix task); only the embargo
-  # lifter is scheduled here.
+  # MSSQL sync is manual-only (Admin → Sync or mix task); the embargo lifter
+  # and the fixity checker are scheduled here.
   embargo_cron = System.get_env("EMBARGO_CRON", "0 2 * * *")
+  fixity_cron = System.get_env("FIXITY_CRON", "0 3 * * *")
 
   config :kiroku, Oban,
     plugins: [
       {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
-      {Oban.Plugins.Cron, crontab: [{embargo_cron, Kiroku.Embargo.LifterWorker}]}
+      {
+        Oban.Plugins.Cron,
+        crontab: [
+          {embargo_cron, Kiroku.Embargo.LifterWorker},
+          {fixity_cron, Kiroku.Workers.FixityWorker}
+        ]
+      }
     ]
 
   database_url =

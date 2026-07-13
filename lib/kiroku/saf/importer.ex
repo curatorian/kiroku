@@ -340,21 +340,29 @@ defmodule Kiroku.Saf.Importer do
           {:ok, content} = File.read(file_path)
 
           key = Uploader.storage_key(item.id, entry.bundle, entry.filename)
-          {:ok, ^key} = Uploader.upload(key, content, mime_type: mime_for(entry.filename))
 
-          {:ok, _} =
-            Content.create_bitstream(
-              %{
-                item_id: item.id,
-                filename: entry.filename,
-                bundle_name: entry.bundle,
-                sequence: entry.sequence,
-                description: entry.description,
-                storage_path: key,
-                access_level: entry.access_level
-              }
-              |> Map.merge(Uploader.record_attrs())
-            )
+          case Uploader.upload(key, content, mime_type: mime_for(entry.filename)) do
+            {:ok, %{checksum: checksum}} ->
+              {:ok, _} =
+                Content.create_bitstream(
+                  %{
+                    item_id: item.id,
+                    filename: entry.filename,
+                    bundle_name: entry.bundle,
+                    sequence: entry.sequence,
+                    description: entry.description,
+                    storage_path: key,
+                    checksum: checksum,
+                    checksum_algorithm: "MD5",
+                    access_level: entry.access_level
+                  }
+                  |> Map.merge(Uploader.record_attrs())
+                )
+
+            {:error, reason} ->
+              require Logger
+              Logger.error("SAF upload failed for #{entry.filename}: #{inspect(reason)}")
+          end
       end
     end)
   end
