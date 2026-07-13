@@ -2,10 +2,12 @@ defmodule KirokuWeb.CommunityLive.Index do
   use KirokuWeb, :live_view
 
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
 
   @impl true
   def mount(_params, _session, socket) do
-    communities = Repository.list_root_communities()
+    scope = Authorization.visibility_scope(socket.assigns[:current_user])
+    communities = Repository.list_root_communities(scope: scope)
 
     {:ok,
      socket

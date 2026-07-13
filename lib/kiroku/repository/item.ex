@@ -12,7 +12,7 @@ defmodule Kiroku.Repository.Item do
   )a
 
   @status_values ~w(draft submitted under_review published embargoed withdrawn)a
-  @access_values ~w(open restricted closed)a
+  @access_values ~w(open internal restricted closed)a
   @degree_values ~w(d3 d4 s1 s1_terapan s2 s3)a
   @language_values ~w(id en)a
 

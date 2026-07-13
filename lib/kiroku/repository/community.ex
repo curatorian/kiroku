@@ -5,6 +5,8 @@ defmodule Kiroku.Repository.Community do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
+  @access_values ~w(open internal restricted closed)a
+
   schema "communities" do
     field :name, :string
     field :handle, :string
@@ -13,6 +15,10 @@ defmodule Kiroku.Repository.Community do
     field :logo_bitstream_id, :binary_id
     field :position, :integer, default: 0
     field :is_active, :boolean, default: true
+
+    # Visibility of this community in public browse/search. A community set to
+    # :internal/:restricted/:closed is hidden from anonymous viewers.
+    field :access_level, Ecto.Enum, values: @access_values, default: :open
 
     # Virtual field used only for hierarchical tree display in the admin UI.
     field :depth, :integer, virtual: true, default: 0
@@ -34,7 +40,8 @@ defmodule Kiroku.Repository.Community do
       :logo_bitstream_id,
       :position,
       :parent_community_id,
-      :is_active
+      :is_active,
+      :access_level
     ])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 255)

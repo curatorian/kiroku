@@ -229,6 +229,7 @@ defmodule Kiroku.Oai.Builder do
   end
 
   defp rights_statement(%{access_level: :open}), do: "open"
+  defp rights_statement(%{access_level: :internal}), do: "internal"
   defp rights_statement(%{access_level: :restricted}), do: "restricted"
   defp rights_statement(_), do: "metadata only"
 

@@ -2,10 +2,12 @@ defmodule KirokuWeb.BrowseLive do
   use KirokuWeb, :live_view
 
   alias Kiroku.Repository
+  alias Kiroku.Access.Authorization
 
   @impl true
   def mount(_params, _session, socket) do
-    communities_with_collections = Repository.list_communities_with_collections()
+    scope = Authorization.visibility_scope(socket.assigns[:current_user])
+    communities_with_collections = Repository.list_communities_with_collections(scope: scope)
 
     {:ok,
      socket

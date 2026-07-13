@@ -47,6 +47,7 @@ defmodule Kiroku.Content do
   5. If the item's files are embargoed → not accessible.
   6. Otherwise → evaluate the bitstream's own access_level:
        :open       → accessible to everyone
+       :internal   → accessible to any logged-in user
        :inherit    → use the parent item's access_level
        :restricted → staff only
        :closed     → no one (except staff, already handled above)
@@ -89,6 +90,11 @@ defmodule Kiroku.Content do
   defp abstract?(%Bitstream{}), do: false
 
   defp access_level_allows?(:open, _item_level, _user), do: true
+
+  # :internal = any authenticated user (logged-in). Anonymous (nil) is denied;
+  # any non-nil user — including submitters — is granted.
+  defp access_level_allows?(:internal, _item_level, nil), do: false
+  defp access_level_allows?(:internal, _item_level, _user), do: true
 
   defp access_level_allows?(:inherit, item_level, user),
     do: access_level_allows?(item_level, item_level, user)

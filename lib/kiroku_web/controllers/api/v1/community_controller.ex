@@ -9,11 +9,13 @@ defmodule KirokuWeb.Api.V1.CommunityController do
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Repo}
+  alias Kiroku.Access.Authorization
 
   action_fallback KirokuWeb.FallbackController
 
   def index(conn, _params) do
-    communities = Repository.list_communities()
+    scope = Authorization.visibility_scope(conn.assigns[:current_user])
+    communities = Repository.list_communities(scope: scope)
     json(conn, %{data: Enum.map(communities, &community_json/1)})
   end
 
@@ -25,8 +27,15 @@ defmodule KirokuWeb.Api.V1.CommunityController do
         |> json(%{error: "Community not found"})
 
       community ->
-        community = Repo.preload(community, :collections)
-        json(conn, %{data: community_json(community, include_collections: true)})
+        if Authorization.can?(conn.assigns[:current_user], :read, community) do
+          scope = Authorization.visibility_scope(conn.assigns[:current_user])
+          community = Repo.preload(community, :collections)
+          json(conn, %{data: community_json(community, include_collections: true, scope: scope)})
+        else
+          conn
+          |> put_status(:not_found)
+          |> json(%{error: "Community not found"})
+        end
     end
   end
 
@@ -42,9 +51,12 @@ defmodule KirokuWeb.Api.V1.CommunityController do
     }
 
     if Keyword.get(opts, :include_collections) && Ecto.assoc_loaded?(community.collections) do
+      scope = Keyword.get(opts, :scope, :public)
+      levels = Authorization.visible_access_levels(scope)
+
       collections =
         community.collections
-        |> Enum.filter(& &1.is_active)
+        |> Enum.filter(fn c -> c.is_active and c.access_level in levels end)
         |> Enum.map(&collection_brief/1)
 
       Map.put(base, :collections, collections)

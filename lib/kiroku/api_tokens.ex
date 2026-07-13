@@ -117,7 +117,8 @@ defmodule Kiroku.ApiTokens do
 
       {api_token, user} ->
         update_last_used(api_token)
-        {:ok, user}
+        # Preload RBAC policies so Authorization.can?/3 has them in memory.
+        {:ok, Repo.preload(user, :rbac_policies)}
     end
   end
 

@@ -221,6 +221,23 @@ defmodule Kiroku.ContentTest do
       refute Content.accessible?(bs2, anonymous(), item2)
       assert Content.accessible?(bs2, staff_user(), item2)
     end
+
+    test ":internal accessible to any logged-in user, denied to anonymous" do
+      item = create_item()
+      bs = create_bitstream(item, %{"sequence" => 2, "access_level" => "internal"})
+
+      refute Content.accessible?(bs, anonymous(), item)
+      assert Content.accessible?(bs, regular_user(), item)
+      assert Content.accessible?(bs, staff_user(), item)
+    end
+
+    test ":inherit resolves to an :internal item access_level" do
+      item = create_item(%{"access_level" => "internal"})
+      bs = create_bitstream(item, %{"sequence" => 2, "access_level" => "inherit"})
+
+      refute Content.accessible?(bs, anonymous(), item)
+      assert Content.accessible?(bs, regular_user(), item)
+    end
   end
 
   # ── files_embargoed? ───────────────────────────────────────────────────────

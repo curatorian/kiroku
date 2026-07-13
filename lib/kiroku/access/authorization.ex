@@ -6,10 +6,58 @@ defmodule Kiroku.Access.Authorization do
 
   The third argument can be a struct or a bare atom (:global) for
   non-resource actions.
+
+  ## Two layers of authorization
+
+  1. **Role rules** — hardcoded clauses keyed on `user_type` (the fast path).
+     These establish the baseline: what a submitter/internal/reviewer/admin can
+     do anywhere.
+  2. **RBAC policies** — per-user grants stored in `rbac_policies` and preloaded
+     onto `%User{rbac_policies: [...]}` at the auth boundary. A policy can only
+     *grant additional* access, never revoke it. This is how a faculty liaison,
+     for example, can be empowered to review items in one specific collection
+     without being promoted to a global `:reviewer`.
+
+  Resource matching honours the repository hierarchy: a policy on a community
+  or collection covers the items within it (collection→items via `collection_id`,
+  community→items via the collection's `community_id` when preloaded).
   """
 
   alias Kiroku.Repository.{Community, Collection, Item}
   alias Kiroku.Accounts.User
+  alias Kiroku.Access.RbacPolicy
+
+  # ── Visibility scope ──────────────────────────────────────────────────────────
+  #
+  # A "visibility scope" is the maximum access tier a viewer may see, derived
+  # from their role. It drives item discovery filtering (listings/search) and
+  # the published-item read check. The three tiers map to the repository's
+  # public / internal / private model:
+  #
+  #   :public  — anonymous visitor         → sees :open items only
+  #   :internal — any logged-in user        → sees :open + :internal items
+  #   :staff    — reviewer/admin/superadmin → sees every access level
+
+  @doc "Returns the visibility scope for a user (or nil for anonymous)."
+  def visibility_scope(%User{user_type: type}) when type in [:reviewer, :admin, :superadmin],
+    do: :staff
+
+  def visibility_scope(%User{user_type: type}) when type in [:internal, :submitter],
+    do: :internal
+
+  def visibility_scope(_user), do: :public
+
+  @doc """
+  Returns the list of `access_level` atoms visible to the given scope.
+
+      visible_access_levels(:public)  ~> [:open]
+      visible_access_levels(:internal) ~> [:open, :internal]
+      visible_access_levels(:staff)    ~> [:open, :internal, :restricted, :closed]
+  """
+  def visible_access_levels(:staff), do: [:open, :internal, :restricted, :closed]
+  def visible_access_levels(:internal), do: [:open, :internal]
+  def visible_access_levels(:public), do: [:open]
+  def visible_access_levels(_other), do: [:open]
 
   # Superadmin may do anything
   def can?(%User{user_type: :superadmin}, _action, _resource), do: true
@@ -18,24 +66,53 @@ defmodule Kiroku.Access.Authorization do
   #
   # Community management — including the hierarchical structure — is restricted
   # to superadmins. Admins and below may only read.
+  #
+  # Read access is gated by `is_active` and `access_level`: an inactive or
+  # non-open community is hidden from public/internal viewers (both in browse
+  # listings and on direct handle access).
 
-  def can?(_user, :read, %Community{}), do: true
+  def can?(user, :read, %Community{is_active: false} = community),
+    do: visibility_scope(user) == :staff or policy_allows?(user, :read, community)
+
+  def can?(user, :read, %Community{} = community),
+    do:
+      community.access_level in visible_access_levels(visibility_scope(user)) or
+        policy_allows?(user, :read, community)
 
   # ── Collection CRUD ───────────────────────────────────────────────────────────
 
   def can?(%User{user_type: type}, action, %Collection{})
-      when type in [:admin] and action in [:read, :create, :update, :delete] do
+      when type in [:admin] and action in [:create, :update, :delete] do
     true
   end
 
-  def can?(_user, :read, %Collection{}), do: true
+  def can?(%User{user_type: :admin}, :read, %Collection{}), do: true
+
+  def can?(user, :read, %Collection{is_active: false} = collection),
+    do: visibility_scope(user) == :staff or policy_allows?(user, :read, collection)
+
+  def can?(user, :read, %Collection{} = collection),
+    do:
+      collection.access_level in visible_access_levels(visibility_scope(user)) or
+        policy_allows?(user, :read, collection)
 
   # ── Item read ─────────────────────────────────────────────────────────────────
+  #
+  # Published items are gated by `access_level` according to the viewer's scope
+  # (public / internal / staff). This is what prevents a :closed or :restricted
+  # item's metadata from leaking to anonymous or non-staff viewers.
 
-  def can?(_user, :read, %Item{status: :published, discoverable: true}), do: true
+  def can?(user, :read, %Item{status: :published, discoverable: true} = item) do
+    item.access_level in visible_access_levels(visibility_scope(user)) or
+      policy_allows?(user, :read, item)
+  end
 
-  def can?(%User{user_type: type}, :read, %Item{})
-      when type in [:internal, :reviewer, :admin] do
+  # Non-published items (draft, submitted, under_review, embargoed, withdrawn)
+  # are readable by internal users and staff. The `status != :published` guard
+  # is essential: without it this clause would re-grant access to published
+  # items that the access_level check above just denied.
+  def can?(%User{user_type: type}, :read, %Item{status: status})
+      when type in [:internal, :reviewer, :admin] and status != :published do
     true
   end
 
@@ -82,7 +159,88 @@ defmodule Kiroku.Access.Authorization do
     true
   end
 
-  # ── Catch-all ─────────────────────────────────────────────────────────────────
+  # ── Catch-all / RBAC policy fallback ─────────────────────────────────────────
+  #
+  # Anything not matched by a role rule above is denied — unless an explicit
+  # RBAC policy grants it. This is what lets a :submitter with a :review policy
+  # on a collection perform review actions on that collection's items, or read a
+  # restricted item they've been granted access to.
+
+  def can?(%User{} = user, action, resource), do: policy_allows?(user, action, resource)
 
   def can?(_user, _action, _resource), do: false
+
+  # ── RBAC policy evaluation ───────────────────────────────────────────────────
+  #
+  # Policies are preloaded onto the user as a list (`%User{rbac_policies: [...]}`).
+  # When the association is not loaded (e.g. bare structs in unit tests, or code
+  # paths that didn't preload), there are no custom grants and this returns false.
+
+  defp policy_allows?(%User{rbac_policies: policies}, action, resource)
+       when is_list(policies) do
+    Enum.any?(policies, &policy_matches?(&1, action, resource))
+  end
+
+  defp policy_allows?(_user, _action, _resource), do: false
+
+  defp policy_matches?(%RbacPolicy{} = policy, action, resource) do
+    action_grants?(policy.action, action) and resource_matches?(policy, resource)
+  end
+
+  # :manage is a wildcard — it grants every action on the scoped resource.
+  defp action_grants?(:manage, _action), do: true
+
+  defp action_grants?(:review, action) when action in [:review, :withdraw, :lift_embargo],
+    do: true
+
+  defp action_grants?(:publish, :publish), do: true
+  defp action_grants?(:submit, :create), do: true
+  defp action_grants?(:read, :read), do: true
+  defp action_grants?(_policy_action, _requested), do: false
+
+  # A policy's resource scope matches when it is global, or points at the
+  # resource itself, its parent collection, or its parent community. UUIDs are
+  # binaries; nil resource_ids never match a specific resource.
+  defp resource_matches?(%RbacPolicy{resource_type: :global}, _resource), do: true
+
+  defp resource_matches?(%RbacPolicy{resource_type: :item, resource_id: rid}, %Item{id: id})
+       when is_binary(rid) and is_binary(id),
+       do: rid == id
+
+  defp resource_matches?(
+         %RbacPolicy{resource_type: :collection, resource_id: rid},
+         %Item{collection_id: cid}
+       )
+       when is_binary(rid) and is_binary(cid),
+       do: rid == cid
+
+  defp resource_matches?(
+         %RbacPolicy{resource_type: :collection, resource_id: rid},
+         %Collection{id: id}
+       )
+       when is_binary(rid) and is_binary(id),
+       do: rid == id
+
+  defp resource_matches?(
+         %RbacPolicy{resource_type: :community, resource_id: rid},
+         %Collection{community_id: cmid}
+       )
+       when is_binary(rid) and is_binary(cmid),
+       do: rid == cmid
+
+  defp resource_matches?(%RbacPolicy{resource_type: :community, resource_id: rid}, %Community{
+         id: id
+       })
+       when is_binary(rid) and is_binary(id),
+       do: rid == id
+
+  # Item → community, but only when the item's collection is preloaded.
+  defp resource_matches?(
+         %RbacPolicy{resource_type: :community, resource_id: rid},
+         %Item{collection: %Collection{community_id: cmid}}
+       )
+       when is_binary(rid) and is_binary(cmid),
+       do: rid == cmid
+
+  defp resource_matches?(_policy, _resource), do: false
 end
