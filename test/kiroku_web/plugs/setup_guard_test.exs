@@ -6,6 +6,7 @@ defmodule KirokuWeb.Plugs.SetupGuardTest do
   # Manipulates the global :persistent_term cache, so cannot run async.
   setup do
     Onboarding.force_setup_state(false)
+    on_exit(fn -> Onboarding.force_setup_state(true) end)
     :ok
   end
 

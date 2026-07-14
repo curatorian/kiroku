@@ -25,7 +25,31 @@ defmodule Kiroku.Content do
     %Bitstream{}
     |> Bitstream.changeset(attrs)
     |> Repo.insert()
+    |> maybe_enqueue_pdf_extraction()
   end
+
+  # After a successful insert, kick off async text extraction for PDFs in
+  # content-bearing bundles. The worker skips non-PDFs internally, so this
+  # is safe for every insert; gating on bundle/mime + storage_path avoids
+  # no-op job rows for thumbnails, license uploads, and not-yet-staged
+  # bitstreams (e.g. test fixtures).
+  defp maybe_enqueue_pdf_extraction({:ok, %Bitstream{} = bs}) do
+    if bs.bundle_name in [:ORIGINAL, :CHAPTER] and has_stored_bytes?(bs) do
+      %{bitstream_id: bs.id}
+      |> Kiroku.Workers.PdfTextWorker.new()
+      |> Oban.insert()
+    end
+
+    {:ok, bs}
+  end
+
+  defp maybe_enqueue_pdf_extraction(other), do: other
+
+  defp has_stored_bytes?(%Bitstream{storage_type: type, storage_path: path})
+       when type in [:local, :s3] and is_binary(path) and path != "",
+       do: true
+
+  defp has_stored_bytes?(_), do: false
 
   def update_bitstream(%Bitstream{} = bitstream, attrs) do
     bitstream
@@ -116,6 +140,7 @@ defmodule Kiroku.Content do
   # it to the stored value, recording each result in bitstream_fixity_checks.
 
   alias Kiroku.Content.BitstreamFixityCheck
+  alias Kiroku.Content.BitstreamExtractedText
   alias Kiroku.Storage.Uploader
 
   @fixity_batch_size 50
@@ -257,5 +282,206 @@ defmodule Kiroku.Content do
         limit: ^limit,
         preload: [:bitstream]
     )
+  end
+
+  # ── PDF text extraction ─────────────────────────────────────────────────────
+  #
+  # Shells out to `pdftotext` (poppler-utils) to pull the text content of an
+  # ORIGINAL-bundle PDF. The result is persisted to bitstream_extracted_text
+  # and aggregated into the parent item's denormalized `extracted_text`
+  # column, which the PostgreSQL `search_vector` generated column folds into
+  # the GIN-indexed tsvector used by full-text search.
+
+  @extractor "pdftotext"
+
+  @doc """
+  Extracts text from `bitstream` (a PDF) via `pdftotext`.
+
+  Skips non-PDFs and externally-hosted bitstreams (cannot read bytes).
+  Persists the result and rebuilds the parent item's `extracted_text` cache
+  so the search index stays fresh.
+
+  Returns:
+    * `{:ok, text}`         — extraction succeeded (text may be empty)
+    * `{:ok, nil}`          — skipped (non-PDF or :url storage)
+    * `{:error, reason}`    — extraction failed (bytes unreadable, pdftotext
+                              missing/errored); see the persisted row's
+                              `:error` field for details
+  """
+  def extract_text(%Bitstream{} = bitstream) do
+    cond do
+      not pdf?(bitstream) ->
+        {:ok, nil}
+
+      bitstream.storage_type == :url ->
+        {:ok, nil}
+
+      true ->
+        extract_pdf(bitstream)
+    end
+  end
+
+  def extract_text(id) when is_binary(id) do
+    case get_bitstream(id) do
+      %Bitstream{} = bs -> extract_text(bs)
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp extract_pdf(%Bitstream{} = bitstream) do
+    now = DateTime.utc_now()
+
+    case Uploader.read_bytes(bitstream) do
+      {:ok, bytes} ->
+        case run_pdftotext(bytes) do
+          {:ok, text, page_count} ->
+            persist_extraction(bitstream, %{
+              text: text,
+              page_count: page_count,
+              extractor: @extractor,
+              error: nil,
+              extracted_at: now
+            })
+
+            recompute_item_extracted_text(bitstream.item_id)
+            {:ok, text}
+
+          {:error, reason} ->
+            persist_extraction(bitstream, %{
+              text: nil,
+              page_count: nil,
+              extractor: @extractor,
+              error: extractor_error_string(reason),
+              extracted_at: now
+            })
+
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp run_pdftotext(bytes) do
+    if System.find_executable("pdftotext") == nil do
+      {:error, :pdftotext_not_found}
+    else
+      # System.cmd/3 in Elixir 1.20+ no longer accepts :input, so we write
+      # the bytes to a temp file and have pdftotext read it directly.
+      tmp_in =
+        Path.join(
+          System.tmp_dir!(),
+          "kiroku-pdf-#{System.unique_integer([:positive, :monotonic])}.pdf"
+        )
+
+      try do
+        File.write!(tmp_in, bytes)
+
+        case System.cmd("pdftotext", [tmp_in, "-"], stderr_to_stdout: true) do
+          {text, 0} ->
+            {:ok, text, count_pages(bytes)}
+
+          {output, exit_code} ->
+            {:error, {:extractor_failed, exit_code, output}}
+        end
+      after
+        File.rm(tmp_in)
+      end
+    end
+  end
+
+  # Best-effort page count via pdfinfo (also from poppler-utils). Returns nil
+  # if pdfinfo is unavailable or fails — we don't want to fail the whole
+  # extraction just because page counting broke.
+  defp count_pages(bytes) do
+    if System.find_executable("pdfinfo") == nil do
+      nil
+    else
+      tmp_in =
+        Path.join(
+          System.tmp_dir!(),
+          "kiroku-pdf-info-#{System.unique_integer([:positive, :monotonic])}.pdf"
+        )
+
+      try do
+        File.write!(tmp_in, bytes)
+
+        case System.cmd("pdfinfo", [tmp_in], stderr_to_stdout: true) do
+          {info, 0} ->
+            case Regex.run(~r/^Pages:\s+(\d+)/m, info) do
+              [_, n] -> String.to_integer(n)
+              _ -> nil
+            end
+
+          _ ->
+            nil
+        end
+      after
+        File.rm(tmp_in)
+      end
+    end
+  end
+
+  defp extractor_error_string(:pdftotext_not_found), do: "pdftotext binary not on PATH"
+
+  defp extractor_error_string({:extractor_failed, code, output}),
+    do: "pdftotext exited #{code}: #{output}"
+
+  defp extractor_error_string(other), do: inspect(other)
+
+  # A bitstream is considered a PDF if its mime_type advertises PDF or its
+  # filename ends with .pdf. We accept a few common mime variants seen in the
+  # wild.
+  defp pdf?(%Bitstream{mime_type: mime}) when mime in ~w(application/pdf application/x-pdf),
+    do: true
+
+  defp pdf?(%Bitstream{filename: name}) when is_binary(name),
+    do: String.ends_with?(String.downcase(name), ".pdf")
+
+  defp pdf?(_), do: false
+
+  # Persists (upserts) the extraction result for a single bitstream.
+  defp persist_extraction(bitstream, attrs) do
+    {:ok, _} =
+      %BitstreamExtractedText{}
+      |> BitstreamExtractedText.changeset(Map.put(attrs, :bitstream_id, bitstream.id))
+      |> Repo.insert(
+        on_conflict: :replace_all,
+        conflict_target: :bitstream_id
+      )
+
+    :ok
+  end
+
+  @doc """
+  Recomputes `items.extracted_text` by concatenating the text of all
+  successfully extracted bitstreams for `item_id`, in bundle/sequence order.
+
+  The PostgreSQL `search_vector` column is GENERATED from title + abstract +
+  extracted_text, so updating this column automatically refreshes the
+  GIN-indexed full-text search index.
+  """
+  def recompute_item_extracted_text(item_id) when is_binary(item_id) do
+    rows =
+      Repo.all(
+        from e in BitstreamExtractedText,
+          join: b in assoc(e, :bitstream),
+          where: e.text != "" and not is_nil(e.text) and b.item_id == ^item_id,
+          order_by: [b.bundle_name, b.sequence],
+          select: e.text
+      )
+
+    concatenated = Enum.join(rows, " \n")
+
+    {:ok, _} =
+      Kiroku.Repository.Item
+      |> Repo.get(item_id)
+      |> case do
+        nil -> {:ok, nil}
+        item -> item |> Ecto.Changeset.change(%{extracted_text: concatenated}) |> Repo.update()
+      end
+
+    :ok
   end
 end

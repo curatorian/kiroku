@@ -758,6 +758,13 @@ defmodule Kiroku.Sync.Importer do
   defp create_bitstreams_for_record(item, r) do
     link_path = field(r, :LinkPath)
 
+    # Replace semantics: clear any existing bitstreams for this item before
+    # inserting the fresh set from the source record. This mirrors the
+    # `replace_all_except` upsert used by import_item/1 and makes the import
+    # idempotent — re-running won't stack duplicates on items that already
+    # have bitstreams from a prior run.
+    Repo.delete_all(from b in Content.Bitstream, where: b.item_id == ^item.id)
+
     file_map = [
       {field(r, :FileCover), :THUMBNAIL, 1, :open},
       {field(r, :FileAbstrak), :ORIGINAL, 1, :inherit},

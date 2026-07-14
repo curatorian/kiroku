@@ -14,6 +14,7 @@ defmodule KirokuWeb.SearchLive do
      socket
      |> assign(:page_title, "Search — Kiroku")
      |> assign(:items, [])
+     |> assign(:facets, empty_facets())
      |> assign(:pagination, Pagination.build(0, 1, 20))
      |> assign(:query, nil)
      |> assign(:filters, %{})}
@@ -29,24 +30,35 @@ defmodule KirokuWeb.SearchLive do
       department: params["department"],
       year: params["year"] && parse_year(params["year"]),
       collection_id: params["collection_id"],
+      author: params["author"],
+      keyword: params["keyword"],
       page: parse_page(params["page"])
     }
 
     scope = Authorization.visibility_scope(socket.assigns[:current_user])
+    search_active = query || Enum.any?(filters, fn {_k, v} -> v not in [nil, 1] end)
 
-    {items, pagination} =
-      if query || Enum.any?(filters, fn {_k, v} -> v not in [nil, 1] end) do
-        Repository.search_items_pagination(Map.merge(filters, %{term: query, scope: scope}))
-      else
-        {[], Pagination.build(0, 1, 20)}
-      end
+    if search_active do
+      search_params = Map.merge(filters, %{term: query, scope: scope})
+      {items, pagination} = Repository.search_items_pagination(search_params)
+      facets = Repository.facets(search_params)
 
-    {:noreply,
-     socket
-     |> assign(:query, query)
-     |> assign(:filters, filters)
-     |> assign(:items, items)
-     |> assign(:pagination, pagination)}
+      {:noreply,
+       socket
+       |> assign(:query, query)
+       |> assign(:filters, filters)
+       |> assign(:items, items)
+       |> assign(:facets, facets)
+       |> assign(:pagination, pagination)}
+    else
+      {:noreply,
+       socket
+       |> assign(:query, nil)
+       |> assign(:filters, filters)
+       |> assign(:items, [])
+       |> assign(:facets, empty_facets())
+       |> assign(:pagination, Pagination.build(0, 1, 20))}
+    end
   end
 
   @impl true
@@ -57,6 +69,11 @@ defmodule KirokuWeb.SearchLive do
       |> Enum.into(%{})
 
     {:noreply, push_patch(socket, to: ~p"/search?#{query_params}")}
+  end
+
+  @impl true
+  def handle_event("clear-filters", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/search")}
   end
 
   @impl true
@@ -75,17 +92,16 @@ defmodule KirokuWeb.SearchLive do
         </div>
 
         <%!-- Search form --%>
-        <form id="search-form" phx-submit="search" phx-change="search" class="space-y-3">
+        <form id="search-form" phx-submit="search" class="space-y-3">
           <div class="flex gap-2">
             <input
               type="text"
               name="q"
               id="search-query"
               value={@query}
-              placeholder="Search titles, abstracts, keywords…"
+              placeholder="Search titles, abstracts, full-text, keywords…"
               class="kiroku-search-input flex-1"
               autocomplete="off"
-              phx-debounce="400"
             />
             <button
               type="submit"
@@ -95,103 +111,222 @@ defmodule KirokuWeb.SearchLive do
               Search
             </button>
           </div>
-          <%!-- Filters row --%>
-          <div class="flex flex-wrap gap-3">
-            <select
-              name="type"
-              id="search-type"
-              class="kiroku-search-input"
-              style="width: auto; padding: 0.4rem 0.75rem;"
-            >
-              <option value="">All types</option>
-              <option value="skripsi" selected={@filters[:item_type] == "skripsi"}>Skripsi</option>
-              <option
-                value="jurnal_nasional"
-                selected={@filters[:item_type] == "jurnal_nasional"}
-              >
-                Jurnal Nasional
-              </option>
-              <option
-                value="jurnal_internasional"
-                selected={@filters[:item_type] == "jurnal_internasional"}
-              >
-                Jurnal Internasional
-              </option>
-              <option value="prosiding" selected={@filters[:item_type] == "prosiding"}>
-                Prosiding
-              </option>
-              <option value="capstone" selected={@filters[:item_type] == "capstone"}>
-                Capstone
-              </option>
-              <option value="karya_kreatif" selected={@filters[:item_type] == "karya_kreatif"}>
-                Karya Kreatif
-              </option>
-              <option
-                value="karya_teknologi"
-                selected={@filters[:item_type] == "karya_teknologi"}
-              >
-                Karya Teknologi
-              </option>
-            </select>
-            <input
-              type="number"
-              name="year"
-              id="search-year"
-              value={@filters[:year]}
-              placeholder="Year"
-              class="kiroku-search-input"
-              style="width: 100px;"
-              phx-debounce="600"
-            />
-            <input
-              type="text"
-              name="faculty"
-              id="search-faculty"
-              value={@filters[:faculty]}
-              placeholder="Faculty"
-              class="kiroku-search-input"
-              style="width: auto;"
-              phx-debounce="600"
-            />
-          </div>
         </form>
 
-        <%!-- Results --%>
-        <div>
-          <%= if @query do %>
-            <p class="text-sm mb-4" style="color: var(--color-quill);">
-              Showing results for <span style="color: var(--color-wisteria);">"{@query}"</span>
-              — {@pagination.total_count} result(s)
-            </p>
-          <% end %>
+        <%!-- Results + facet sidebar --%>
+        <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <%!-- Facet sidebar --%>
+          <aside class="space-y-5 lg:sticky lg:top-6 lg:self-start">
+            <%= if has_active_filters?(@filters) do %>
+              <button
+                phx-click="clear-filters"
+                class="text-xs font-medium uppercase tracking-wide hover:underline"
+                style="color: var(--color-wisteria);"
+              >
+                Clear all filters
+              </button>
+            <% end %>
 
-          <%= if @items == [] do %>
-            <div class="kiroku-card p-12 text-center">
-              <span class="kiroku-kanji text-5xl opacity-30">記</span>
-              <p class="mt-4" style="color: var(--color-quill);">
-                {if @query,
-                  do: "No results found. Try different keywords.",
-                  else: "Enter a search term to begin."}
-              </p>
-            </div>
-          <% else %>
-            <div class="space-y-3">
-              <%= for item <- @items do %>
-                <.item_card item={item} />
-              <% end %>
-            </div>
-
-            <.pagination
-              pagination={@pagination}
-              path="/search"
-              params={build_search_params(@query, @filters)}
+            <.facet_group
+              label="Type"
+              values={@facets.item_types}
+              selected={@filters[:item_type]}
+              param="type"
+              display={&item_type_label/1}
+              current_query={@query}
+              current_filters={@filters}
             />
-          <% end %>
+
+            <.facet_group
+              label="Year"
+              values={@facets.years}
+              selected={@filters[:year] && to_string(@filters[:year])}
+              param="year"
+              current_query={@query}
+              current_filters={@filters}
+            />
+
+            <.facet_group
+              label="Faculty"
+              values={@facets.faculties}
+              selected={@filters[:faculty]}
+              param="faculty"
+              current_query={@query}
+              current_filters={@filters}
+            />
+
+            <.facet_group
+              label="Author"
+              values={@facets.authors}
+              selected={@filters[:author]}
+              param="author"
+              current_query={@query}
+              current_filters={@filters}
+            />
+
+            <.facet_group
+              label="Subject / Keyword"
+              values={@facets.keywords}
+              selected={@filters[:keyword]}
+              param="keyword"
+              current_query={@query}
+              current_filters={@filters}
+            />
+          </aside>
+
+          <%!-- Results --%>
+          <div>
+            <%= if @query do %>
+              <p class="text-sm mb-4" style="color: var(--color-quill);">
+                Showing results for <span style="color: var(--color-wisteria);">"{@query}"</span>
+                — {@pagination.total_count} result(s)
+              </p>
+            <% end %>
+
+            <%= if @items == [] do %>
+              <div class="kiroku-card p-12 text-center">
+                <span class="kiroku-kanji text-5xl opacity-30">記</span>
+                <p class="mt-4" style="color: var(--color-quill);">
+                  {if @query,
+                    do: "No results found. Try different keywords.",
+                    else: "Enter a search term to begin."}
+                </p>
+              </div>
+            <% else %>
+              <div class="space-y-3">
+                <%= for item <- @items do %>
+                  <.item_card item={item} />
+                <% end %>
+              </div>
+
+              <.pagination
+                pagination={@pagination}
+                path="/search"
+                params={build_search_params(@query, @filters)}
+              />
+            <% end %>
+          </div>
         </div>
       </div>
     </Layouts.app>
     """
   end
+
+  # ── Facet component ────────────────────────────────────────────────────────
+
+  attr :label, :string, required: true
+  attr :values, :list, required: true
+  attr :selected, :any, default: nil
+  attr :param, :string, required: true
+  attr :display, :any, default: nil
+  attr :current_query, :string, default: nil
+  attr :current_filters, :map, default: %{}
+
+  def facet_group(assigns) do
+    ~H"""
+    <%= if @values != [] do %>
+      <div class="space-y-2">
+        <h3
+          class="text-xs font-semibold uppercase tracking-widest"
+          style="color: var(--color-quill);"
+        >
+          {@label}
+        </h3>
+        <ul class="space-y-0.5">
+          <%= for entry <- @values do %>
+            <li>
+              <%!-- Build a link that toggles this facet value on/off. Clicking
+                   an already-selected value clears it. --%>
+              <.link
+                patch={facet_toggle_path(@param, entry.value, @current_query, @current_filters)}
+                class={[
+                  "flex items-center justify-between text-sm rounded-md px-2 py-1 transition-colors",
+                  facet_is_selected?(@selected, entry.value) &&
+                    "font-medium",
+                  facet_is_selected?(@selected, entry.value) &&
+                    "bg-[color-mix(in_srgb,var(--color-patchouli)_18%,transparent)]"
+                ]}
+                style={
+                  if facet_is_selected?(@selected, entry.value),
+                    do:
+                      "color: var(--color-wisteria); border-left: 2px solid var(--color-patchouli);",
+                    else: "color: var(--color-lilac);"
+                }
+              >
+                <span class="truncate">
+                  {if @display, do: @display.(entry.value), else: entry.value}
+                </span>
+                <span
+                  class="text-xs ml-2 tabular-nums shrink-0"
+                  style="color: var(--color-quill);"
+                >
+                  {entry.count}
+                </span>
+              </.link>
+            </li>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp facet_is_selected?(selected, value) do
+    selected != nil && to_string(selected) == to_string(value)
+  end
+
+  # Toggles a facet value. If the value is already the selected one, removes
+  # it; otherwise replaces it. Other filters + the query term are preserved.
+  #
+  # URL param names differ from internal filter keys for one facet:
+  #   URL `type`  ↔  filter `item_type`
+  # so we translate via `param_to_filter_key/1`.
+  defp facet_toggle_path(param, value, query, filters) do
+    filter_key = param_to_filter_key(param)
+    current_value = Map.get(filters, filter_key)
+
+    new_filters =
+      if current_value != nil && to_string(current_value) == to_string(value) do
+        Map.delete(filters, filter_key)
+      else
+        Map.put(filters, filter_key, value)
+      end
+
+    params = build_search_params(query, new_filters)
+    ~p"/search?#{params}"
+  end
+
+  defp param_to_filter_key("type"), do: :item_type
+  defp param_to_filter_key(other), do: String.to_existing_atom(other)
+
+  defp has_active_filters?(filters) do
+    filters
+    |> Map.delete(:page)
+    |> Enum.any?(fn {_k, v} -> v not in [nil, ""] end)
+  end
+
+  defp empty_facets do
+    %{item_types: [], years: [], faculties: [], authors: [], keywords: []}
+  end
+
+  # Translates internal item_type atoms to user-facing labels for the facet
+  # sidebar. Mirrors the option list in the previous single-select UI.
+  defp item_type_label(value) when is_atom(value), do: item_type_label(Atom.to_string(value))
+
+  defp item_type_label("skripsi"), do: "Skripsi"
+  defp item_type_label("tesis"), do: "Tesis"
+  defp item_type_label("disertasi"), do: "Disertasi"
+  defp item_type_label("tugas_akhir"), do: "Tugas Akhir"
+  defp item_type_label("memorandum_hukum"), do: "Memorandum Hukum"
+  defp item_type_label("studi_kasus"), do: "Studi Kasus"
+  defp item_type_label("laporan_proyek"), do: "Laporan Proyek"
+  defp item_type_label("karya_kreatif"), do: "Karya Kreatif"
+  defp item_type_label("karya_teknologi"), do: "Karya Teknologi"
+  defp item_type_label("jurnal_nasional"), do: "Jurnal Nasional"
+  defp item_type_label("jurnal_internasional"), do: "Jurnal Internasional"
+  defp item_type_label("prosiding"), do: "Prosiding"
+  defp item_type_label("capstone"), do: "Capstone"
+  defp item_type_label(other), do: other
 
   defp parse_page(nil), do: 1
 
@@ -219,6 +354,8 @@ defmodule KirokuWeb.SearchLive do
     |> maybe_param("department", filters[:department])
     |> maybe_param("year", filters[:year])
     |> maybe_param("collection_id", filters[:collection_id])
+    |> maybe_param("author", filters[:author])
+    |> maybe_param("keyword", filters[:keyword])
   end
 
   defp maybe_param(params, _key, nil), do: params

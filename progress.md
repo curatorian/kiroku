@@ -68,19 +68,23 @@ These areas are mature and need no immediate work:
 
 ## C. Tier 2 — Strongly recommended for parity
 
-- [ ] **2.1 DOI minting via DataCite (or Crossref)**
+- [x] **2.1 DOI minting via DataCite (or Crossref)**
   - Register DOI on `publish_item`. Use `Req` (already a dep) for the API.
+  - _Done:_ pluggable `Kiroku.Doi.Provider` behaviour with two implementations — `Kiroku.Doi.Providers.DataCite` (REST API via Req, full DataCite-JSON payload with creators/ORCID/resource types) and `Kiroku.Doi.Providers.Mock` (deterministic, network-free, for dev/test). `Kiroku.Doi` dispatches by runtime `doi_provider` setting. New `doi_status` (`pending`/`minting`/`minted`/`failed`/`not_required`) + `doi_minted_at` columns on items. Async via `Kiroku.Workers.DoiMintWorker` (Oban, max_attempts: 5) enqueued by `publish_item/1` only when `doi_enabled` is on and the item has no DOI. Master switch + provider/prefix/credentials in Settings. Existing items with a DOI backfilled to `:minted`. 14 tests.
 
-- [ ] **2.2 Full-text PDF extraction + content indexing**
+- [x] **2.2 Full-text PDF extraction + content indexing**
   - Extract text from uploaded PDFs (Rust NIF, e.g. `pdftotext`, or an external worker).
   - Store extracted text; fold into the `search_vector`. This is the feature that makes a thesis repository genuinely useful.
+  - _Done:_ `Content.extract_text/1` shells out to `pdftotext` (poppler-utils) via temp file (Elixir 1.20 dropped `System.cmd`'s `:input` option). Best-effort page count via `pdfinfo`. New `bitstream_extracted_text` table (one row per bitstream, idempotent upsert, records both text and errors). Denormalized `items.extracted_text` cache rebuilt by `Content.recompute_item_extracted_text/1` whenever extraction completes — Postgres `search_vector` GENERATED column expanded to fold `extracted_text` into the GIN-indexed tsvector. `Kiroku.Workers.PdfTextWorker` (Oban, max_attempts: 3) auto-enqueued by `Content.create_bitstream/1` for ORIGINAL/CHAPTER PDFs with stored bytes. Search vector now matches terms that appear only inside PDF bodies. 13 tests.
 
-- [ ] **2.3 Faceted search sidebar** (author, subject, year, type, faculty — with counts)
+- [x] **2.3 Faceted search sidebar** (author, subject, year, type, faculty — with counts)
   - Replace `<select>` dropdowns with real facets returning per-value aggregation counts.
   - Brand guidelines (`plans/03:567`) already call for this layout.
+  - _Done:_ `Repository.facets/1` returns per-value counts for item_type, publication_year, faculty, author_name, and keyword. Each facet's counts are computed excluding that facet's own filter (Amazon-style multi-select) so the other values don't collapse when one is picked. New `author` and `keyword` filter params on `search_items` enable clicking those facets. Refactored the search query into a shared `search_base_query/1` so results + facets stay consistent. SearchLive rewritten with a sticky left sidebar of facet groups (counts, item_type labels in Bahasa, click-to-toggle `<.link patch>` navigation). "Clear all filters" button. 11 Repository tests + 7 LiveView tests.
 
-- [ ] **2.4 Browse-by-author / browse-by-date / browse-by-title indexes**
+- [x] **2.4 Browse-by-author / browse-by-date / browse-by-title indexes**
   - Standard IR navigation. Only structural browse (community→collection→items) exists today.
+  - _Done:_ `Repository.browse_by_author/1`, `browse_by_date/1`, `browse_by_title/1` aggregations (all visibility-scope aware, all paginated or limit-capped). BrowseLive extended with a `?by=structure|author|date|title` mode tab UI. Author mode renders an alphabet jump-bar + per-letter sections. Date mode lists years newest-first. Title mode paginates the alphabetical item list. Every entry links into `/search` with the matching filter, so the existing facet sidebar serves as the result page. 7 Repository tests + 6 LiveView tests.
 
 - [ ] **2.5 SWORD v2 deposit API**
   - Required by many publishers for automated article deposit. No SWORD code exists.
@@ -89,9 +93,6 @@ These areas are mature and need no immediate work:
 - [ ] **2.6 Automatic thumbnail generation**
   - The `image` dep was planned (`plans/01`) but dropped. THUMBNAIL bundle exists; only generation is missing.
   - Generate first-page thumbnail for PDFs, resize uploaded images.
-
-- [ ] **2.7 Virus scanning (ClamAV) on upload**
-  - Required policy for most institutions.
 
 - [ ] **2.8 Versioning & metadata audit log**
   - No `item_versions` table, no `audit_logs`. DSpace and EPrints both have item versioning.
@@ -171,5 +172,9 @@ These areas are mature and need no immediate work:
 - [x] 1.4 — File fixity (checksum on upload, bitstream_fixity_checks audit table, daily FixityWorker cron, dashboard widget, 8 tests)
 - [x] 1.5 — Usage statistics (download tracking, bot filtering, view/download counts on item page + admin dashboard, fixed double-counting, 11 tests)
 - [x] 1.6 — REST write API (create/update item, multipart bitstream deposit, authorization-gated, /api-info updated, 10 tests)
+- [x] 2.1 — DOI minting (pluggable DataCite/Mock providers, async via Oban on publish, 14 tests)
+- [x] 2.2 — PDF text extraction (pdftotext + bitstream_extracted_text + denormalized item cache + search_vector fold-in, auto-enqueued on bitstream create, 13 tests)
+- [x] 2.3 — Faceted search (Repository.facets/1 + multi-select sidebar, author/keyword filters, 18 tests)
+- [x] 2.4 — Browse by author/date/title (3 aggregations + BrowseLive ?by= tabs, 13 tests)
 
-**Tier 1 complete.**
+**Tier 1 complete. Tier 2 underway (4 of 7).**

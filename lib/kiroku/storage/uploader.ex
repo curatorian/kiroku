@@ -53,19 +53,25 @@ defmodule Kiroku.Storage.Uploader do
 
   Returns `{:ok, binary}` | `{:error, reason}`.
   """
-  def read_bytes(%{storage_type: :local, storage_path: path}) do
+  def read_bytes(%{storage_type: :local, storage_path: path})
+      when is_binary(path) and path != "" do
     case File.read(Path.join(@local_upload_dir, path)) do
       {:ok, bytes} -> {:ok, bytes}
       {:error, reason} -> {:error, {:local_read_failed, reason}}
     end
   end
 
-  def read_bytes(%{storage_type: :s3, storage_bucket: bucket, storage_path: path}) do
+  def read_bytes(%{storage_type: :local}), do: {:error, :no_storage_path}
+
+  def read_bytes(%{storage_type: :s3, storage_bucket: bucket, storage_path: path})
+      when is_binary(bucket) and is_binary(path) do
     case ExAws.S3.get_object(bucket, path) |> ExAws.request(ex_aws_config()) do
       {:ok, %{body: body}} -> {:ok, body}
       {:error, reason} -> {:error, {:s3_read_failed, reason}}
     end
   end
+
+  def read_bytes(%{storage_type: :s3}), do: {:error, :no_storage_path}
 
   def read_bytes(%{storage_type: :url}), do: {:error, :url_not_verifiable}
   def read_bytes(_), do: {:error, :unknown_storage}

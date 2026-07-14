@@ -276,7 +276,426 @@ defmodule Kiroku.RepositoryTest do
     end
   end
 
-  # ── Collection default access inheritance ──────────────────────────────────
+  # ── Faceted search ──────────────────────────────────────────────────────────
+
+  describe "facets/1" do
+    setup do
+      c = create_collection()
+
+      [
+        # 2024 skripsi in Hukum by Siti
+        create_published_item_with(%{
+          collection_id: c.id,
+          title: "Analisis Hukum Pidana",
+          item_type: "skripsi",
+          faculty: "Hukum",
+          publication_year: 2024,
+          authors: ["Siti Aminah"],
+          keywords: ["pidana", "hukum"]
+        }),
+        # 2024 skripsi in Hukum by Siti (different keyword)
+        create_published_item_with(%{
+          collection_id: c.id,
+          title: "Studi Kasus Pidana",
+          item_type: "skripsi",
+          faculty: "Hukum",
+          publication_year: 2024,
+          authors: ["Siti Aminah"],
+          keywords: ["pidana"]
+        }),
+        # 2023 tesis in Ekonomi by Budi
+        create_published_item_with(%{
+          collection_id: c.id,
+          title: "Ekonomi Makro Indonesia",
+          item_type: "tesis",
+          faculty: "Ekonomi",
+          publication_year: 2023,
+          authors: ["Budi Santoso"],
+          keywords: ["ekonomi"]
+        })
+      ]
+
+      :ok
+    end
+
+    defp create_published_item_with(attrs) when is_map(attrs) do
+      authors = Map.get(attrs, :authors, [])
+      keywords = Map.get(attrs, :keywords, [])
+
+      item_attrs =
+        attrs
+        |> Map.drop([:authors, :keywords])
+        |> Enum.into(%{}, fn {k, v} -> {to_string(k), to_string(v)} end)
+
+      {:ok, item} =
+        Repository.create_item(
+          Map.merge(
+            %{
+              "status" => "published",
+              "discoverable" => true,
+              "access_level" => "open"
+            },
+            item_attrs
+          )
+        )
+
+      for author <- authors do
+        {:ok, _} = Repository.create_item_author(%{"item_id" => item.id, "author_name" => author})
+      end
+
+      unless keywords == [] do
+        keyword_attrs = Enum.map(keywords, &%{keyword: &1})
+        Repository.upsert_keywords_for_item(item.id, keyword_attrs)
+      end
+
+      item
+    end
+
+    test "returns counts per item_type" do
+      facets = Repository.facets(%{scope: :public})
+
+      types = Map.new(facets.item_types, &{&1.value, &1.count})
+      assert types[:skripsi] == 2
+      assert types[:tesis] == 1
+    end
+
+    test "returns counts per publication_year, newest first" do
+      facets = Repository.facets(%{scope: :public})
+
+      years = Enum.map(facets.years, & &1.value)
+      assert years == [2024, 2023]
+    end
+
+    test "returns counts per faculty" do
+      facets = Repository.facets(%{scope: :public})
+
+      faculties = Map.new(facets.faculties, &{&1.value, &1.count})
+      assert faculties["Hukum"] == 2
+      assert faculties["Ekonomi"] == 1
+    end
+
+    test "returns author counts (distinct items, not per-keyword)" do
+      facets = Repository.facets(%{scope: :public})
+
+      authors = Map.new(facets.authors, &{&1.value, &1.count})
+      assert authors["Siti Aminah"] == 2
+      assert authors["Budi Santoso"] == 1
+    end
+
+    test "returns keyword counts" do
+      facets = Repository.facets(%{scope: :public})
+
+      keywords = Map.new(facets.keywords, &{&1.value, &1.count})
+      assert keywords["pidana"] == 2
+      assert keywords["ekonomi"] == 1
+      assert keywords["hukum"] == 1
+    end
+
+    test "respects visibility scope" do
+      # Create a restricted item; its facets shouldn't appear under :public.
+      create_published_item_with(%{
+        collection_id: create_collection().id,
+        title: "Secret Item",
+        item_type: "disertasi",
+        faculty: "Tambang",
+        publication_year: 2024,
+        authors: ["Rahasia"],
+        keywords: ["confidential"],
+        access_level: "restricted"
+      })
+
+      public_facets = Repository.facets(%{scope: :public})
+      staff_facets = Repository.facets(%{scope: :staff})
+
+      public_types = Enum.map(public_facets.item_types, & &1.value)
+      staff_types = Enum.map(staff_facets.item_types, & &1.value)
+
+      refute :disertasi in public_types
+      assert :disertasi in staff_types
+    end
+
+    test "multi-select: a facet's own filter is excluded from its counts" do
+      # With item_type=skripsi selected, the item_type facet should still show
+      # ALL types available within the unfiltered set, not collapse to skripsi.
+      facets = Repository.facets(%{scope: :public, item_type: :skripsi})
+
+      type_values = Enum.map(facets.item_types, & &1.value)
+      assert :skripsi in type_values
+      assert :tesis in type_values
+    end
+
+    test "year facet narrows when filtering by item_type" do
+      # tesis is 2023 only; the year facet under item_type=tesis should show
+      # only 2023.
+      facets = Repository.facets(%{scope: :public, item_type: :tesis})
+
+      years = Enum.map(facets.years, & &1.value)
+      assert years == [2023]
+    end
+
+    test "author filter narrows the result set" do
+      results = Repository.search_items(%{scope: :public, author: "Siti"})
+      titles = Enum.map(results, & &1.title)
+      assert "Analisis Hukum Pidana" in titles
+      assert "Studi Kasus Pidana" in titles
+      refute "Ekonomi Makro Indonesia" in titles
+    end
+
+    test "keyword filter narrows the result set" do
+      results = Repository.search_items(%{scope: :public, keyword: "pidana"})
+      assert Enum.count(results) == 2
+    end
+
+    test "respects facet_limit option" do
+      facets = Repository.facets(%{scope: :public, facet_limit: 1})
+
+      # Each facet capped at 1 entry.
+      assert length(facets.item_types) <= 1
+      assert length(facets.keywords) <= 1
+    end
+  end
+
+  # ── Browse-by-* aggregations ────────────────────────────────────────────────
+
+  describe "browse_by_author/1" do
+    setup do
+      c = create_collection()
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Item A",
+        authors: ["Budi Santoso", "Siti Aminah"]
+      })
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Item B",
+        authors: ["Budi Santoso"]
+      })
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Restricted Item",
+        authors: ["Rahasia"],
+        access_level: "restricted"
+      })
+
+      :ok
+    end
+
+    defp create_published_item(attrs) do
+      authors = Map.get(attrs, :authors, [])
+
+      item_attrs =
+        attrs
+        |> Map.drop([:authors])
+        |> Enum.into(%{}, fn {k, v} -> {to_string(k), to_string(v)} end)
+
+      {:ok, item} =
+        Repository.create_item(
+          Map.merge(
+            %{
+              "status" => "published",
+              "discoverable" => true,
+              "access_level" => "open"
+            },
+            item_attrs
+          )
+        )
+
+      for author <- authors do
+        {:ok, _} = Repository.create_item_author(%{"item_id" => item.id, "author_name" => author})
+      end
+
+      item
+    end
+
+    test "aggregates distinct item counts per author, alphabetical" do
+      results = Repository.browse_by_author(scope: :public)
+
+      names = Enum.map(results, & &1.value)
+      assert names == ["Budi Santoso", "Siti Aminah"]
+
+      counts = Map.new(results, &{&1.value, &1.count})
+      assert counts["Budi Santoso"] == 2
+      assert counts["Siti Aminah"] == 1
+    end
+
+    test "respects visibility scope" do
+      public_results = Repository.browse_by_author(scope: :public)
+      staff_results = Repository.browse_by_author(scope: :staff)
+
+      public_names = Enum.map(public_results, & &1.value)
+      staff_names = Enum.map(staff_results, & &1.value)
+
+      refute "Rahasia" in public_names
+      assert "Rahasia" in staff_names
+    end
+
+    test "respects limit option" do
+      results = Repository.browse_by_author(scope: :public, limit: 1)
+      assert length(results) == 1
+    end
+  end
+
+  describe "browse_by_date/1" do
+    setup do
+      c = create_collection()
+
+      [
+        %{"title" => "Old", "publication_year" => 2020},
+        %{"title" => "New", "publication_year" => 2024},
+        %{"title" => "Mid", "publication_year" => 2022},
+        %{"title" => "Untimed"}
+      ]
+      |> Enum.each(fn attrs ->
+        create_item(Map.merge(%{"collection_id" => c.id, "status" => "published"}, attrs))
+      end)
+
+      :ok
+    end
+
+    test "groups by publication_year, newest first" do
+      results = Repository.browse_by_date(scope: :public)
+
+      years = Enum.map(results, & &1.value)
+      assert years == [2024, 2022, 2020]
+    end
+
+    test "excludes items without a publication_year" do
+      results = Repository.browse_by_date(scope: :public)
+      # Only 3 of the 4 items have publication_year set.
+      assert Enum.map(results, & &1.count) |> Enum.sum() == 3
+    end
+  end
+
+  describe "browse_by_title/1" do
+    setup do
+      c = create_collection()
+
+      ["Cherry", "Apple", "Banana"]
+      |> Enum.each(fn title ->
+        create_item(%{
+          "collection_id" => c.id,
+          "title" => title,
+          "status" => "published",
+          "discoverable" => true,
+          "access_level" => "open"
+        })
+      end)
+
+      :ok
+    end
+
+    test "returns items alphabetical by title" do
+      {items, _pagination} = Repository.browse_by_title(scope: :public)
+      titles = Enum.map(items, & &1.title)
+      assert titles == ["Apple", "Banana", "Cherry"]
+    end
+
+    test "paginates" do
+      {items, pagination} = Repository.browse_by_title(scope: :public, page: 1, per_page: 2)
+      assert length(items) == 2
+      assert pagination.total_count == 3
+      assert pagination.total_pages == 2
+
+      {items2, _} = Repository.browse_by_title(scope: :public, page: 2, per_page: 2)
+      assert length(items2) == 1
+    end
+  end
+
+  # ── import_item upsert id regression ────────────────────────────────────────
+
+  describe "import_item/1 — upsert returns the actual persisted id" do
+    # Regression: Ecto's on_conflict returns a struct with a freshly-generated
+    # (never-persisted) id when the conflict target matches, unless
+    # returning: true is set. Callers that rely on item.id after an upsert
+    # (the MSSQL importer creates bitstreams with it) would hit FK constraint
+    # failures. See lib/kiroku/repository.ex:import_item/1.
+
+    test "on insert: returns the newly-created id" do
+      collection = create_collection()
+
+      attrs = %{
+        "title" => "First Import",
+        "collection_id" => collection.id,
+        "legacy_id" => "skripsi/12345",
+        "handle" => "imp-#{System.unique_integer([:positive])}"
+      }
+
+      assert {:ok, item} = Repository.import_item(attrs)
+      assert item.id != nil
+
+      # The returned id must be the one actually persisted.
+      assert Repo.get(Kiroku.Repository.Item, item.id) != nil
+    end
+
+    test "on update (conflict on legacy_id): returns the EXISTING id, not a phantom" do
+      collection = create_collection()
+      handle = "imp-#{System.unique_integer([:positive])}"
+
+      {:ok, original} =
+        Repository.import_item(%{
+          "title" => "Original Title",
+          "collection_id" => collection.id,
+          "legacy_id" => "skripsi/99999",
+          "handle" => handle
+        })
+
+      # Re-import the same legacy_id with updated fields.
+      {:ok, updated} =
+        Repository.import_item(%{
+          "title" => "Updated Title",
+          "collection_id" => collection.id,
+          "legacy_id" => "skripsi/99999",
+          "handle" => handle
+        })
+
+      # The returned id must match the original persisted row — otherwise
+      # callers creating child records (bitstreams, authors, keywords) would
+      # pass a phantom id that triggers FK constraint failures.
+      assert updated.id == original.id
+
+      # And it must be findable in the DB.
+      assert Repo.get(Kiroku.Repository.Item, updated.id) != nil
+      assert Repo.get!(Kiroku.Repository.Item, updated.id).title == "Updated Title"
+    end
+
+    test "the returned id is usable for child-record inserts (the FK bug)" do
+      collection = create_collection()
+      handle = "imp-#{System.unique_integer([:positive])}"
+
+      # First import creates the row.
+      {:ok, _original} =
+        Repository.import_item(%{
+          "title" => "V1",
+          "collection_id" => collection.id,
+          "legacy_id" => "skripsi/77777",
+          "handle" => handle
+        })
+
+      # Second import (conflict path) returns an id. If the bug were present,
+      # the bitstream insert below would fail with an FK constraint error.
+      {:ok, updated} =
+        Repository.import_item(%{
+          "title" => "V2",
+          "collection_id" => collection.id,
+          "legacy_id" => "skripsi/77777",
+          "handle" => handle
+        })
+
+      assert {:ok, _bitstream} =
+               Kiroku.Content.create_bitstream(%{
+                 "item_id" => updated.id,
+                 "filename" => "chapter1.pdf",
+                 "bundle_name" => "CHAPTER",
+                 "sequence" => 1,
+                 "storage_type" => "url",
+                 "storage_url" => "https://example.com/ch1.pdf",
+                 "access_level" => "inherit"
+               })
+    end
+  end
 
   describe "collection default_item_access_level inheritance" do
     test "new item inherits collection default when access_level not specified" do
