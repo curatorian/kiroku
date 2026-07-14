@@ -90,7 +90,9 @@ defmodule KirokuWeb.ItemLive.Show do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
       <%!-- Structured-data + social meta tags for search engines & Scholar --%>
-      <.item_meta item={@item} bitstreams={@bitstreams} />
+      <%= if not @not_found do %>
+        <.item_meta item={@item} bitstreams={@bitstreams} />
+      <% end %>
       <%= if @not_found do %>
         <div class="max-w-2xl mx-auto py-16 px-4">
           <div class="kiroku-card-raised p-10 text-center">
@@ -166,41 +168,57 @@ defmodule KirokuWeb.ItemLive.Show do
 
           <%!-- Hero header card --%>
           <div class="kiroku-card-raised p-6 sm:p-8 space-y-5">
-            <%!-- Type + Status badges --%>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="badge-item-type">{@item.item_type}</span>
-              <span class={["status-badge", to_string(@item.status)]}>{@item.status}</span>
-              <%= if @item.degree_level do %>
-                <span
-                  class="text-xs px-2 py-0.5 rounded-full font-medium"
-                  style="background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
-                >
-                  {String.upcase(to_string(@item.degree_level))}
-                </span>
+            <div class="flex gap-6">
+              <%!-- Thumbnail (auto-generated or user-uploaded cover) --%>
+              <%= if thumbnail = Enum.find(@bitstreams, &(&1.bundle_name == :THUMBNAIL)) do %>
+                <div class="shrink-0 hidden sm:block">
+                  <img
+                    src={~p"/items/#{@item.handle}/bitstreams/#{thumbnail.id}"}
+                    alt="Cover"
+                    class="w-32 h-44 object-cover rounded-lg border"
+                    style="border-color: rgba(155,126,200,0.15);"
+                  />
+                </div>
               <% end %>
-              <%= if @item.language do %>
-                <span
-                  class="text-xs px-2 py-0.5 rounded-full font-medium"
-                  style="background: rgba(155,126,200,0.08); color: var(--color-dust);"
-                >
-                  {String.upcase(to_string(@item.language))}
-                </span>
-              <% end %>
-            </div>
 
-            <%!-- Title --%>
-            <div class="space-y-2">
-              <h1
-                class="font-heading text-2xl sm:text-3xl font-semibold leading-tight"
-                style="color: var(--color-lilac);"
-              >
-                {@item.title}
-              </h1>
-              <%= if @item.title_alt do %>
-                <p class="font-body italic text-base" style="color: var(--color-quill);">
-                  {@item.title_alt}
-                </p>
-              <% end %>
+              <div class="flex-1 min-w-0 space-y-5">
+                <%!-- Type + Status badges --%>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="badge-item-type">{@item.item_type}</span>
+                  <span class={["status-badge", to_string(@item.status)]}>{@item.status}</span>
+                  <%= if @item.degree_level do %>
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style="background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
+                    >
+                      {String.upcase(to_string(@item.degree_level))}
+                    </span>
+                  <% end %>
+                  <%= if @item.language do %>
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style="background: rgba(155,126,200,0.08); color: var(--color-dust);"
+                    >
+                      {String.upcase(to_string(@item.language))}
+                    </span>
+                  <% end %>
+                </div>
+
+                <%!-- Title --%>
+                <div class="space-y-2">
+                  <h1
+                    class="font-heading text-2xl sm:text-3xl font-semibold leading-tight"
+                    style="color: var(--color-lilac);"
+                  >
+                    {@item.title}
+                  </h1>
+                  <%= if @item.title_alt do %>
+                    <p class="font-body italic text-base" style="color: var(--color-quill);">
+                      {@item.title_alt}
+                    </p>
+                  <% end %>
+                </div>
+              </div>
             </div>
 
             <%!-- Author + handle --%>
@@ -507,6 +525,7 @@ defmodule KirokuWeb.ItemLive.Show do
             <%!-- Right sidebar: Files only --%>
             <div class="space-y-6">
               <%!-- Files --%>
+              <% visible_bitstreams = Enum.reject(@bitstreams, &(&1.bundle_name == :THUMBNAIL)) %>
               <%= if @bitstreams != [] do %>
                 <div class="kiroku-card p-5 sticky top-4">
                   <h2
@@ -515,8 +534,16 @@ defmodule KirokuWeb.ItemLive.Show do
                   >
                     <.icon name="hero-folder-open" class="w-5 h-5" /> Files
                   </h2>
+                  <%= if visible_bitstreams == [] do %>
+                    <div class="text-center py-6">
+                      <.icon name="hero-folder-open" class="w-8 h-8 mx-auto opacity-30" />
+                      <p class="mt-2 text-sm" style="color: var(--color-quill);">
+                        No files available for this item.
+                      </p>
+                    </div>
+                  <% else %>
                   <div class="space-y-1.5">
-                    <%= for bs <- @bitstreams, bs.bundle_name != :THUMBNAIL do %>
+                    <%= for bs <- visible_bitstreams do %>
                       <% can_access = Content.accessible?(bs, @current_user, @item) %>
                       <% locked = Content.bitstream_locked?(bs) %>
                       <%= if can_access do %>
@@ -576,6 +603,7 @@ defmodule KirokuWeb.ItemLive.Show do
                       <% end %>
                     <% end %>
                   </div>
+                  <% end %>
                 </div>
               <% end %>
             </div>

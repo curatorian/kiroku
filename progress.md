@@ -17,7 +17,7 @@ These areas are mature and need no immediate work:
 - **Access control** — three-tier visibility (public/internal/private) + hierarchical RBAC policies + embargoes + bundle-forced rules + collection-default inheritance.
 - **Review workflow** — clean FSM (draft→submitted→under_review→published/withdrawn) with Oban email notifications.
 - **Legacy migration** — production-grade MSSQL sync with run tracking, change-detection checksums, dead-letter queue.
-- **Code health** — zero TODO/FIXME markers, 146 tests, `mix precommit` clean, DB-backed runtime settings, onboarding wizard, health endpoint.
+- **Code health** — zero TODO/FIXME markers, 289 tests, `mix precommit` clean, DB-backed runtime settings, onboarding wizard, health endpoint.
 
 ---
 
@@ -86,17 +86,20 @@ These areas are mature and need no immediate work:
   - Standard IR navigation. Only structural browse (community→collection→items) exists today.
   - _Done:_ `Repository.browse_by_author/1`, `browse_by_date/1`, `browse_by_title/1` aggregations (all visibility-scope aware, all paginated or limit-capped). BrowseLive extended with a `?by=structure|author|date|title` mode tab UI. Author mode renders an alphabet jump-bar + per-letter sections. Date mode lists years newest-first. Title mode paginates the alphabetical item list. Every entry links into `/search` with the matching filter, so the existing facet sidebar serves as the result page. 7 Repository tests + 6 LiveView tests.
 
-- [ ] **2.5 SWORD v2 deposit API**
+- [x] **2.5 SWORD v2 deposit API**
   - Required by many publishers for automated article deposit. No SWORD code exists.
   - Service Document, Col-IRI / SED-IRI, Atom entry handling.
+  - _Done:_ three SWORD v2 endpoints at `/sword-v2/`: `GET /service-document` (lists communities as workspaces + collections as Col-IRIs), `POST /collection/:handle` (creates draft item from Atom entry XML or multipart file deposit), `GET /statement/:handle` (returns deposit state). Reuses existing API token Bearer auth. `Kiroku.Sword.Builder` generates Service Document, Deposit Receipt, Statement, and Error documents as Atom XML. `Kiroku.Sword.AtomParser` extracts Dublin Core metadata (title, abstract, creator, type) from inbound Atom entries via regex (avoids `:xmerl` namespace complexity). 8 tests.
 
-- [ ] **2.6 Automatic thumbnail generation**
+- [x] **2.6 Automatic thumbnail generation**
   - The `image` dep was planned (`plans/01`) but dropped. THUMBNAIL bundle exists; only generation is missing.
   - Generate first-page thumbnail for PDFs, resize uploaded images.
+  - _Done:_ `Content.generate_thumbnail/1` renders page 1 of an ORIGINAL PDF as a 400px-wide JPEG via `pdftoppm` (poppler-utils, same package as `pdftotext`). Stores the result as a THUMBNAIL bitstream through `Uploader.upload/3` (local or S3, same as the source). `Kiroku.Workers.ThumbnailWorker` (Oban, max_attempts: 3) auto-enqueued by `Content.create_bitstream/1` alongside `PdfTextWorker`. Skips gracefully when: source is not a PDF, storage is `:url`, `pdftoppm` is missing, or the item already has a THUMBNAIL bitstream (user-uploaded cover or legacy `FileCover` — never overwrites). `Content.get_thumbnail_for_item/1` + `item_has_thumbnail?/1` helpers. Item detail page now displays the thumbnail in the hero header. 11 tests.
 
-- [ ] **2.8 Versioning & metadata audit log**
+- [x] **2.8 Versioning & metadata audit log**
   - No `item_versions` table, no `audit_logs`. DSpace and EPrints both have item versioning.
   - Append-only history of who changed what when (current `reviewed_by_id`/`reviewed_at` capture only the latest).
+  - _Done:_ `item_versions` table with per-item numbered snapshots + JSONB field snapshots. Every lifecycle event (create, update, submit, review, approve, publish, withdraw, import) writes a version row via `Repository.record_version/2`. Best-effort — version failures never break the parent operation. `Repository.list_item_versions/1` + `current_version_number/1` for queries. Admin item show page renders the full version history timeline (version number, action, actor, timestamp, summary). 9 tests.
 
 ---
 
@@ -176,5 +179,11 @@ These areas are mature and need no immediate work:
 - [x] 2.2 — PDF text extraction (pdftotext + bitstream_extracted_text + denormalized item cache + search_vector fold-in, auto-enqueued on bitstream create, 13 tests)
 - [x] 2.3 — Faceted search (Repository.facets/1 + multi-select sidebar, author/keyword filters, 18 tests)
 - [x] 2.4 — Browse by author/date/title (3 aggregations + BrowseLive ?by= tabs, 13 tests)
+- [x] 2.6 — Thumbnail generation (pdftoppm first-page JPEG + auto-enqueue on ORIGINAL create, skip-if-exists, item detail display, 11 tests)
+- [x] 2.5 — SWORD v2 deposit API (Service Document + Col-IRI Atom/multipart deposit + Statement, API token auth, Atom XML builder + parser, 8 tests)
+- [x] 2.8 — Versioning & audit log (item_versions table + record_version on every lifecycle event + admin history timeline, 9 tests)
+- [x] **Bug fix: import_item upsert phantom id** — `Repository.import_item/1` returned a freshly-generated (never-persisted) UUID on `legacy_id` conflict because `Repo.insert` without `returning: true` doesn't read back the actual DB state. Added `returning: true`. The MSSQL importer's `create_bitstreams_for_record` was passing this phantom id to `Content.create_bitstream/1`, silently failing FK constraints on ~18k updated items. 3 regression tests.
+- [x] **Bug fix: importer bitstream duplication** — `create_bitstreams_for_record` had no dedup logic. Re-running the import would stack duplicate bitstreams on items that already had them. Now deletes existing bitstreams before inserting (replace semantics matching `import_item`'s `replace_all_except` upsert).
+- [x] **Test isolation fix: OnboardingTest** — `refresh_setup_state/0` writes to the global `:persistent_term` cache, racing with concurrent ConnCase-based LiveView tests. Changed `async: true` → `async: false` + `on_exit` cleanup in OnboardingTest and SetupGuardTest. Stable across all seeds.
 
-**Tier 1 complete. Tier 2 underway (4 of 7).**
+**Tier 1 complete. Tier 2 complete (7 of 7).**

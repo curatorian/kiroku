@@ -300,6 +300,7 @@ h6 {
   background: rgba(155, 126, 200, 0.06);
   padding: 0.15rem 0.5rem;
   border-radius: 0.25rem;
+  width: fit-content;
 }
 
 /* Search input */

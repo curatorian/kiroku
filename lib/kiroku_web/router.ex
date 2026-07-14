@@ -87,6 +87,25 @@ defmodule KirokuWeb.Router do
     end
   end
 
+  # ── SWORD v2 deposit API ─────────────────────────────────────────────────────
+  # Minimal SWORD v2 implementation for automated publisher deposit.
+  # Authentication reuses the existing API token (Bearer) mechanism.
+  # Endpoints: Service Document, Collection deposit (Col-IRI), Statement (SED-IRI).
+
+  pipeline :sword_api do
+    plug :accepts, ["json", "xml", "atom+xml", "atomserv+xml", "multipart/form-data"]
+    plug KirokuWeb.Plugs.ApiAuth
+    plug KirokuWeb.Plugs.RequireApiToken
+  end
+
+  scope "/sword-v2", KirokuWeb.SwordV2 do
+    pipe_through :sword_api
+
+    get "/service-document", ServiceController, :service_document
+    post "/collection/:collection_handle", DepositController, :deposit
+    get "/statement/:item_handle", DepositController, :statement
+  end
+
   # ── Auth routes (guest only) ───────────────────────────────────────────────────
 
   scope "/", KirokuWeb do

@@ -86,89 +86,127 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
           <div>
             <h1 class="font-heading text-3xl" style="color: var(--color-lilac);">Communities</h1>
             <p class="text-sm mt-1" style="color: var(--color-quill);">
-              Organize communities into a hierarchy. Top-level communities appear on the public browse page.
+              Click a community to expand or collapse its subcommunities.
             </p>
           </div>
-          <.link
-            patch={~p"/admin/communities/new"}
-            class="px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2"
-            style="background: var(--color-patchouli); color: white;"
-          >
-            <.icon name="hero-plus" class="w-4 h-4" /> New Community
-          </.link>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              phx-click="expand_all"
+              class="px-3 py-2 rounded-lg text-sm font-medium"
+              style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+            >
+              Expand All
+            </button>
+            <button
+              type="button"
+              phx-click="collapse_all"
+              class="px-3 py-2 rounded-lg text-sm font-medium"
+              style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+            >
+              Collapse All
+            </button>
+            <.link
+              patch={~p"/admin/communities/new"}
+              class="px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2"
+              style="background: var(--color-patchouli); color: white;"
+            >
+              <.icon name="hero-plus" class="w-4 h-4" /> New
+            </.link>
+          </div>
         </div>
+
         <div class="kiroku-card overflow-hidden">
-          <table class="w-full text-sm">
-            <thead style="background: rgba(45,27,105,0.5);">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
-                  Name
-                </th>
-                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
-                  Handle
-                </th>
-                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
-                  Active
-                </th>
-                <th class="px-4 py-3 text-left font-medium" style="color: var(--color-wisteria);">
-                  Visibility
-                </th>
-                <th class="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody id="communities" phx-update="stream">
-              <tr
-                :for={{id, community} <- @streams.communities}
-                id={id}
-                style="border-top: 1px solid rgba(155,126,200,0.1);"
-              >
-                <td class="px-4 py-3" style={"padding-left: #{(community.depth || 0) * 1.5 + 1}rem;"}>
-                  <%= if (community.depth || 0) > 0 do %>
-                    <span style="color: var(--color-quill);" class="mr-1">└</span>
-                  <% end %>
-                  <span style="color: var(--color-lilac);">{community.name}</span>
-                </td>
-                <td class="px-4 py-3 kiroku-handle">{community.handle}</td>
-                <td class="px-4 py-3">
+          <%= if @tree_rows == [] do %>
+            <div class="p-12 text-center">
+              <.icon name="hero-building-library" class="w-12 h-12 mx-auto opacity-30" />
+              <p class="mt-3 text-sm" style="color: var(--color-quill);">
+                No communities yet. Create one to get started.
+              </p>
+            </div>
+          <% else %>
+            <div id="community-tree">
+              <%= for {community, depth, has_children, is_collapsed} <- @tree_rows do %>
+                <div
+                  id={"community-row-#{community.id}"}
+                  class="flex items-center gap-2 px-4 py-3 transition-colors hover:bg-white/[0.02]"
+                  style={"padding-left: #{depth * 1.5 + 1}rem; border-top: 1px solid rgba(155,126,200,0.08);"}
+                >
+                  <button
+                    type="button"
+                    phx-click="toggle_collapse"
+                    phx-value-id={community.id}
+                    class="shrink-0 p-1 rounded transition-colors hover:bg-white/5"
+                    style="color: var(--color-quill);"
+                  >
+                    <%= if has_children do %>
+                      <.icon
+                        name={if is_collapsed, do: "hero-chevron-right", else: "hero-chevron-down"}
+                        class="w-4 h-4"
+                      />
+                    <% else %>
+                      <span class="inline-block w-4 h-4"></span>
+                    <% end %>
+                  </button>
+
+                  <.icon
+                    name={if depth == 0, do: "hero-building-library", else: "hero-folder"}
+                    class="w-4 h-4 shrink-0"
+                    style="color: var(--color-patchouli);"
+                  />
+
+                  <div class="flex-1 min-w-0">
+                    <span
+                      class="text-sm font-medium truncate"
+                      style={if depth == 0, do: "color: var(--color-lilac);", else: "color: var(--color-wisteria);"}
+                    >
+                      {community.name}
+                    </span>
+                    <span class="kiroku-handle ml-2" style="display: inline-block;">
+                      {community.handle}
+                    </span>
+                  </div>
+
                   <%= if community.is_active do %>
-                    <span class="status-badge published">Active</span>
+                    <span class="status-badge published text-xs">Active</span>
                   <% else %>
-                    <span class="status-badge withdrawn">Inactive</span>
+                    <span class="status-badge withdrawn text-xs">Inactive</span>
                   <% end %>
-                </td>
-                <td class="px-4 py-3">
-                  <span class={"status-badge #{access_badge_class(community.access_level)}"}>
+
+                  <span class={"status-badge #{access_badge_class(community.access_level)} text-xs"}>
                     {community.access_level}
                   </span>
-                </td>
-                <td class="px-4 py-3 text-right flex items-center gap-3 justify-end">
-                  <.link
-                    navigate={~p"/admin/communities/#{community.id}"}
-                    style="color: var(--color-lavender);"
-                    class="hover:text-white transition-colors text-xs"
-                  >
-                    View
-                  </.link>
-                  <.link
-                    patch={~p"/admin/communities/#{community.id}/edit"}
-                    style="color: var(--color-lavender);"
-                    class="hover:text-white transition-colors text-xs"
-                  >
-                    Edit
-                  </.link>
-                  <button
-                    phx-click="delete"
-                    phx-value-id={community.id}
-                    data-confirm="Delete this community? Its subcommunities will become top-level."
-                    class="text-xs transition-colors hover:text-white"
-                    style="color: var(--color-ribbon-red);"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+
+                  <div class="flex items-center gap-2 shrink-0 ml-2">
+                    <.link
+                      navigate={~p"/admin/communities/#{community.id}"}
+                      class="text-xs transition-colors hover:text-white"
+                      style="color: var(--color-lavender);"
+                    >
+                      View
+                    </.link>
+                    <.link
+                      patch={~p"/admin/communities/#{community.id}/edit"}
+                      class="text-xs transition-colors hover:text-white"
+                      style="color: var(--color-lavender);"
+                    >
+                      Edit
+                    </.link>
+                    <button
+                      type="button"
+                      phx-click="delete"
+                      phx-value-id={community.id}
+                      data-confirm="Delete this community? Its subcommunities will become top-level."
+                      class="text-xs transition-colors hover:text-white"
+                      style="color: var(--color-ribbon-red);"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
         </div>
       </div>
     </Layouts.admin>
@@ -176,7 +214,12 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   end
 
   def mount(_params, _session, socket) do
-    {:ok, stream(socket, :communities, [])}
+    {:ok,
+     socket
+     |> assign(:collapsed, MapSet.new())
+     |> assign(:parent_ids, MapSet.new())
+     |> assign(:communities, [])
+     |> assign(:tree_rows, [])}
   end
 
   def handle_params(params, _uri, socket) do
@@ -192,12 +235,15 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
 
   defp apply_action(socket, :index, _params) do
     communities = Repository.list_communities_tree(scope: :staff)
+    parent_ids = communities_with_children(communities)
 
     socket
+    |> assign(:communities, communities)
+    |> assign(:parent_ids, parent_ids)
     |> assign(:form, nil)
     |> assign(:current_community, nil)
     |> assign(:parent_options, [])
-    |> stream(:communities, communities, reset: true)
+    |> assign(:tree_rows, build_tree_rows(communities, socket.assigns.collapsed, parent_ids))
   end
 
   defp apply_action(socket, :new, _params) do
@@ -281,13 +327,51 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     community = Repository.get_community!(id)
     {:ok, _} = Repository.delete_community(community)
 
-    # Re-stream the tree since deleting a node reshuffles the hierarchy.
     communities = Repository.list_communities_tree(scope: :staff)
+    parent_ids = communities_with_children(communities)
 
     {:noreply,
      socket
      |> put_flash(:info, "Community deleted.")
-     |> stream(:communities, communities, reset: true)}
+     |> assign(:communities, communities)
+     |> assign(:parent_ids, parent_ids)
+     |> assign(:tree_rows, build_tree_rows(communities, socket.assigns.collapsed, parent_ids))}
+  end
+
+  def handle_event("toggle_collapse", %{"id" => id}, socket) do
+    collapsed =
+      if MapSet.member?(socket.assigns.collapsed, id) do
+        MapSet.delete(socket.assigns.collapsed, id)
+      else
+        MapSet.put(socket.assigns.collapsed, id)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:collapsed, collapsed)
+     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
+  end
+
+  def handle_event("expand_all", _params, socket) do
+    collapsed = MapSet.new()
+
+    {:noreply,
+     socket
+     |> assign(:collapsed, collapsed)
+     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
+  end
+
+  def handle_event("collapse_all", _params, socket) do
+    collapsed =
+      socket.assigns.communities
+      |> Enum.filter(&(MapSet.member?(socket.assigns.parent_ids, &1.id)))
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    {:noreply,
+     socket
+     |> assign(:collapsed, collapsed)
+     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
   end
 
   # Treat an empty/select-prompt parent id as "no parent".
@@ -300,4 +384,51 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
   defp access_badge_class(:restricted), do: "embargoed"
   defp access_badge_class(:closed), do: "withdrawn"
   defp access_badge_class(_), do: "draft"
+
+  # ── Tree helpers ────────────────────────────────────────────────────────────
+
+  # Returns a MapSet of community IDs that have at least one subcommunity.
+  defp communities_with_children(communities) do
+    communities
+    |> Enum.filter(& &1.parent_community_id)
+    |> Enum.map(& &1.parent_community_id)
+    |> MapSet.new()
+  end
+
+  # Builds the visible list of {community, depth, has_children, is_collapsed}
+  # tuples, skipping descendants of any collapsed community.
+  defp build_tree_rows(communities, collapsed, parent_ids) do
+    by_parent =
+      Enum.group_by(communities, fn c ->
+        if c.parent_community_id, do: to_string(c.parent_community_id), else: nil
+      end)
+
+    build_rows_recursive(by_parent, nil, 0, collapsed, parent_ids, MapSet.new())
+  end
+
+  defp build_rows_recursive(by_parent, parent_id, depth, collapsed, parent_ids, hidden_ancestors) do
+    key = if parent_id, do: to_string(parent_id), else: nil
+    children = Map.get(by_parent, key, [])
+    parent_is_hidden = parent_id != nil and MapSet.member?(hidden_ancestors, parent_id)
+
+    Enum.flat_map(children, fn community ->
+      is_collapsed = MapSet.member?(collapsed, community.id)
+      has_children = MapSet.member?(parent_ids, community.id)
+      row = {community, depth, has_children, is_collapsed}
+
+      if parent_is_hidden do
+        []
+      else
+        new_hidden =
+          if is_collapsed,
+            do: MapSet.put(hidden_ancestors, community.id),
+            else: hidden_ancestors
+
+        child_rows =
+          build_rows_recursive(by_parent, community.id, depth + 1, collapsed, parent_ids, new_hidden)
+
+        [row | child_rows]
+      end
+    end)
+  end
 end

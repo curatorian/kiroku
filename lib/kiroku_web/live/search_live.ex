@@ -38,10 +38,13 @@ defmodule KirokuWeb.SearchLive do
     scope = Authorization.visibility_scope(socket.assigns[:current_user])
     search_active = query || Enum.any?(filters, fn {_k, v} -> v not in [nil, 1] end)
 
+    # Always fetch facets (scoped to visibility) so the sidebar is populated
+    # even before a search — users can browse by clicking facet values.
+    facet_params = Map.merge(filters, %{term: query, scope: scope})
+    facets = Repository.facets(facet_params)
+
     if search_active do
-      search_params = Map.merge(filters, %{term: query, scope: scope})
-      {items, pagination} = Repository.search_items_pagination(search_params)
-      facets = Repository.facets(search_params)
+      {items, pagination} = Repository.search_items_pagination(facet_params)
 
       {:noreply,
        socket
@@ -56,7 +59,7 @@ defmodule KirokuWeb.SearchLive do
        |> assign(:query, nil)
        |> assign(:filters, filters)
        |> assign(:items, [])
-       |> assign(:facets, empty_facets())
+       |> assign(:facets, facets)
        |> assign(:pagination, Pagination.build(0, 1, 20))}
     end
   end
@@ -189,7 +192,7 @@ defmodule KirokuWeb.SearchLive do
                 <p class="mt-4" style="color: var(--color-quill);">
                   {if @query,
                     do: "No results found. Try different keywords.",
-                    else: "Enter a search term to begin."}
+                    else: "Search above, or browse using the filters on the left."}
                 </p>
               </div>
             <% else %>
