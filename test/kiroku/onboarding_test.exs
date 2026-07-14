@@ -1,13 +1,16 @@
 defmodule Kiroku.OnboardingTest do
-  use Kiroku.DataCase, async: true
+  # Manipulates the global :persistent_term cache via refresh_setup_state/0.
+  # Must run serially (async: false) because a concurrent refresh_setup_state
+  # call writing false to the cache races with ConnCase-based LiveView tests
+  # that rely on SetupGuard seeing setup_complete? == true.
+  use Kiroku.DataCase, async: false
 
   alias Kiroku.Accounts.User
   alias Kiroku.{Onboarding, Settings}
 
-  # onboarding state is cached in :persistent_term; reset between tests so a
-  # prior test's cache doesn't leak into this one.
   setup do
     Onboarding.force_setup_state(false)
+    on_exit(fn -> Onboarding.force_setup_state(true) end)
     :ok
   end
 

@@ -310,4 +310,42 @@ defmodule Kiroku.Settings do
       "Bitstream descriptions locked from public view (visible to internal + staff)"
     )
   end
+
+  # ── DOI minting helpers ──────────────────────────────────────────────────────
+
+  @doc """
+  Master switch for DOI minting on publish. When false, no DOI worker is
+  enqueued. Defaults to false — must be explicitly enabled after credentials
+  are configured. Priority: DB setting → DOI_ENABLED env → false.
+  """
+  def doi_enabled?, do: get("doi_enabled", System.get_env("DOI_ENABLED", "false")) == "true"
+
+  @doc """
+  Active DOI provider key. One of "mock" (dev/test, no network) or "datacite".
+  Priority: DB setting → DOI_PROVIDER env → "mock".
+  """
+  def doi_provider, do: get("doi_provider", System.get_env("DOI_PROVIDER", "mock"))
+
+  @doc """
+  DOI prefix (the registrant prefix assigned by DataCite/Crossref).
+  Example: "10.5555". Priority: DB setting → DOI_PREFIX env → "10.5555".
+  """
+  def doi_prefix, do: get("doi_prefix", System.get_env("DOI_PREFIX", "10.5555"))
+
+  @doc "DataCite REST API username. Priority: DB setting → DATACITE_USERNAME env."
+  def doi_username, do: get("doi_username", System.get_env("DATACITE_USERNAME"))
+
+  @doc "DataCite REST API password. Priority: DB setting → DATACITE_PASSWORD env."
+  def doi_password, do: get("doi_password", System.get_env("DATACITE_PASSWORD"))
+
+  @doc "Returns a map of all DOI settings for the admin UI."
+  def doi_settings do
+    %{
+      enabled: doi_enabled?(),
+      provider: doi_provider(),
+      prefix: doi_prefix(),
+      username: doi_username(),
+      endpoint: get("doi_endpoint", System.get_env("DOI_ENDPOINT", "https://api.datacite.org"))
+    }
+  end
 end

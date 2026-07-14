@@ -1033,32 +1033,8 @@ defmodule Kiroku.Repository do
   results to the access levels the viewer may see.
   """
   def search_items(%{} = params) do
-    term = Map.get(params, :term)
-    department = Map.get(params, :department)
-    faculty = Map.get(params, :faculty)
-    year = Map.get(params, :year)
-    item_type = Map.get(params, :item_type)
-    collection_id = Map.get(params, :collection_id)
-    scope = Map.get(params, :scope, :public)
-    page = Map.get(params, :page, 1)
-    per_page = Map.get(params, :per_page, 20)
-    offset = (page - 1) * per_page
-
-    from(i in Item,
-      where: i.status == :published and i.discoverable == true
-    )
-    |> visibility_filter(scope)
-    |> maybe_full_text_filter(term)
-    |> maybe_filter(:department, department)
-    |> maybe_filter(:faculty, faculty)
-    |> maybe_filter(:publication_year, year)
-    |> maybe_filter(:item_type, item_type)
-    |> maybe_filter(:collection_id, collection_id)
-    |> apply_search_ordering(term)
-    |> limit(^per_page)
-    |> offset(^offset)
-    |> select([i], ^@item_display_fields)
-    |> Repo.all()
+    {items, _pagination} = search_items_pagination(params)
+    items
   end
 
   @doc """
@@ -1067,40 +1043,239 @@ defmodule Kiroku.Repository do
   (page and per_page are read from the map).
   """
   def search_items_pagination(%{} = params) do
-    term = Map.get(params, :term)
-    department = Map.get(params, :department)
-    faculty = Map.get(params, :faculty)
-    year = Map.get(params, :year)
-    item_type = Map.get(params, :item_type)
-    collection_id = Map.get(params, :collection_id)
-    scope = Map.get(params, :scope, :public)
-    page = Map.get(params, :page, 1)
-    per_page = Map.get(params, :per_page, 20)
+    opts = normalize_search_params(params)
+    base = search_base_query(opts)
+
+    count = Repo.aggregate(base, :count, :id)
+    pagination = Pagination.build(count, opts.page, opts.per_page)
+
+    items =
+      base
+      |> apply_search_ordering(opts.term)
+      |> limit(^opts.per_page)
+      |> offset(^Pagination.offset(pagination))
+      |> select([i], ^@item_display_fields)
+      |> Repo.all()
+
+    {items, pagination}
+  end
+
+  @doc """
+  Computes per-value aggregation counts for the search result set, for
+  rendering a faceted sidebar. Returns a map of facet name → sorted list of
+  `%{value, count}` entries.
+
+  Each facet's counts are computed by running a grouped count query on the
+  base filter set **excluding** that facet's own filter — so users can
+  multi-select within a facet without the other values collapsing to zero.
+
+  ## Facets
+
+    * `:item_types`  — `items.item_type`
+    * `:years`       — `items.publication_year`
+    * `:faculties`   — `items.faculty`
+    * `:authors`     — `item_authors.author_name` (top 10 by count)
+    * `:keywords`    — `item_keywords.keyword`    (top 10 by count)
+
+  ## Options
+
+  Accepts the same params map as `search_items/1`. The `:limit` option
+  controls how many values are returned per facet (default 10).
+  """
+  def facets(%{} = params) do
+    opts = normalize_search_params(params)
+    facet_limit = Map.get(params, :facet_limit, 10)
+
+    %{
+      item_types:
+        column_facet(search_base_query(%{opts | item_type: nil}), :item_type, facet_limit),
+      years:
+        column_facet(search_base_query(%{opts | year: nil}), :publication_year, facet_limit,
+          order: :desc
+        ),
+      faculties: column_facet(search_base_query(%{opts | faculty: nil}), :faculty, facet_limit),
+      authors: author_facet(%{opts | author: nil}, facet_limit),
+      keywords: keyword_facet(%{opts | keyword: nil}, facet_limit)
+    }
+  end
+
+  # ── Search internals ────────────────────────────────────────────────────────
+
+  defp normalize_search_params(%{} = params) do
+    %{
+      term: Map.get(params, :term),
+      department: Map.get(params, :department),
+      faculty: Map.get(params, :faculty),
+      year: Map.get(params, :year),
+      item_type: Map.get(params, :item_type),
+      collection_id: Map.get(params, :collection_id),
+      author: Map.get(params, :author),
+      keyword: Map.get(params, :keyword),
+      scope: Map.get(params, :scope, :public),
+      page: Map.get(params, :page, 1),
+      per_page: Map.get(params, :per_page, 20)
+    }
+  end
+
+  # Builds the WHERE-only base query shared by search + facets. Does NOT
+  # apply ordering, limit, or select — callers compose those on top.
+  defp search_base_query(opts) do
+    from(i in Item, where: i.status == :published and i.discoverable == true)
+    |> visibility_filter(opts.scope)
+    |> maybe_full_text_filter(opts.term)
+    |> maybe_filter(:department, opts.department)
+    |> maybe_filter(:faculty, opts.faculty)
+    |> maybe_filter(:publication_year, opts.year)
+    |> maybe_filter(:item_type, opts.item_type)
+    |> maybe_filter(:collection_id, opts.collection_id)
+    |> maybe_author_filter(opts.author)
+    |> maybe_keyword_filter(opts.keyword)
+  end
+
+  # ── Browse-by-* aggregations ────────────────────────────────────────────────
+  #
+  # Standard IR navigation indexes: a value→count aggregation across all
+  # published+visible items. Clicking an entry links into /search with the
+  # matching filter applied — same code path as the facet sidebar, just
+  # un-scoped by any term so the whole corpus is enumerated.
+
+  @doc """
+  Returns authors with their published-item counts, alphabetical by surname.
+
+  Aggregates across `item_authors` joined to published+visible items. The
+  `:limit` option caps the result (default 200); pass a large number for a
+  full index. Returns `[%{value: name, count: n}, ...]`.
+  """
+  def browse_by_author(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    limit = Keyword.get(opts, :limit, 200)
+
+    from(i in Item, where: i.status == :published and i.discoverable == true)
+    |> visibility_filter(scope)
+    |> join(:inner, [i], a in assoc(i, :item_authors))
+    |> where([i, ..., a], not is_nil(a.author_name) and a.author_name != ^"")
+    |> group_by([i, ..., a], a.author_name)
+    |> select([i, ..., a], %{value: a.author_name, count: count(i.id, :distinct)})
+    |> order_by([i, ..., a], asc: a.author_name)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns publication years with their published-item counts, newest first.
+
+  Returns `[%{value: year, count: n}, ...]`. Items without a `publication_year`
+  are excluded.
+  """
+  def browse_by_date(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    limit = Keyword.get(opts, :limit, 100)
+
+    from(i in Item, where: i.status == :published and i.discoverable == true)
+    |> visibility_filter(scope)
+    |> where([i], not is_nil(i.publication_year))
+    |> group_by([i], i.publication_year)
+    |> select([i], %{value: i.publication_year, count: count(i.id)})
+    |> order_by([i], desc: i.publication_year)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns published items ordered alphabetically by title.
+
+  Paginates the same way `list_published_items_pagination/1` does. Returns
+  `{items, %Pagination{}}` where each item carries the `@item_display_fields`
+  projection. Items without a title are excluded.
+  """
+  def browse_by_title(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, 20)
 
     base =
-      from(i in Item,
-        where: i.status == :published and i.discoverable == true
-      )
+      from(i in Item, where: i.status == :published and i.discoverable == true)
       |> visibility_filter(scope)
-      |> maybe_full_text_filter(term)
-      |> maybe_filter(:department, department)
-      |> maybe_filter(:faculty, faculty)
-      |> maybe_filter(:publication_year, year)
-      |> maybe_filter(:item_type, item_type)
-      |> maybe_filter(:collection_id, collection_id)
+      |> where([i], not is_nil(i.title) and i.title != ^"")
 
     count = Repo.aggregate(base, :count, :id)
     pagination = Pagination.build(count, page, per_page)
 
     items =
       base
-      |> apply_search_ordering(term)
+      |> order_by([i], asc: i.title)
       |> limit(^per_page)
       |> offset(^Pagination.offset(pagination))
       |> select([i], ^@item_display_fields)
       |> Repo.all()
 
     {items, pagination}
+  end
+
+  defp maybe_author_filter(query, nil), do: query
+
+  defp maybe_author_filter(query, author) do
+    pattern = "%" <> String.replace(author, "%", "\\%") <> "%"
+
+    from [i, ...] in query,
+      join: a in assoc(i, :item_authors),
+      where: ilike(a.author_name, ^pattern)
+  end
+
+  defp maybe_keyword_filter(query, nil), do: query
+
+  defp maybe_keyword_filter(query, keyword) do
+    pattern = "%" <> String.replace(keyword, "%", "\\%") <> "%"
+
+    from [i, ...] in query,
+      join: k in assoc(i, :item_keywords),
+      where: ilike(k.keyword, ^pattern)
+  end
+
+  # Counts items per value of a single column on `items`. The empty-string
+  # filter is only applied to string columns — enum columns (:item_type) will
+  # raise if compared to "".
+  defp column_facet(base, column, limit, opts \\ []) do
+    order = Keyword.get(opts, :order, :asc)
+    string_columns = [:faculty, :department]
+
+    base =
+      if column in string_columns do
+        where(base, [i], not is_nil(field(i, ^column)) and field(i, ^column) != ^"")
+      else
+        where(base, [i], not is_nil(field(i, ^column)))
+      end
+
+    base
+    |> group_by([i], field(i, ^column))
+    |> select([i], %{value: field(i, ^column), count: count(i.id)})
+    |> order_by([i], {^order, field(i, ^column)})
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  # Author facet: join items → item_authors, group by author_name. The opts
+  # passed in already have `author` excluded so multi-select works.
+  defp author_facet(opts, limit) do
+    search_base_query(opts)
+    |> join(:inner, [i], a in assoc(i, :item_authors))
+    |> where([i, ..., a], not is_nil(a.author_name) and a.author_name != ^"")
+    |> group_by([i, ..., a], a.author_name)
+    |> select([i, ..., a], %{value: a.author_name, count: count(i.id, :distinct)})
+    |> order_by([i, ..., a], desc: count(i.id, :distinct), asc: a.author_name)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp keyword_facet(opts, limit) do
+    search_base_query(opts)
+    |> join(:inner, [i], k in assoc(i, :item_keywords))
+    |> where([i, ..., k], not is_nil(k.keyword) and k.keyword != ^"")
+    |> group_by([i, ..., k], k.keyword)
+    |> select([i, ..., k], %{value: k.keyword, count: count(i.id, :distinct)})
+    |> order_by([i, ..., k], desc: count(i.id, :distinct), asc: k.keyword)
+    |> limit(^limit)
+    |> Repo.all()
   end
 
   defp maybe_full_text_filter(query, nil), do: query
@@ -1191,14 +1366,32 @@ defmodule Kiroku.Repository do
   end
 
   def publish_item(%Item{} = item) do
-    item
-    |> Ecto.Changeset.change(
-      status: :published,
-      published_at: NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second),
-      discoverable: true
-    )
-    |> Repo.update()
+    result =
+      item
+      |> Ecto.Changeset.change(
+        status: :published,
+        published_at: NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second),
+        discoverable: true
+      )
+      |> Repo.update()
+
+    # Async DOI minting — only when enabled and the item has no DOI yet.
+    # Existing DOIs (manual entry, SAF import) are left untouched and the
+    # worker will mark the item :minted as a no-op confirmation.
+    with {:ok, updated} <- result,
+         true <- Kiroku.Settings.doi_enabled?(),
+         false <- has_doi?(updated) do
+      %{item_id: updated.id}
+      |> Kiroku.Workers.DoiMintWorker.new()
+      |> Oban.insert()
+    end
+
+    result
   end
+
+  defp has_doi?(%Item{doi: nil}), do: false
+  defp has_doi?(%Item{doi: ""}), do: false
+  defp has_doi?(%Item{}), do: true
 
   def lift_embargo(%Item{} = item) do
     item
@@ -1307,13 +1500,24 @@ defmodule Kiroku.Repository do
   @doc """
   Upserts an item from the MSSQL import. Uses legacy_id as the conflict target;
   on conflict it replaces all fields except id and inserted_at.
+
+  ## Returning the actual id on conflict
+
+  Ecto autogenerates a primary key UUID before issuing the INSERT. On a
+  legacy_id conflict, Postgres keeps the existing row's id and only updates
+  the other columns. Without `returning: true`, Ecto returns the struct
+  carrying the freshly-generated (never-persisted) UUID, so callers that
+  rely on `item.id` (e.g. the importer creating bitstreams) would hit FK
+  constraint failures. Asking Postgres to RETURN * on both insert and
+  conflict paths fixes this.
   """
   def import_item(attrs) do
     %Item{}
     |> Item.import_changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace_all_except, [:id, :inserted_at]},
-      conflict_target: :legacy_id
+      conflict_target: :legacy_id,
+      returning: true
     )
   end
 

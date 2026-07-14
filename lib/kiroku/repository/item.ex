@@ -190,6 +190,21 @@ defmodule Kiroku.Repository.Item do
     field :submitted_at, :utc_datetime_usec
     belongs_to :reviewed_by, Kiroku.Accounts.User, foreign_key: :reviewed_by_id
 
+    # DOI minting (async via Kiroku.Workers.DoiMintWorker on publish).
+    # `doi` itself is the journal-article form/import field; `doi_status`
+    # tracks whether a DOI has been minted for this item by the platform.
+    field :doi_status, Ecto.Enum,
+      values: ~w(pending minting minted failed not_required)a,
+      default: :pending
+
+    field :doi_minted_at, :utc_datetime_usec
+
+    # Denormalized concatenation of extracted PDF text for all ORIGINAL
+    # bitstreams under this item. Maintained by Content.recompute_item_*
+    # functions. Folded into `search_vector` by the generated column so the
+    # search index stays in sync without a trigger.
+    field :extracted_text, :string
+
     belongs_to :collection, Kiroku.Repository.Collection
     belongs_to :submitter, Kiroku.Accounts.User
 
@@ -234,6 +249,7 @@ defmodule Kiroku.Repository.Item do
     embargo_open_date embargo_close_date embargo_reason
     base_url submitter_id
     review_note reviewed_at submitted_at reviewed_by_id
+    doi_status doi_minted_at extracted_text
   )a
 
   def changeset(item, attrs) do
