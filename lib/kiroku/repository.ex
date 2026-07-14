@@ -19,7 +19,8 @@ defmodule Kiroku.Repository do
     ItemAdvisor,
     ItemExaminer,
     ItemTeamMember,
-    ItemMetadata
+    ItemMetadata,
+    ItemVersion
   }
 
   @item_preloads [
@@ -357,25 +358,38 @@ defmodule Kiroku.Repository do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
     scope = Keyword.get(opts, :scope, :public)
+    search = Keyword.get(opts, :search)
+    community_id = Keyword.get(opts, :community_id)
     levels = Authorization.visible_access_levels(scope)
 
-    count =
-      Repo.one(
-        from c in Collection,
-          where: c.access_level in ^levels,
-          select: count(c.id)
-      )
+    base =
+      from c in Collection,
+        where: c.access_level in ^levels
 
+    base =
+      if search && search != "" do
+        pattern = "%#{String.downcase(search)}%"
+        from c in base, where: ilike(fragment("lower(?)", c.name), ^pattern) or ilike(c.handle, ^pattern)
+      else
+        base
+      end
+
+    base =
+      if community_id && community_id != "" do
+        from c in base, where: c.community_id == ^community_id
+      else
+        base
+      end
+
+    count = Repo.aggregate(base, :count, :id)
     pagination = Pagination.build(count, page, per_page)
 
     collections =
-      Repo.all(
-        from c in Collection,
-          where: c.access_level in ^levels,
-          order_by: c.name,
-          limit: ^per_page,
-          offset: ^Pagination.offset(pagination)
-      )
+      base
+      |> order_by([c], c.name)
+      |> limit(^per_page)
+      |> offset(^Pagination.offset(pagination))
+      |> Repo.all()
 
     {collections, pagination}
   end
@@ -467,26 +481,26 @@ defmodule Kiroku.Repository do
   def get_item!(id_or_handle) do
     case Ecto.UUID.cast(id_or_handle) do
       {:ok, _} -> Repo.get!(Item, id_or_handle)
-      :error -> Repo.get_by!(Item, handle: id_or_handle)
+      :error -> find_by_handle!(id_or_handle)
     end
   end
 
   def get_item(id_or_handle) do
     case Ecto.UUID.cast(id_or_handle) do
       {:ok, _} -> Repo.get(Item, id_or_handle)
-      :error -> Repo.get_by(Item, handle: id_or_handle)
+      :error -> find_by_handle(id_or_handle)
     end
   end
 
-  def get_item_by_handle!(handle), do: Repo.get_by!(Item, handle: handle)
+  def get_item_by_handle!(handle), do: find_by_handle!(handle)
 
-  def get_item_by_handle(handle), do: Repo.get_by(Item, handle: handle)
+  def get_item_by_handle(handle), do: find_by_handle(handle)
 
   def get_item_with_preloads!(id_or_handle) do
     item =
       case Ecto.UUID.cast(id_or_handle) do
         {:ok, _} -> Repo.get!(Item, id_or_handle)
-        :error -> Repo.get_by!(Item, handle: id_or_handle)
+        :error -> find_by_handle!(id_or_handle)
       end
 
     Repo.preload(item, @item_preloads)
@@ -496,10 +510,32 @@ defmodule Kiroku.Repository do
     item =
       case Ecto.UUID.cast(id_or_handle) do
         {:ok, _} -> Repo.get(Item, id_or_handle)
-        :error -> Repo.get_by(Item, handle: id_or_handle)
+        :error -> find_by_handle(id_or_handle)
       end
 
     if item, do: Repo.preload(item, @item_preloads)
+  end
+
+  # Handle lookup that tolerates trailing whitespace in the DB (MSSQL CHAR(n)
+  # columns pad with spaces). Tries an exact match first (index-backed), then
+  # falls back to a TRIM() query for legacy padded data.
+  defp find_by_handle(handle) do
+    trimmed = String.trim(handle)
+
+    case Repo.get_by(Item, handle: trimmed) do
+      nil ->
+        Repo.one(from i in Item, where: fragment("btrim(?)", i.handle) == ^trimmed, limit: 1)
+
+      item ->
+        item
+    end
+  end
+
+  defp find_by_handle!(handle) do
+    case find_by_handle(handle) do
+      nil -> raise Ecto.NoResultsError, queryable: Item
+      item -> item
+    end
   end
 
   def list_items(%{} = filters) do
@@ -1322,8 +1358,20 @@ defmodule Kiroku.Repository do
       %Item{}
       |> Item.changeset(final_attrs)
       |> Repo.insert()
+      |> tap_version("created", attrs[:actor] || attrs["actor"])
     end)
   end
+
+  defp tap_version({:ok, %Item{}} = result, action, actor) do
+    case result do
+      {:ok, item} -> record_version(item, action: action, actor: actor)
+      _ -> :ok
+    end
+
+    result
+  end
+
+  defp tap_version(result, _action, _actor), do: result
 
   # When the caller does not specify an access_level, inherit the collection's
   # configured default. This lets a "Tugas Akhir" collection default all new
@@ -1360,9 +1408,17 @@ defmodule Kiroku.Repository do
   end
 
   def update_item(%Item{} = item, attrs) do
-    item
-    |> Item.changeset(attrs)
-    |> Repo.update()
+    result =
+      item
+      |> Item.changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} -> record_version(updated, action: "updated")
+      _ -> :ok
+    end
+
+    result
   end
 
   def publish_item(%Item{} = item) do
@@ -1375,15 +1431,19 @@ defmodule Kiroku.Repository do
       )
       |> Repo.update()
 
-    # Async DOI minting — only when enabled and the item has no DOI yet.
-    # Existing DOIs (manual entry, SAF import) are left untouched and the
-    # worker will mark the item :minted as a no-op confirmation.
-    with {:ok, updated} <- result,
-         true <- Kiroku.Settings.doi_enabled?(),
-         false <- has_doi?(updated) do
-      %{item_id: updated.id}
-      |> Kiroku.Workers.DoiMintWorker.new()
-      |> Oban.insert()
+    case result do
+      {:ok, updated} ->
+        record_version(updated, action: "published")
+
+        # Async DOI minting — only when enabled and the item has no DOI yet.
+        if Kiroku.Settings.doi_enabled?() and not has_doi?(updated) do
+          %{item_id: updated.id}
+          |> Kiroku.Workers.DoiMintWorker.new()
+          |> Oban.insert()
+        end
+
+      _ ->
+        :ok
     end
 
     result
@@ -1394,9 +1454,17 @@ defmodule Kiroku.Repository do
   defp has_doi?(%Item{}), do: true
 
   def lift_embargo(%Item{} = item) do
-    item
-    |> Ecto.Changeset.change(status: :published, embargo_open_date: nil)
-    |> Repo.update()
+    result =
+      item
+      |> Ecto.Changeset.change(status: :published, embargo_open_date: nil)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} -> record_version(updated, action: "embargo_lifted")
+      _ -> :ok
+    end
+
+    result
   end
 
   # ── Review workflow FSM ──────────────────────────────────────────────────────
@@ -1407,6 +1475,7 @@ defmodule Kiroku.Repository do
     |> Item.status_changeset(%{status: :submitted, submitted_at: DateTime.utc_now()})
     |> Repo.update()
     |> tap_notify(:submitted)
+    |> tap_version("submitted", nil)
   end
 
   def submit_item(%Item{}), do: {:error, :invalid_transition}
@@ -1421,6 +1490,7 @@ defmodule Kiroku.Repository do
     })
     |> Repo.update()
     |> tap_notify(:review_started)
+    |> tap_version("review_started", reviewer)
   end
 
   def start_review(%Item{}, _), do: {:error, :invalid_transition}
@@ -1437,6 +1507,7 @@ defmodule Kiroku.Repository do
     })
     |> Repo.update()
     |> tap_notify(:approved)
+    |> tap_version("approved", reviewer)
   end
 
   def approve_item(%Item{}, _), do: {:error, :invalid_transition}
@@ -1452,6 +1523,7 @@ defmodule Kiroku.Repository do
     })
     |> Repo.update()
     |> tap_notify(:revision_requested)
+    |> tap_version("revision_requested", reviewer)
   end
 
   def request_revision(%Item{}, _, _), do: {:error, :invalid_transition}
@@ -1468,6 +1540,7 @@ defmodule Kiroku.Repository do
     })
     |> Repo.update()
     |> tap_notify(:rejected)
+    |> tap_version("rejected", reviewer)
   end
 
   def reject_item(%Item{}, _, _), do: {:error, :invalid_transition}
@@ -1479,6 +1552,7 @@ defmodule Kiroku.Repository do
     |> Item.status_changeset(%{status: :withdrawn, discoverable: false})
     |> Repo.update()
     |> tap_notify(:withdrawn)
+    |> tap_version("withdrawn", nil)
   end
 
   def withdraw_item_fsm(%Item{}), do: {:error, :invalid_transition}
@@ -1512,13 +1586,21 @@ defmodule Kiroku.Repository do
   conflict paths fixes this.
   """
   def import_item(attrs) do
-    %Item{}
-    |> Item.import_changeset(attrs)
-    |> Repo.insert(
-      on_conflict: {:replace_all_except, [:id, :inserted_at]},
-      conflict_target: :legacy_id,
-      returning: true
-    )
+    result =
+      %Item{}
+      |> Item.import_changeset(attrs)
+      |> Repo.insert(
+        on_conflict: {:replace_all_except, [:id, :inserted_at]},
+        conflict_target: :legacy_id,
+        returning: true
+      )
+
+    case result do
+      {:ok, item} -> record_version(item, action: "imported", actor_name: "MSSQL import")
+      _ -> :ok
+    end
+
+    result
   end
 
   # ── Keywords ────────────────────────────────────────────────────────────────
@@ -1543,11 +1625,15 @@ defmodule Kiroku.Repository do
     |> Repo.insert()
   end
 
+  def delete_item_author(%ItemAuthor{} = author), do: Repo.delete(author)
+
   def create_item_advisor(attrs) do
     %ItemAdvisor{}
     |> ItemAdvisor.changeset(attrs)
     |> Repo.insert()
   end
+
+  def delete_item_advisor(%ItemAdvisor{} = advisor), do: Repo.delete(advisor)
 
   def create_item_examiner(attrs) do
     %ItemExaminer{}
@@ -1555,10 +1641,34 @@ defmodule Kiroku.Repository do
     |> Repo.insert()
   end
 
+  def delete_item_examiner(%ItemExaminer{} = examiner), do: Repo.delete(examiner)
+
   def create_item_team_member(attrs) do
     %ItemTeamMember{}
     |> ItemTeamMember.changeset(attrs)
     |> Repo.insert()
+  end
+
+  def delete_item_team_member(%ItemTeamMember{} = member), do: Repo.delete(member)
+
+  @doc """
+  Moves `item` to a different collection. Records a version entry with
+  action "moved" so the change is auditable.
+  """
+  def move_item(%Item{} = item, new_collection_id) do
+    result =
+      item
+      |> Ecto.Changeset.change(collection_id: new_collection_id)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        record_version(updated, action: "moved", summary: "Moved to different collection")
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   # ── Supplementary Metadata ──────────────────────────────────────────────────
@@ -1581,5 +1691,120 @@ defmodule Kiroku.Repository do
 
   def list_metadata_for_item(item_id) do
     Repo.all(from m in ItemMetadata, where: m.item_id == ^item_id, order_by: m.position)
+  end
+
+  # ── Versioning & audit log ──────────────────────────────────────────────────
+
+  @doc """
+  Returns the version history for `item_id`, newest first.
+  Each entry is an `%ItemVersion{}` with the actor preloaded when present.
+  """
+  def list_item_versions(item_id) do
+    Repo.all(
+      from v in ItemVersion,
+        where: v.item_id == ^item_id,
+        order_by: [desc: v.version_number],
+        preload: [:actor]
+    )
+  end
+
+  @doc """
+  Returns the current version number for `item_id`, or 0 if no versions
+  have been recorded yet.
+  """
+  def current_version_number(item_id) do
+    Repo.one(
+      from v in ItemVersion,
+        where: v.item_id == ^item_id,
+        select: coalesce(max(v.version_number), 0)
+    )
+  end
+
+  @doc """
+  Records an append-only version snapshot for `item`.
+
+  Options:
+    * `:action`    — required, e.g. "created", "published", "updated"
+    * `:actor`     — the `%User{}` who triggered the event (nil for system)
+    * `:actor_name`— display name when actor is nil (e.g. "MSSQL import")
+    * `:summary`   — human-readable description
+
+  The snapshot captures the item's key bibliographic fields as a JSONB map
+  so versions can be diffed without retaining full item rows. Called
+  automatically by the lifecycle functions below.
+  """
+  def record_version(%Item{} = item, opts) do
+    action = Keyword.fetch!(opts, :action)
+    actor = Keyword.get(opts, :actor)
+    actor_name = Keyword.get(opts, :actor_name) || actor_display_name(actor)
+    summary = Keyword.get(opts, :summary) || default_summary(action, actor_name)
+
+    version_number = current_version_number(item.id) + 1
+
+    # Best-effort: if the version insert fails (FK on a test-only actor,
+    # unique race, etc.) we log and continue — the audit trail is a side
+    # effect and must never break the parent lifecycle operation.
+    %ItemVersion{}
+    |> ItemVersion.changeset(%{
+      item_id: item.id,
+      version_number: version_number,
+      action: action,
+      actor_id: if(actor, do: actor.id),
+      actor_name: actor_name,
+      summary: summary,
+      snapshot: snapshot_item(item)
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, version} ->
+        {:ok, version}
+
+      {:error, changeset} ->
+        require Logger
+
+        Logger.warning(
+          "record_version failed item=#{item.id} action=#{action}: #{inspect(changeset.errors)}"
+        )
+
+        {:error, changeset}
+    end
+  end
+
+  # Captures the key bibliographic fields for diffing. We deliberately
+  # exclude large text fields (abstract, extracted_text) and child
+  # associations to keep the snapshot compact.
+  @snapshot_fields ~w(
+    title title_alt item_type degree_level department faculty
+    program_study institution student_name student_id
+    status access_level discoverable publication_year published_at
+    handle legacy_id doi doi_status
+    embargo_open_date embargo_close_date
+  )a
+
+  defp snapshot_item(%Item{} = item) do
+    Map.take(item, @snapshot_fields)
+  end
+
+  defp actor_display_name(%{email: email}), do: email
+  defp actor_display_name(%{display_name: name}) when is_binary(name), do: name
+  defp actor_display_name(_), do: "system"
+
+  defp default_summary(action, actor_name) do
+    action_verbs = %{
+      "created" => "Created",
+      "updated" => "Updated",
+      "submitted" => "Submitted for review",
+      "review_started" => "Review started",
+      "approved" => "Approved and published",
+      "revision_requested" => "Revision requested",
+      "rejected" => "Rejected",
+      "published" => "Published",
+      "withdrawn" => "Withdrawn",
+      "imported" => "Imported",
+      "embargo_lifted" => "Embargo lifted"
+    }
+
+    verb = Map.get(action_verbs, action, String.capitalize(action))
+    "#{verb} by #{actor_name}"
   end
 end

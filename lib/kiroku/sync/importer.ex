@@ -839,7 +839,7 @@ defmodule Kiroku.Sync.Importer do
 
   defp map_status(_stPublikasi, _verifikasi, _validasi), do: :published
 
-  defp build_handle(npm), do: npm
+  defp build_handle(npm), do: String.trim(to_string(npm))
 
   defp build_legacy_id(nil, npm), do: "unknown/#{npm}"
   defp build_legacy_id("", npm), do: "unknown/#{npm}"

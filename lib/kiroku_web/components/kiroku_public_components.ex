@@ -50,7 +50,7 @@ defmodule KirokuWeb.KirokuPublicComponents do
           <% end %>
         </div>
 
-        <p class="font-heading text-base leading-snug" style="color: var(--color-wisteria);">
+        <p class="font-heading text-2xl leading-snug" style="color: var(--color-wisteria);">
           {@item.title}
         </p>
 

@@ -46,7 +46,8 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
                     id="search-input"
                     value={@search_query}
                     placeholder="Search by title, handle, or student name..."
-                    class="kiroku-search-input w-full pl-10"
+                    class="kiroku-search-input w-full"
+                    style="padding-left: 2.5rem;"
                     autocomplete="off"
                   />
                   <button
@@ -472,35 +473,23 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   end
 
   def handle_event("search", %{"search" => search}, socket) do
-    {:noreply,
-     push_patch(socket,
-       to:
-         ~p"/admin/items?search=#{search}&status=#{socket.assigns.status_filter}&item_type=#{socket.assigns.item_type_filter}"
-     )}
+    params = build_index_params(search: search, socket: socket)
+    {:noreply, push_patch(socket, to: ~p"/admin/items?#{params}")}
   end
 
   def handle_event("filter", %{"item_type" => item_type}, socket) do
-    {:noreply,
-     push_patch(socket,
-       to:
-         ~p"/admin/items?item_type=#{item_type}&search=#{socket.assigns.search_query}&status=#{socket.assigns.status_filter}"
-     )}
+    params = build_index_params(item_type: item_type, socket: socket)
+    {:noreply, push_patch(socket, to: ~p"/admin/items?#{params}")}
   end
 
   def handle_event("clear_search", _, socket) do
-    {:noreply,
-     push_patch(socket,
-       to:
-         ~p"/admin/items?status=#{socket.assigns.status_filter}&item_type=#{socket.assigns.item_type_filter}"
-     )}
+    params = build_index_params(socket: socket)
+    {:noreply, push_patch(socket, to: ~p"/admin/items?#{params}")}
   end
 
   def handle_event("clear_type_filter", _, socket) do
-    {:noreply,
-     push_patch(socket,
-       to:
-         ~p"/admin/items?search=#{socket.assigns.search_query}&status=#{socket.assigns.status_filter}"
-     )}
+    params = build_index_params(socket: socket, item_type: "")
+    {:noreply, push_patch(socket, to: ~p"/admin/items?#{params}")}
   end
 
   def handle_event("clear_all_filters", _, socket) do
@@ -550,4 +539,18 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
 
   defp maybe_put_item_type(filters, ""), do: filters
   defp maybe_put_item_type(filters, item_type), do: Map.put(filters, :item_type, item_type)
+
+  # Builds a query-params map for push_patch, filtering out nil/empty values
+  # so Phoenix's verified route encoder never receives nil.
+  defp build_index_params(opts) do
+    socket = Keyword.fetch!(opts, :socket)
+    search = Keyword.get(opts, :search, socket.assigns.search_query)
+    item_type = Keyword.get(opts, :item_type, socket.assigns.item_type_filter)
+    status = socket.assigns.status_filter
+
+    %{}
+    |> then(fn m -> if search not in [nil, ""], do: Map.put(m, "search", search), else: m end)
+    |> then(fn m -> if item_type not in [nil, ""], do: Map.put(m, "item_type", item_type), else: m end)
+    |> then(fn m -> if status not in [nil, ""], do: Map.put(m, "status", status), else: m end)
+  end
 end

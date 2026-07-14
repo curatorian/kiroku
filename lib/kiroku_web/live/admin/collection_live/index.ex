@@ -114,6 +114,48 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
             <.icon name="hero-plus" class="w-4 h-4" /> New Collection
           </.link>
         </div>
+
+        <%!-- Search + filter bar --%>
+        <form id="collection-filters" phx-change="filter" class="flex flex-wrap gap-3">
+          <div class="relative flex-1 min-w-[200px]">
+            <input
+              type="text"
+              name="search"
+              value={@search_query}
+              placeholder="Search by name or handle…"
+              class="kiroku-search-input w-full"
+              style="padding-left: 2.25rem;"
+              phx-debounce="300"
+            />
+            <.icon
+              name="hero-magnifying-glass"
+              class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+              style="color: var(--color-quill);"
+            />
+          </div>
+          <select name="community_id" class="kiroku-search-input" style="width: auto;">
+            <option value="">All communities</option>
+            <%= for community <- @communities do %>
+              <% depth = community.depth || 0 %>
+              <% indent = String.duplicate("\u00A0\u00A0\u00A0\u00A0", depth) %>
+              <% prefix = if depth > 0, do: "└ ", else: "" %>
+              <option value={community.id} selected={@community_filter == community.id}>
+                {indent}{prefix}{community.name}
+              </option>
+            <% end %>
+          </select>
+          <%= if @search_query != "" or @community_filter != "" do %>
+            <button
+              type="button"
+              phx-click="clear_filters"
+              class="px-3 py-2 rounded-lg text-sm font-medium"
+              style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+            >
+              Clear
+            </button>
+          <% end %>
+        </form>
+
         <div class="kiroku-card overflow-hidden">
           <table class="w-full text-sm">
             <thead style="background: rgba(45,27,105,0.5);">
@@ -189,20 +231,30 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
               </tr>
             </tbody>
           </table>
+          <%= if @pagination.total_count == 0 do %>
+            <div class="p-8 text-center">
+              <.icon name="hero-folder-open" class="w-10 h-10 mx-auto opacity-30" />
+              <p class="mt-2 text-sm" style="color: var(--color-quill);">
+                No collections found{if @search_query != "", do: " for \"#{@search_query}\"", else: ""}.
+              </p>
+            </div>
+          <% end %>
         </div>
 
-        <.pagination pagination={@pagination} path="/admin/collections" params={%{}} />
+        <.pagination pagination={@pagination} path="/admin/collections" params={filter_params(@search_query, @community_filter)} />
       </div>
     </Layouts.admin>
     """
   end
 
   def mount(_params, _session, socket) do
-    communities = Repository.list_communities(scope: :staff)
+    community_tree = Repository.list_communities_tree(scope: :staff)
 
     {:ok,
      socket
-     |> assign(:communities, communities)
+     |> assign(:communities, community_tree)
+     |> assign(:search_query, "")
+     |> assign(:community_filter, "")
      |> assign(:pagination, Pagination.build(0, 1, 20))
      |> stream(:collections, [])}
   end
@@ -213,15 +265,25 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
 
   defp apply_action(socket, :index, params) do
     page = parse_page(params["page"])
+    search = params["search"] || ""
+    community_id = params["community_id"] || ""
 
     {collections, pagination} =
-      Repository.list_collections_pagination(page: page, per_page: 20, scope: :staff)
+      Repository.list_collections_pagination(
+        page: page,
+        per_page: 20,
+        scope: :staff,
+        search: search,
+        community_id: community_id
+      )
 
     collections = Kiroku.Repo.preload(collections, :community)
 
     socket
     |> assign(:form, nil)
     |> assign(:current_collection, nil)
+    |> assign(:search_query, search)
+    |> assign(:community_filter, community_id)
     |> assign(:pagination, pagination)
     |> stream(:collections, collections, reset: true)
   end
@@ -291,6 +353,18 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
      |> stream_delete(:collections, collection)}
   end
 
+  def handle_event("filter", params, socket) do
+    search = params["search"] || ""
+    community_id = params["community_id"] || ""
+
+    params = filter_params(search, community_id)
+    {:noreply, push_patch(socket, to: ~p"/admin/collections?#{params}")}
+  end
+
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/admin/collections")}
+  end
+
   defp parse_page(nil), do: 1
 
   defp parse_page(p) do
@@ -305,4 +379,10 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
   defp access_badge_class(:restricted), do: "embargoed"
   defp access_badge_class(:closed), do: "withdrawn"
   defp access_badge_class(_), do: "draft"
+
+  defp filter_params(search, community_id) do
+    %{}
+    |> then(fn m -> if search not in [nil, ""], do: Map.put(m, "search", search), else: m end)
+    |> then(fn m -> if community_id not in [nil, ""], do: Map.put(m, "community_id", community_id), else: m end)
+  end
 end

@@ -604,7 +604,120 @@ defmodule Kiroku.RepositoryTest do
     end
   end
 
-  # ── import_item upsert id regression ────────────────────────────────────────
+  # ── Versioning & audit log ──────────────────────────────────────────────────
+
+  describe "versioning & audit log" do
+    test "create_item records version 1 with action 'created'" do
+      item = create_item(%{"title" => "Versioned Item"})
+
+      versions = Repository.list_item_versions(item.id)
+      assert length(versions) == 1
+
+      v1 = hd(versions)
+      assert v1.version_number == 1
+      assert v1.action == "created"
+      assert v1.snapshot["title"] == "Versioned Item"
+    end
+
+    test "update_item records a version with action 'updated'" do
+      item = create_item(%{"title" => "Original"})
+      {:ok, updated} = Repository.update_item(item, %{"title" => "Changed"})
+
+      versions = Repository.list_item_versions(updated.id)
+      assert length(versions) == 2
+
+      [v2, v1] = versions
+      assert v2.action == "updated"
+      assert v2.snapshot["title"] == "Changed"
+      assert v1.action == "created"
+      assert v1.snapshot["title"] == "Original"
+    end
+
+    test "publish_item records a version with action 'published'" do
+      item = create_item(%{"status" => "draft"})
+      {:ok, published} = Repository.publish_item(item)
+
+      versions = Repository.list_item_versions(published.id)
+      actions = Enum.map(versions, & &1.action)
+      assert "published" in actions
+    end
+
+    test "submit_item records a version with action 'submitted'" do
+      item = create_item(%{"status" => "draft"})
+      {:ok, submitted} = Repository.submit_item(item)
+
+      versions = Repository.list_item_versions(submitted.id)
+      actions = Enum.map(versions, & &1.action)
+      assert "submitted" in actions
+    end
+
+    test "withdraw_item_fsm records a version with action 'withdrawn'" do
+      item = create_item(%{"status" => "published", "discoverable" => true})
+      {:ok, withdrawn} = Repository.withdraw_item_fsm(item)
+
+      versions = Repository.list_item_versions(withdrawn.id)
+      actions = Enum.map(versions, & &1.action)
+      assert "withdrawn" in actions
+    end
+
+    test "import_item records a version with action 'imported'" do
+      collection = create_collection()
+
+      {:ok, item} =
+        Repository.import_item(%{
+          "title" => "Imported",
+          "collection_id" => collection.id,
+          "legacy_id" => "skripsi/#{System.unique_integer([:positive])}",
+          "handle" => "imp-#{System.unique_integer([:positive])}"
+        })
+
+      versions = Repository.list_item_versions(item.id)
+      actions = Enum.map(versions, & &1.action)
+      assert "imported" in actions
+    end
+
+    test "current_version_number/1 returns 0 for items with no versions" do
+      # Build an item without going through create_item (which records a version).
+      collection = create_collection()
+
+      {:ok, item} =
+        %Kiroku.Repository.Item{}
+        |> Kiroku.Repository.Item.changeset(%{"title" => "X", "collection_id" => collection.id})
+        |> Repo.insert()
+
+      assert Repository.current_version_number(item.id) == 0
+    end
+
+    test "version numbers increment monotonically" do
+      item = create_item(%{"status" => "draft"})
+
+      {:ok, _} = Repository.submit_item(item)
+      {:ok, published} = Repository.publish_item(item)
+
+      versions = Repository.list_item_versions(published.id)
+      numbers = Enum.map(versions, & &1.version_number) |> Enum.sort()
+      assert numbers == [1, 2, 3]
+
+      actions = Enum.map(Enum.sort_by(versions, & &1.version_number), & &1.action)
+      assert actions == ["created", "submitted", "published"]
+    end
+
+    test "snapshot captures key bibliographic fields" do
+      item =
+        create_item(%{
+          "title" => "Snapshot Test",
+          "faculty" => "Hukum",
+          "publication_year" => 2024,
+          "doi" => "10.1234/test"
+        })
+
+      [v1] = Repository.list_item_versions(item.id)
+      assert v1.snapshot["title"] == "Snapshot Test"
+      assert v1.snapshot["faculty"] == "Hukum"
+      assert v1.snapshot["publication_year"] == 2024
+      assert v1.snapshot["doi"] == "10.1234/test"
+    end
+  end
 
   describe "import_item/1 — upsert returns the actual persisted id" do
     # Regression: Ecto's on_conflict returns a struct with a freshly-generated
