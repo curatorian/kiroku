@@ -354,7 +354,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
 
             <%!-- Uploads are most reliable (and testable) inside a form; the
                  phx-submit consumes the staged file and stores the logo. --%>
-            <form id="logo-form" phx-submit="upload_logo" class="block">
+            <form id="logo-form" phx-submit="upload_logo" phx-change="validate_logo" class="block">
               <div
                 class="upload-dropzone group relative flex flex-col items-center justify-center gap-2 px-6 py-6 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200"
                 phx-drop-target={@uploads.logo.ref}
@@ -734,6 +734,11 @@ defmodule KirokuWeb.Admin.SettingsLive do
   end
 
   # ── Logo upload / removal ───────────────────────────────────────────────────
+
+  @impl true
+  def handle_event("validate_logo", _params, socket) do
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_event("upload_logo", _params, socket) do
