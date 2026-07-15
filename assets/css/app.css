@@ -441,4 +441,27 @@ h6 {
   transition: transform 0.2s ease;
 }
 
+/* ── Upload dropzone ──────────────────────────────────────────────────────
+   The dashed dropzone sits low-contrast by default so it doesn't shout, then
+   lights up on hover / drag-over to confirm it's an interactive target. The
+   base border/bg are set inline per-theme via color tokens; these rules layer
+   the active states on top.
+*/
+.upload-dropzone {
+  border-color: color-mix(in srgb, var(--color-lavender) 28%, transparent);
+  background: color-mix(in srgb, var(--color-patchouli) 4%, transparent);
+}
+
+.upload-dropzone:hover {
+  border-color: color-mix(in srgb, var(--color-patchouli) 65%, transparent);
+  background: color-mix(in srgb, var(--color-patchouli) 9%, transparent);
+}
+
+.upload-dropzone.dragging {
+  border-color: var(--color-patchouli);
+  background: color-mix(in srgb, var(--color-patchouli) 14%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-patchouli) 14%, transparent);
+  transform: scale(1.005);
+}
+
 /* This file is for your main application CSS */

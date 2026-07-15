@@ -189,6 +189,15 @@ defmodule KirokuWeb.Layouts do
             current_path={@page_title}
             match="Users"
           />
+          <%= if @current_scope && @current_scope.user_type == :superadmin do %>
+            <.admin_nav_item
+              icon="hero-shield-check"
+              label="Role Policy"
+              href={~p"/admin/role-policy"}
+              current_path={@page_title}
+              match="Role Policy"
+            />
+          <% end %>
           <%= if @current_scope && @current_scope.user_type in [:admin, :superadmin] do %>
             <%= if Kiroku.Sync.enabled?() do %>
               <.admin_nav_item

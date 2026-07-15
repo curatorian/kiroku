@@ -241,7 +241,11 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
           <% end %>
         </div>
 
-        <.pagination pagination={@pagination} path="/admin/collections" params={filter_params(@search_query, @community_filter)} />
+        <.pagination
+          pagination={@pagination}
+          path="/admin/collections"
+          params={filter_params(@search_query, @community_filter)}
+        />
       </div>
     </Layouts.admin>
     """
@@ -383,6 +387,8 @@ defmodule KirokuWeb.Admin.CollectionLive.Index do
   defp filter_params(search, community_id) do
     %{}
     |> then(fn m -> if search not in [nil, ""], do: Map.put(m, "search", search), else: m end)
-    |> then(fn m -> if community_id not in [nil, ""], do: Map.put(m, "community_id", community_id), else: m end)
+    |> then(fn m ->
+      if community_id not in [nil, ""], do: Map.put(m, "community_id", community_id), else: m
+    end)
   end
 end

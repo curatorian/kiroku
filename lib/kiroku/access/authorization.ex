@@ -25,7 +25,7 @@ defmodule Kiroku.Access.Authorization do
 
   alias Kiroku.Repository.{Community, Collection, Item}
   alias Kiroku.Accounts.User
-  alias Kiroku.Access.RbacPolicy
+  alias Kiroku.Access.{RbacPolicy, RolePolicy, RolePolicies}
 
   # ── Visibility scope ──────────────────────────────────────────────────────────
   #
@@ -162,15 +162,40 @@ defmodule Kiroku.Access.Authorization do
   # ── Catch-all / RBAC policy fallback ─────────────────────────────────────────
   #
   # Anything not matched by a role rule above is denied — unless an explicit
-  # RBAC policy grants it. This is what lets a :submitter with a :review policy
-  # on a collection perform review actions on that collection's items, or read a
-  # restricted item they've been granted access to.
+  # RBAC policy grants it. Two layers of policy are checked:
+  #
+  # 1. **Role policies** — stored in `role_policies` and keyed on `user_type`.
+  #    These apply to every user with that role (e.g. "all reviewers can read
+  #    items in collection X"). They are fetched from the DB on demand since
+  #    they are only needed on authorization misses (the slow path).
+  # 2. **Per-user policies** — stored in `rbac_policies` and preloaded onto the
+  #    user struct at the auth boundary. These grant additional access to a
+  #    specific individual.
 
-  def can?(%User{} = user, action, resource), do: policy_allows?(user, action, resource)
+  def can?(%User{} = user, action, resource) do
+    role_policy_allows?(user.user_type, action, resource) or
+      policy_allows?(user, action, resource)
+  end
 
   def can?(_user, _action, _resource), do: false
 
-  # ── RBAC policy evaluation ───────────────────────────────────────────────────
+  # ── Role policy evaluation ──────────────────────────────────────────────────
+  #
+  # Role policies are fetched from the DB (not preloaded on the user) because
+  # they are keyed on user_type, not user_id. They are only evaluated on the
+  # slow path (when role rules don't already grant access), so the DB hit is
+  # acceptable.
+
+  defp role_policy_allows?(user_type, action, resource) do
+    RolePolicies.cached_policies_for_type(user_type)
+    |> Enum.any?(&role_policy_matches?(&1, action, resource))
+  end
+
+  defp role_policy_matches?(%RolePolicy{} = policy, action, resource) do
+    action_grants?(policy.action, action) and resource_matches?(policy, resource)
+  end
+
+  # ── Per-user RBAC policy evaluation ─────────────────────────────────────────
   #
   # Policies are preloaded onto the user as a list (`%User{rbac_policies: [...]}`).
   # When the association is not loaded (e.g. bare structs in unit tests, or code

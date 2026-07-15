@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <link rel="icon" href={Kiroku.Settings.brand_logo_url() || ~p"/kiroku.ico"} />
+    <link rel="apple-touch-icon" href={Kiroku.Settings.brand_logo_url() || ~p"/kiroku.ico"} />
     <.live_title default="Kiroku" suffix=" · Institutional Repository">
       {assigns[:page_title]}
     </.live_title>

@@ -542,67 +542,70 @@ defmodule KirokuWeb.ItemLive.Show do
                       </p>
                     </div>
                   <% else %>
-                  <div class="space-y-1.5">
-                    <%= for bs <- visible_bitstreams do %>
-                      <% can_access = Content.accessible?(bs, @current_user, @item) %>
-                      <% locked = Content.bitstream_locked?(bs) %>
-                      <%= if can_access do %>
-                        <a
-                          href={~p"/items/#{@item.handle}/bitstreams/#{bs.id}"}
-                          target="_blank"
-                          rel="noopener"
-                          class="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all hover:scale-[1.02]"
-                          style="background: rgba(123,79,166,0.06); border: 1px solid rgba(123,79,166,0.12);"
-                        >
-                          <.icon
-                            name="hero-document-text"
-                            class="w-4 h-4 shrink-0 text-[var(--color-patchouli)]"
-                          />
-                          <div class="min-w-0 flex-1">
-                            <p
-                              class="text-xs font-medium truncate"
-                              style="color: var(--color-wisteria);"
-                            >
-                              {bs.description || bs.filename}
-                            </p>
-                            <p class="text-[10px] truncate" style="color: var(--color-quill);">
-                              {bs.filename}
-                            </p>
-                          </div>
-                          <.icon name="hero-arrow-down-tray w-4 h-4 shrink-0 text-[var(--color-quill)] group-hover:text-[var(--color-patchouli)] transition-colors" />
-                        </a>
-                      <% else %>
-                        <div
-                          class="flex items-center gap-2.5 p-2.5 rounded-lg opacity-70"
-                          style="background: rgba(155,126,200,0.03); border: 1px solid rgba(155,126,200,0.08);"
-                          title={
-                            if locked,
-                              do: "Locked — sign in with an internal account to view",
-                              else: "Restricted"
-                          }
-                        >
-                          <.icon
-                            name="hero-lock-closed"
-                            class="w-4 h-4 shrink-0 text-[var(--color-quill)]"
-                          />
-                          <div class="min-w-0 flex-1">
-                            <p class="text-xs font-medium truncate" style="color: var(--color-quill);">
-                              {bs.description || bs.filename}
-                            </p>
-                            <p class="text-[10px] truncate" style="color: var(--color-dust);">
-                              {bs.filename}
-                            </p>
-                          </div>
-                          <span
-                            class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
-                            style="background: rgba(196,65,90,0.12); color: var(--color-ribbon-red);"
+                    <div class="space-y-1.5">
+                      <%= for bs <- visible_bitstreams do %>
+                        <% can_access = Content.accessible?(bs, @current_user, @item) %>
+                        <% locked = Content.bitstream_locked?(bs) %>
+                        <%= if can_access do %>
+                          <a
+                            href={~p"/items/#{@item.handle}/bitstreams/#{bs.id}"}
+                            target="_blank"
+                            rel="noopener"
+                            class="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all hover:scale-[1.02]"
+                            style="background: rgba(123,79,166,0.06); border: 1px solid rgba(123,79,166,0.12);"
                           >
-                            Locked
-                          </span>
-                        </div>
+                            <.icon
+                              name="hero-document-text"
+                              class="w-4 h-4 shrink-0 text-[var(--color-patchouli)]"
+                            />
+                            <div class="min-w-0 flex-1">
+                              <p
+                                class="text-xs font-medium truncate"
+                                style="color: var(--color-wisteria);"
+                              >
+                                {bs.description || bs.filename}
+                              </p>
+                              <p class="text-[10px] truncate" style="color: var(--color-quill);">
+                                {bs.filename}
+                              </p>
+                            </div>
+                            <.icon name="hero-arrow-down-tray w-4 h-4 shrink-0 text-[var(--color-quill)] group-hover:text-[var(--color-patchouli)] transition-colors" />
+                          </a>
+                        <% else %>
+                          <div
+                            class="flex items-center gap-2.5 p-2.5 rounded-lg opacity-70"
+                            style="background: rgba(155,126,200,0.03); border: 1px solid rgba(155,126,200,0.08);"
+                            title={
+                              if locked,
+                                do: "Locked — sign in with an internal account to view",
+                                else: "Restricted"
+                            }
+                          >
+                            <.icon
+                              name="hero-lock-closed"
+                              class="w-4 h-4 shrink-0 text-[var(--color-quill)]"
+                            />
+                            <div class="min-w-0 flex-1">
+                              <p
+                                class="text-xs font-medium truncate"
+                                style="color: var(--color-quill);"
+                              >
+                                {bs.description || bs.filename}
+                              </p>
+                              <p class="text-[10px] truncate" style="color: var(--color-dust);">
+                                {bs.filename}
+                              </p>
+                            </div>
+                            <span
+                              class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                              style="background: rgba(196,65,90,0.12); color: var(--color-ribbon-red);"
+                            >
+                              Locked
+                            </span>
+                          </div>
+                        <% end %>
                       <% end %>
-                    <% end %>
-                  </div>
+                    </div>
                   <% end %>
                 </div>
               <% end %>

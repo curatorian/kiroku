@@ -167,8 +167,25 @@ defmodule Kiroku.Settings do
   @doc "Returns the public contact phone number."
   def brand_contact_phone, do: get("brand_contact_phone") || "08123456789"
 
-  @doc "Returns the URL of the brand logo image, or nil to use the text wordmark."
-  def brand_logo_url, do: get("brand_logo_url")
+  @doc """
+  Returns the URL of the brand logo image, or nil to use the text wordmark /
+  default favicon. Empty/whitespace values are normalized to nil so fallbacks
+  work correctly (an empty string is truthy in Elixir).
+  """
+  def brand_logo_url do
+    case get("brand_logo_url") do
+      nil ->
+        nil
+
+      s ->
+        s
+        |> String.trim()
+        |> case do
+          "" -> nil
+          trimmed -> trimmed
+        end
+    end
+  end
 
   @doc """
   Returns the primary brand color as a CSS hex string (e.g. \"#7B4FA6\").

@@ -2,8 +2,9 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
   use KirokuWeb, :live_view
 
   alias Kiroku.{Repository, Content}
+  alias Kiroku.Repository.Item
 
-  @tabs ~w(status metadata contributors files history)a
+  @tabs ~w(status metadata details contributors files history)a
 
   def render(assigns) do
     ~H"""
@@ -25,14 +26,16 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
 
           <%!-- Quick actions --%>
           <div class="flex items-center gap-2">
-            <.link
-              navigate={~p"/items/#{@item.handle}"}
-              class="text-xs px-3 py-1.5 rounded-lg transition-colors"
-              style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
-              target="_blank"
-            >
-              View Public ↗
-            </.link>
+            <%= if @item.handle do %>
+              <.link
+                navigate={~p"/items/#{@item.handle}"}
+                class="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
+                target="_blank"
+              >
+                View Public ↗
+              </.link>
+            <% end %>
             <.link
               navigate={~p"/admin/items/#{@item.id}/review"}
               class="text-xs px-3 py-1.5 rounded-lg transition-colors"
@@ -64,6 +67,7 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
         <div class="flex flex-wrap gap-2 border-b pb-2" style="border-color: rgba(155,126,200,0.12);">
           <.tab_link item_id={@item.id} tab="status" active={@tab} count={nil} label="Status" />
           <.tab_link item_id={@item.id} tab="metadata" active={@tab} count={nil} label="Metadata" />
+          <.tab_link item_id={@item.id} tab="details" active={@tab} count={nil} label="Details" />
           <.tab_link
             item_id={@item.id}
             tab="contributors"
@@ -93,6 +97,8 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
             <.status_tab item={@item} />
           <% :metadata -> %>
             <.metadata_tab item={@item} form={@metadata_form} collections={@collections} />
+          <% :details -> %>
+            <.details_tab item={@item} />
           <% :contributors -> %>
             <.contributors_tab item={@item} />
           <% :files -> %>
@@ -403,6 +409,218 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
     </div>
     """
   end
+
+  # ── Details tab (type-specific fields) ──────────────────────────────────────
+
+  defp details_tab(assigns) do
+    ~H"""
+    <% fields = type_detail_fields(@item) %>
+    <%= if fields == [] do %>
+      <div class="kiroku-card p-8 text-center">
+        <.icon name="hero-document-magnifying-glass" class="w-10 h-10 mx-auto opacity-30" />
+        <p class="mt-3 text-sm" style="color: var(--color-quill);">
+          No type-specific details recorded for this item.
+        </p>
+      </div>
+    <% else %>
+      <div class="kiroku-card p-5 space-y-4">
+        <h3 class="font-heading text-lg flex items-center gap-2" style="color: var(--color-lilac);">
+          <.icon name="hero-clipboard-document-list" class="w-5 h-5" />
+          {humanize_type(@item.item_type)} Details
+        </h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+          <%= for {label, value} <- fields do %>
+            <div>
+              <p class="text-xs font-medium mb-0.5" style="color: var(--color-quill);">
+                {label}
+              </p>
+              <p class="text-sm" style="color: var(--color-wisteria);">
+                {value}
+              </p>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  # Maps an item to a list of {display_label, formatted_value} pairs for the
+  # type-specific fields that apply to it. Nil/empty values are filtered out.
+  defp type_detail_fields(%Item{} = item) do
+    item
+    |> fields_for_type()
+    |> Enum.map(fn {label, field} -> {label, format_field(item, field)} end)
+    |> Enum.reject(fn {_, v} -> blank?(v) end)
+  end
+
+  defp fields_for_type(%Item{item_type: t})
+       when t in [:skripsi, :tesis, :disertasi, :tugas_akhir] do
+    [
+      {"Research Method", :thesis_type_detail},
+      {"Research Location", :research_location},
+      {"Research Period", :research_period},
+      {"Funding Source", :funding_source},
+      {"Subject Classification", :subject_classification},
+      {"Originality Statement", :originality_statement}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :memorandum_hukum}) do
+    [
+      {"Legal Subject Matter", :legal_subject_matter},
+      {"Analysis Method", :legal_analysis_method},
+      {"Jurisdiction", :jurisdiction},
+      {"Court Level", :court_level},
+      {"Case Reference", :case_reference},
+      {"Legal Issue", :legal_issue}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :studi_kasus}) do
+    [
+      {"Case Study Type", :case_study_type},
+      {"Data Collection Method", :data_collection_method},
+      {"Subject", :case_subject},
+      {"Period", :case_period},
+      {"Location", :case_location},
+      {"Analysis Framework", :analysis_framework},
+      {"Industry Partner", :industry_partner},
+      {"Subject Anonymized", :subject_anonymized},
+      {"Informed Consent", :informed_consent},
+      {"Ethics Approval Number", :ethics_approval_number}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :laporan_proyek}) do
+    [
+      {"Project Type", :project_type},
+      {"Team Role", :team_role},
+      {"Client", :project_client},
+      {"Partner Institution", :partner_institution},
+      {"Period", :project_period},
+      {"Location", :project_location},
+      {"Deliverable", :project_deliverable},
+      {"Budget", :project_budget},
+      {"Problem Statement", :problem_statement},
+      {"Solution / Result", :solution_description},
+      {"Patent Pending", :patent_pending}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :karya_kreatif}) do
+    [
+      {"Creative Work Type", :creative_work_type},
+      {"Copyright Type", :copyright_type},
+      {"Medium / Material", :medium_material},
+      {"Dimensions / Duration", :dimensions_duration},
+      {"Creation Period", :creation_period},
+      {"Artistic Statement", :artistic_statement},
+      {"Exhibition / Performance", :exhibition_performance},
+      {"Exhibition Venue", :exhibition_venue},
+      {"Exhibition Date", :exhibition_date},
+      {"Collection Owner", :collection_owner}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :karya_teknologi}) do
+    [
+      {"Technology Type", :technology_type},
+      {"Implementation Status", :implementation_status},
+      {"License Type", :license_type},
+      {"Testing Method", :testing_method},
+      {"Problem Solved", :problem_solved},
+      {"Target User", :target_user},
+      {"Patent Status", :patent_status},
+      {"HKI Number", :hki_number},
+      {"Industry Tested At", :industry_tested_at}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: t})
+       when t in [:jurnal_nasional, :jurnal_internasional] do
+    [
+      {"Journal Name", :journal_name},
+      {"ISSN", :issn},
+      {"e-ISSN", :eissn},
+      {"DOI", :doi},
+      {"Volume", :volume},
+      {"Issue", :issue},
+      {"Pages", :page_range},
+      {"Publisher", :publisher},
+      {"Sinta Accreditation", :sinta_accreditation},
+      {"Quartile", :quartile},
+      {"Article Type", :article_type},
+      {"Peer Review Type", :peer_review_type},
+      {"Scopus Indexed", :scopus_indexed},
+      {"WoS Indexed", :wos_indexed}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :prosiding}) do
+    [
+      {"Conference Name", :conference_name},
+      {"Conference Location", :conference_location},
+      {"Conference Date", :conference_date},
+      {"DOI", :doi},
+      {"ISBN", :isbn},
+      {"Publisher", :publisher},
+      {"Best Paper Award", :best_paper_award}
+    ]
+  end
+
+  defp fields_for_type(%Item{item_type: :capstone}) do
+    [
+      {"Capstone Theme", :capstone_theme},
+      {"Capstone Partner", :capstone_partner},
+      {"MBKM Scheme", :mbkm_scheme},
+      {"Project Type", :project_type},
+      {"Partner Institution", :partner_institution},
+      {"Period", :project_period},
+      {"Location", :project_location},
+      {"Team Role", :team_role},
+      {"Problem Statement", :problem_statement},
+      {"Solution / Result", :solution_description}
+    ]
+  end
+
+  defp fields_for_type(_), do: []
+
+  defp format_field(item, :page_range) do
+    case {item.page_start, item.page_end} do
+      {nil, nil} -> nil
+      {s, nil} -> "#{s}"
+      {nil, e} -> "#{e}"
+      {s, e} -> "#{s}–#{e}"
+    end
+  end
+
+  defp format_field(item, field) do
+    case Map.get(item, field) do
+      nil -> nil
+      v when is_atom(v) -> humanize_atom(v)
+      v when is_boolean(v) -> if v, do: "Yes", else: "No"
+      v -> to_string(v)
+    end
+  end
+
+  defp humanize_atom(atom) do
+    atom
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp humanize_type(type) do
+    type
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(_), do: false
 
   # ── Contributors tab ─────────────────────────────────────────────────────────
 
@@ -1006,6 +1224,9 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
 
   # External :url bitstreams link directly to their storage_url; local/s3
   # go through the BitstreamController download route.
-  defp bitstream_url(%{storage_type: :url, storage_url: url}, _handle) when is_binary(url), do: url
+  defp bitstream_url(%{storage_type: :url, storage_url: url}, _handle) when is_binary(url),
+    do: url
+
+  defp bitstream_url(bs, nil), do: "/admin/items/#{bs.item_id}/bitstreams/#{bs.id}"
   defp bitstream_url(bs, handle), do: "/items/#{handle}/bitstreams/#{bs.id}"
 end

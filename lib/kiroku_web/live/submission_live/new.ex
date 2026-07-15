@@ -228,59 +228,6 @@ defmodule KirokuWeb.SubmissionLive.New do
     """
   end
 
-  @doc false
-  def upload_field(assigns) do
-    ~H"""
-    <div id={"upload-#{@field_name}"} class="space-y-2">
-      <div class="flex items-baseline gap-2">
-        <label class="text-sm font-medium" style="color: var(--color-wisteria);">{@label}</label>
-        <span class="text-xs" style="color: var(--color-quill);">{@hint}</span>
-      </div>
-      <.live_file_input
-        upload={@upload}
-        class="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-sm file:font-medium"
-        style="color: var(--color-quill);"
-      />
-      <%= for entry <- @upload.entries do %>
-        <div
-          class="flex items-center gap-2 text-xs rounded-lg px-3 py-2"
-          style="background: rgba(155,126,200,0.08); color: var(--color-wisteria);"
-        >
-          <.icon name="hero-document" class="w-4 h-4 shrink-0" />
-          <span class="flex-1 truncate">{entry.client_name}</span>
-          <span style="color: var(--color-quill);">
-            {Float.round(entry.client_size / 1_000_000, 1)} MB
-          </span>
-          <button
-            type="button"
-            phx-click="cancel_upload"
-            phx-value-ref={entry.ref}
-            phx-value-field={@field_name}
-            class="hover:opacity-70 transition-opacity"
-          >
-            <.icon name="hero-x-mark" class="w-4 h-4" />
-          </button>
-        </div>
-        <div
-          class="w-full h-1 rounded-full overflow-hidden"
-          style="background: rgba(155,126,200,0.15);"
-        >
-          <div
-            class="h-1 rounded-full transition-all"
-            style={"width: #{entry.progress}%; background: var(--color-patchouli);"}
-          >
-          </div>
-        </div>
-        <%= for err <- upload_errors(@upload, entry) do %>
-          <p class="text-xs" style="color: var(--color-ribbon-red);">
-            {upload_error_to_string(err)}
-          </p>
-        <% end %>
-      <% end %>
-    </div>
-    """
-  end
-
   @impl true
   def handle_event("type_changed", %{"item" => %{"item_type" => type}}, socket) do
     {:noreply, assign(socket, :selected_type, type)}
@@ -400,11 +347,6 @@ defmodule KirokuWeb.SubmissionLive.New do
   defp bundle_description(:MEDIA, _), do: "Media file"
   defp bundle_description(:SOURCE, _), do: "Source file"
   defp bundle_description(:ADMINISTRATIVE, _), do: "Administrative document"
-
-  defp upload_error_to_string(:too_large), do: "File is too large"
-  defp upload_error_to_string(:not_accepted), do: "File type not accepted"
-  defp upload_error_to_string(:too_many_files), do: "Too many files"
-  defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
 
   defp list_all_collections do
     Repository.list_active_collections()

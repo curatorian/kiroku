@@ -834,6 +834,81 @@ defmodule Kiroku.RepositoryTest do
     end
   end
 
+  describe "handle auto-generation on create_item" do
+    test "uses the student id (NPM) as handle when provided" do
+      item = create_item(%{"student_id" => "210210160150"})
+
+      assert item.handle == "210210160150"
+    end
+
+    test "falls back to a short unique token when no student id is provided" do
+      item = create_item(%{})
+
+      assert item.handle != nil
+      assert String.length(item.handle) == 8
+    end
+
+    test "disambiguates an NPM that collides with an existing handle" do
+      create_item(%{"student_id" => "210210160150"})
+
+      second = create_item(%{"student_id" => "210210160150"})
+
+      assert second.handle != "210210160150"
+      assert String.starts_with?(second.handle, "210210160150-")
+    end
+
+    test "preserves an explicitly provided handle" do
+      item = create_item(%{"handle" => "custom-handle-42"})
+
+      assert item.handle == "custom-handle-42"
+    end
+  end
+
+  describe "create_item_relations/2" do
+    test "creates authors, advisors, examiners, team members and keywords" do
+      item = create_item(%{})
+
+      :ok =
+        Repository.create_item_relations(item, %{
+          authors: [%{"author_name" => "Budi", "affiliation" => "Unpad"}],
+          advisors: [
+            %{"advisor_name" => "Dr. X", "advisor_role" => "main_advisor", "nidn" => "123"}
+          ],
+          examiners: [%{"examiner_name" => "Prof. Y"}],
+          team_members: [%{"member_name" => "Tim", "role" => "developer"}],
+          keywords: [%{keyword: "hukum"}, %{keyword: "pidana"}]
+        })
+
+      reloaded = Repository.get_item_with_preloads!(item.id)
+
+      assert Enum.map(reloaded.item_authors, & &1.author_name) == ["Budi"]
+      assert hd(reloaded.item_advisors).advisor_name == "Dr. X"
+      assert hd(reloaded.item_examiners).examiner_name == "Prof. Y"
+      assert hd(reloaded.item_team_members).member_name == "Tim"
+      assert Enum.map(reloaded.item_keywords, & &1.keyword) == ["hukum", "pidana"]
+    end
+
+    test "silently skips empty/invalid relation rows" do
+      item = create_item(%{})
+
+      :ok =
+        Repository.create_item_relations(item, %{
+          authors: [
+            %{"author_name" => "Keep"},
+            %{"author_name" => "  ", "affiliation" => "blank-name dropped"}
+          ],
+          advisors: [],
+          examiners: [],
+          team_members: [],
+          keywords: []
+        })
+
+      reloaded = Repository.get_item_with_preloads!(item.id)
+
+      assert Enum.map(reloaded.item_authors, & &1.author_name) == ["Keep"]
+    end
+  end
+
   # ── Community & Collection browse visibility ───────────────────────────────
 
   describe "community browse visibility" do

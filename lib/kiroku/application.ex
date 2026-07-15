@@ -22,7 +22,19 @@ defmodule Kiroku.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Kiroku.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    result = Supervisor.start_link(children, opts)
+
+    # Best-effort cache warm-up for role policies. Runs after Repo is started.
+    # If it fails (e.g. migration not yet run), the cache stays empty and
+    # policies are refreshed on the first CRUD operation.
+    try do
+      Kiroku.Access.RolePolicies.refresh_cache()
+    rescue
+      _ -> :ok
+    end
+
+    result
   end
 
   # Tell Phoenix to update the endpoint configuration

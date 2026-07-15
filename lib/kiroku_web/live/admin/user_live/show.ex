@@ -5,8 +5,8 @@ defmodule KirokuWeb.Admin.UserLive.Show do
   alias Kiroku.Accounts.User
   alias Kiroku.Access.{RbacPolicies, RbacPolicy}
 
-  @user_types_all ~w(submitter reviewer admin superadmin)
-  @user_types_limited ~w(submitter reviewer)
+  @user_types_all ~w(submitter internal reviewer admin superadmin)
+  @user_types_limited ~w(submitter internal reviewer)
 
   # ── Render ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,15 @@ defmodule KirokuWeb.Admin.UserLive.Show do
                   style="background: rgba(155,126,200,0.12); color: var(--color-wisteria); border: 1px solid rgba(155,126,200,0.2);"
                 >
                   Set Password
+                </.link>
+              <% end %>
+              <%= if @current_user.user_type == :superadmin do %>
+                <.link
+                  navigate={~p"/admin/users/#{@user.id}/role-management"}
+                  class="px-3 py-2 rounded-lg text-xs font-medium"
+                  style="background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25);"
+                >
+                  Area Access
                 </.link>
               <% end %>
             </div>
@@ -595,6 +604,7 @@ defmodule KirokuWeb.Admin.UserLive.Show do
   defp role_badge_class(:superadmin), do: "submitted"
   defp role_badge_class(:admin), do: "under-review"
   defp role_badge_class(:reviewer), do: "embargoed"
+  defp role_badge_class(:internal), do: "published"
   defp role_badge_class(:submitter), do: "draft"
   defp role_badge_class(_), do: "draft"
 end

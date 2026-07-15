@@ -4,8 +4,9 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   import KirokuWeb.ItemForm
   import KirokuWeb.KirokuComponents
 
-  alias Kiroku.Repository
+  alias Kiroku.{Content, Repository}
   alias Kiroku.Repository.Item
+  alias Kiroku.Storage.Uploader
 
   @statuses ~w(submitted published draft embargoed withdrawn)
   @item_types ~w(skripsi tesis disertasi tugas_akhir memorandum_hukum studi_kasus laporan_proyek karya_kreatif karya_teknologi jurnal_nasional jurnal_internasional prosiding capstone)
@@ -306,7 +307,20 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
           <%!-- 4. Type-specific detail fields --%>
           <.type_section type={@selected_type} form={@form} />
 
-          <%!-- 5. Admin: initial status & access --%>
+          <%!-- 5. Relations: authors, advisors, examiners, team, keywords --%>
+          <.relations_section
+            author_rows={@author_rows}
+            advisor_rows={@advisor_rows}
+            examiner_rows={@examiner_rows}
+            team_rows={@team_rows}
+            show_team={team_type?(@selected_type)}
+            keywords={@keywords}
+          />
+
+          <%!-- 6. File uploads — fields shown follow the selected jenis karya --%>
+          <.files_section uploads={@uploads} type={@selected_type} />
+
+          <%!-- 7. Admin: initial status & access --%>
           <div id="admin-settings-section" class="kiroku-card p-6 space-y-4">
             <div
               class="flex items-center gap-3 pb-4 mb-1 border-b"
@@ -346,9 +360,14 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
                   <option value="published" selected={to_string(@form[:status].value) == "published"}>
                     Published
                   </option>
+                  <option value="embargoed" selected={to_string(@form[:status].value) == "embargoed"}>
+                    Embargoed
+                  </option>
                 </select>
                 <p class="text-xs mt-1" style="color: var(--color-quill);">
-                  Pilih <em>Published</em> untuk langsung menayangkan.
+                  Pilih <em>Published</em>
+                  untuk langsung menayangkan, atau <em>Embargoed</em>
+                  lalu isi tanggal buka embargo.
                 </p>
               </div>
               <div>
@@ -364,25 +383,31 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
                     Open Access
                   </option>
                   <option
+                    value="internal"
+                    selected={to_string(@form[:access_level].value) == "internal"}
+                  >
+                    Internal (Login Kampus)
+                  </option>
+                  <option
                     value="restricted"
                     selected={to_string(@form[:access_level].value) == "restricted"}
                   >
-                    Terbatas (Login)
+                    Terbatas (Staf)
                   </option>
                   <option
-                    value="embargoed"
-                    selected={to_string(@form[:access_level].value) == "embargoed"}
+                    value="closed"
+                    selected={to_string(@form[:access_level].value) == "closed"}
                   >
-                    Embargo
+                    Tertutup
                   </option>
                 </select>
               </div>
             </div>
 
             <.input
-              field={@form[:embargo_lift_date]}
+              field={@form[:embargo_open_date]}
               type="date"
-              label="Tanggal Berakhir Embargo (jika berlaku)"
+              label="Tanggal Buka Embargo (jika status Embargoed)"
             />
           </div>
 
@@ -424,8 +449,58 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
      |> assign(:collections, collections)
      |> assign(:selected_type, "skripsi")
      |> assign(:form, nil)
+     |> assign(:keywords, "")
+     |> assign_relation_rows([])
      |> assign(:search_form, to_form(%{}))
      |> assign(:filter_form, to_form(%{}))
+     |> allow_upload(:cover,
+       accept: ~w(.jpg .jpeg .png),
+       max_entries: 1,
+       max_file_size: 5_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:abstract,
+       accept: ~w(.pdf),
+       max_entries: 1,
+       max_file_size: 20_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:fulltext,
+       accept: ~w(.pdf),
+       max_entries: 1,
+       max_file_size: 100_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:chapters,
+       accept: ~w(.pdf),
+       max_entries: 6,
+       max_file_size: 50_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:supplemental,
+       accept: ~w(.pdf .docx .xlsx .csv .zip .pptx),
+       max_entries: 10,
+       max_file_size: 50_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:media,
+       accept: ~w(.mp3 .mp4 .mov .jpg .jpeg .png .tiff .zip),
+       max_entries: 5,
+       max_file_size: 500_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:source,
+       accept: ~w(.zip .tar .gz .ipynb .pdf),
+       max_entries: 3,
+       max_file_size: 200_000_000,
+       auto_upload: true
+     )
+     |> allow_upload(:administrative,
+       accept: ~w(.pdf),
+       max_entries: 5,
+       max_file_size: 20_000_000,
+       auto_upload: true
+     )
      |> stream(:items, [])}
   end
 
@@ -463,13 +538,20 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
     socket
     |> assign(:page_title, "New Item")
     |> assign(:selected_type, "skripsi")
+    |> assign(:keywords, "")
+    |> assign_relation_rows([])
     |> assign(:form, to_form(changeset, as: :item))
+    |> cancel_unused_uploads([])
   end
 
   # ── Events ─────────────────────────────────────────────────────────────────
 
   def handle_event("type_changed", %{"item" => %{"item_type" => type}}, socket) do
-    {:noreply, assign(socket, :selected_type, type)}
+    # Drop any staged files whose bundle no longer applies to the new type so
+    # what the user sees is exactly what will be submitted.
+    keep = KirokuWeb.ItemForm.bundles_for_type(type)
+
+    {:noreply, socket |> assign(:selected_type, type) |> cancel_unused_uploads(keep)}
   end
 
   def handle_event("search", %{"search" => search}, socket) do
@@ -496,7 +578,7 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
     {:noreply, push_patch(socket, to: ~p"/admin/items")}
   end
 
-  def handle_event("validate", %{"item" => params}, socket) do
+  def handle_event("validate", %{"item" => params} = all, socket) do
     changeset =
       %Item{}
       |> Item.changeset(params)
@@ -505,15 +587,45 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
     {:noreply,
      socket
      |> assign(:selected_type, params["item_type"] || socket.assigns.selected_type)
-     |> assign(:form, to_form(changeset, as: :item))}
+     |> assign(:form, to_form(changeset, as: :item))
+     |> assign(:keywords, Map.get(all, "keywords", ""))
+     |> sync_rows(:author_rows, all, "authors", [:author_name, :affiliation, :email, :orcid])
+     |> sync_rows(
+       :advisor_rows,
+       all,
+       "advisors",
+       [:advisor_name, :advisor_role, :nidn, :affiliation]
+     )
+     |> sync_rows(:examiner_rows, all, "examiners", [:examiner_name, :nidn, :affiliation])
+     |> sync_rows(:team_rows, all, "team_members", [
+       :member_name,
+       :role,
+       :student_id,
+       :affiliation
+     ])}
   end
 
-  def handle_event("save", %{"item" => params}, socket) do
+  def handle_event("save", %{"item" => item_params} = params, socket) do
     user = socket.assigns.current_user
-    attrs = Map.put(params, "submitter_id", user.id)
+
+    attrs =
+      item_params
+      |> Map.put("submitter_id", user.id)
+      |> Map.put("actor", user)
 
     case Repository.create_item(attrs) do
-      {:ok, _item} ->
+      {:ok, item} ->
+        relations = %{
+          authors: parse_relation_rows(params["authors"], "author_name"),
+          advisors: parse_relation_rows(params["advisors"], "advisor_name"),
+          examiners: parse_relation_rows(params["examiners"], "examiner_name"),
+          team_members: parse_relation_rows(params["team_members"], "member_name"),
+          keywords: parse_keywords(params["keywords"])
+        }
+
+        Repository.create_item_relations(item, relations)
+        socket = consume_and_create_bitstreams(socket, item)
+
         {:noreply,
          socket
          |> put_flash(:info, "Item created successfully.")
@@ -524,12 +636,220 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
     end
   end
 
+  # ── Relation row add/remove events ──────────────────────────────────────────
+
+  def handle_event("add_author", _, socket),
+    do:
+      {:noreply, assign(socket, :author_rows, socket.assigns.author_rows ++ [empty_row(:author)])}
+
+  def handle_event("add_advisor", _, socket),
+    do:
+      {:noreply,
+       assign(socket, :advisor_rows, socket.assigns.advisor_rows ++ [empty_row(:advisor)])}
+
+  def handle_event("add_examiner", _, socket),
+    do:
+      {:noreply,
+       assign(socket, :examiner_rows, socket.assigns.examiner_rows ++ [empty_row(:examiner)])}
+
+  def handle_event("add_team", _, socket),
+    do: {:noreply, assign(socket, :team_rows, socket.assigns.team_rows ++ [empty_row(:team)])}
+
+  def handle_event("remove_author", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, :author_rows, remove_row(socket.assigns.author_rows, id))}
+
+  def handle_event("remove_advisor", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, :advisor_rows, remove_row(socket.assigns.advisor_rows, id))}
+
+  def handle_event("remove_examiner", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, :examiner_rows, remove_row(socket.assigns.examiner_rows, id))}
+
+  def handle_event("remove_team", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, :team_rows, remove_row(socket.assigns.team_rows, id))}
+
+  # ── Upload events ───────────────────────────────────────────────────────────
+
+  def handle_event("cancel_upload", %{"ref" => ref, "field" => field}, socket) do
+    field_atom = String.to_existing_atom(field)
+    {:noreply, cancel_upload(socket, field_atom, ref)}
+  end
+
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp list_all_collections do
     Repository.list_collections()
     |> Enum.filter(& &1.is_active)
   end
+
+  defp team_type?(type) when type in ~w(capstone laporan_proyek karya_teknologi), do: true
+  defp team_type?(_), do: false
+
+  # ── Relation row state helpers ──────────────────────────────────────────────
+
+  defp assign_relation_rows(socket, rows) do
+    socket
+    |> assign(:author_rows, rows)
+    |> assign(:advisor_rows, rows)
+    |> assign(:examiner_rows, rows)
+    |> assign(:team_rows, rows)
+  end
+
+  defp remove_row(rows, id),
+    do: Enum.reject(rows, fn row -> to_string(row.id) == to_string(id) end)
+
+  defp empty_row(:author) do
+    %{id: row_id("a"), author_name: "", affiliation: "", email: "", orcid: ""}
+  end
+
+  defp empty_row(:advisor) do
+    %{id: row_id("d"), advisor_name: "", advisor_role: "main_advisor", nidn: "", affiliation: ""}
+  end
+
+  defp empty_row(:examiner) do
+    %{id: row_id("e"), examiner_name: "", nidn: "", affiliation: ""}
+  end
+
+  defp empty_row(:team) do
+    %{id: row_id("t"), member_name: "", role: "", student_id: "", affiliation: ""}
+  end
+
+  defp row_id(prefix), do: "#{prefix}#{System.unique_integer([:positive])}"
+
+  # Reconciles the row assigns with the latest form params keyed by row id, so
+  # values typed into the dynamic rows survive phx-change re-renders. `incoming`
+  # is the `%{row_id => %{"field" => value}}` map Phoenix parses from
+  # `authors[row_id][field]` style names.
+  defp sync_rows(socket, assign_key, params, param_key, fields) do
+    incoming = Map.get(params, param_key) || %{}
+
+    updated =
+      Enum.map(socket.assigns[assign_key], fn row ->
+        inc = Map.get(incoming, to_string(row.id), %{})
+
+        Enum.reduce(fields, row, fn field, acc ->
+          Map.put(acc, field, Map.get(inc, Atom.to_string(field), Map.get(acc, field)))
+        end)
+      end)
+
+    assign(socket, assign_key, updated)
+  end
+
+  defp parse_relation_rows(nil, _name_field), do: []
+
+  defp parse_relation_rows(rows, name_field) when is_map(rows) do
+    rows
+    |> Map.values()
+    |> Enum.reject(fn row -> blank?(Map.get(row, name_field)) end)
+  end
+
+  defp parse_relation_rows(rows, name_field) when is_list(rows) do
+    Enum.reject(rows, fn row -> blank?(Map.get(row, name_field)) end)
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(s) when is_binary(s), do: String.trim(s) == ""
+  defp blank?(_), do: false
+
+  defp parse_keywords(nil), do: []
+
+  defp parse_keywords(text) when is_binary(text) do
+    text
+    |> String.split(~r/[\n,]/, trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&%{keyword: &1})
+  end
+
+  # ── Bitstream upload consumption ────────────────────────────────────────────
+
+  # Cancels staged entries for upload fields not in `keep`, so switching jenis
+  # karya never leaves orphan files that the form no longer displays.
+  defp cancel_unused_uploads(socket, keep) do
+    unused =
+      [:cover, :abstract, :fulltext, :chapters, :supplemental, :media, :source, :administrative] --
+        keep
+
+    Enum.reduce(unused, socket, fn field, acc ->
+      Enum.reduce(acc.assigns.uploads[field].entries, acc, fn entry, inner ->
+        cancel_upload(inner, field, entry.ref)
+      end)
+    end)
+  end
+
+  defp consume_and_create_bitstreams(socket, item) do
+    bucket = Kiroku.Settings.storage_bucket()
+    # Only consume bundles that apply to this item's type (mirrors the UI).
+    keep = KirokuWeb.ItemForm.bundles_for_type(to_string(item.item_type))
+
+    upload_specs =
+      [
+        {:cover, :THUMBNAIL, 1},
+        {:abstract, :ORIGINAL, 1},
+        {:fulltext, :ORIGINAL, 2},
+        {:chapters, :CHAPTER, 1},
+        {:supplemental, :SUPPLEMENTAL, 1},
+        {:media, :MEDIA, 1},
+        {:source, :SOURCE, 1},
+        {:administrative, :ADMINISTRATIVE, 1}
+      ]
+      |> Enum.filter(fn {field, _bundle, _seq} -> field in keep end)
+
+    Enum.reduce(upload_specs, socket, fn {field, bundle, start_seq}, socket ->
+      # uploaded_entries/2 returns {done, in_progress}. Only consume when
+      # every entry for this field has finished uploading — otherwise
+      # consume_uploaded_entries/3 raises.
+      {done, in_progress} = uploaded_entries(socket, field)
+
+      if done != [] and in_progress == [] do
+        consume_uploaded_entries(socket, field, fn %{path: tmp_path}, entry ->
+          seq_index = Enum.find_index(done, &(&1.ref == entry.ref)) || 0
+          seq = start_seq + seq_index
+
+          content = File.read!(tmp_path)
+          key = Uploader.storage_key(item.id, bundle, entry.client_name)
+
+          result =
+            case Uploader.upload(key, content, mime_type: entry.client_type) do
+              {:ok, %{checksum: checksum}} ->
+                Content.create_bitstream(%{
+                  item_id: item.id,
+                  filename: entry.client_name,
+                  bundle_name: bundle,
+                  sequence: seq,
+                  description: bundle_description(bundle, seq),
+                  mime_type: entry.client_type,
+                  file_size: entry.client_size,
+                  storage_type: Kiroku.Settings.storage_adapter(),
+                  storage_path: key,
+                  storage_bucket: bucket,
+                  checksum: checksum,
+                  checksum_algorithm: "MD5",
+                  access_level: :inherit
+                })
+
+              {:error, reason} ->
+                require Logger
+                Logger.error("Upload failed for #{entry.client_name}: #{inspect(reason)}")
+                {:error, reason}
+            end
+
+          {:ok, result}
+        end)
+      end
+
+      socket
+    end)
+  end
+
+  defp bundle_description(:THUMBNAIL, _), do: "Cover image"
+  defp bundle_description(:ORIGINAL, 1), do: "Abstract"
+  defp bundle_description(:ORIGINAL, _), do: "Full text"
+  defp bundle_description(:CHAPTER, seq), do: "Chapter #{seq}"
+  defp bundle_description(:SUPPLEMENTAL, _), do: "Supplemental document"
+  defp bundle_description(:MEDIA, _), do: "Media file"
+  defp bundle_description(:SOURCE, _), do: "Source file"
+  defp bundle_description(:ADMINISTRATIVE, _), do: "Administrative document"
 
   defp maybe_put_status(filters, nil), do: filters
   defp maybe_put_status(filters, status), do: Map.put(filters, :status, status)
@@ -550,7 +870,9 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
 
     %{}
     |> then(fn m -> if search not in [nil, ""], do: Map.put(m, "search", search), else: m end)
-    |> then(fn m -> if item_type not in [nil, ""], do: Map.put(m, "item_type", item_type), else: m end)
+    |> then(fn m ->
+      if item_type not in [nil, ""], do: Map.put(m, "item_type", item_type), else: m
+    end)
     |> then(fn m -> if status not in [nil, ""], do: Map.put(m, "status", status), else: m end)
   end
 end

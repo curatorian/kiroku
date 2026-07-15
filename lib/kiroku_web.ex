@@ -17,7 +17,7 @@ defmodule KirokuWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico)
+  def static_paths, do: ~w(assets fonts images favicon.ico kiroku.ico)
 
   def router do
     quote do
