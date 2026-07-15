@@ -85,6 +85,13 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Register custom MIME types so Phoenix's upload validators accept the
+# corresponding file extensions. Jupyter notebooks (.ipynb) are accepted by the
+# item file-upload sections; without this, allow_upload/3 raises at mount time.
+config :mime, :types, %{
+  "application/x-ipynb+json" => ["ipynb"]
+}
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

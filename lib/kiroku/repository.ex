@@ -369,7 +369,9 @@ defmodule Kiroku.Repository do
     base =
       if search && search != "" do
         pattern = "%#{String.downcase(search)}%"
-        from c in base, where: ilike(fragment("lower(?)", c.name), ^pattern) or ilike(c.handle, ^pattern)
+
+        from c in base,
+          where: ilike(fragment("lower(?)", c.name), ^pattern) or ilike(c.handle, ^pattern)
       else
         base
       end
@@ -1354,6 +1356,7 @@ defmodule Kiroku.Repository do
   def create_item(attrs) do
     attrs
     |> maybe_apply_collection_default_access()
+    |> maybe_generate_handle()
     |> then(fn final_attrs ->
       %Item{}
       |> Item.changeset(final_attrs)
@@ -1361,6 +1364,57 @@ defmodule Kiroku.Repository do
       |> tap_version("created", attrs[:actor] || attrs["actor"])
     end)
   end
+
+  # Items created via the UI (admin / submitter) arrive without a handle, which
+  # breaks public URLs, DOI minting, OAI, SEO and the /handle resolver. When no
+  # handle is supplied we derive one: the student id (NPM) when present, falling
+  # back to a short unique token. Uniqueness is checked against existing rows so
+  # collisions with imported legacy items surface as a handled suffix instead of
+  # a constraint violation.
+  defp maybe_generate_handle(attrs) do
+    if present_handle?(attrs[:handle]) or present_handle?(attrs["handle"]) do
+      attrs
+    else
+      Map.put(attrs, handle_key(attrs), generate_unique_handle(attrs))
+    end
+  end
+
+  defp present_handle?(nil), do: false
+  defp present_handle?(""), do: false
+  defp present_handle?(s) when is_binary(s), do: String.trim(s) != ""
+  defp present_handle?(_), do: false
+
+  defp handle_key(attrs) do
+    has_string_key? =
+      Enum.any?(attrs, fn
+        {k, _} when is_binary(k) -> true
+        _ -> false
+      end)
+
+    if has_string_key?, do: "handle", else: :handle
+  end
+
+  defp generate_unique_handle(attrs) do
+    case attrs[:student_id] || attrs["student_id"] do
+      nil ->
+        short_token()
+
+      npm ->
+        trimmed = String.trim(npm)
+
+        cond do
+          trimmed == "" -> short_token()
+          handle_available?(trimmed) -> trimmed
+          true -> "#{trimmed}-#{short_token()}"
+        end
+    end
+  end
+
+  defp handle_available?(handle) do
+    Repo.one(from i in Item, where: i.handle == ^handle, select: count(i.id)) == 0
+  end
+
+  defp short_token, do: String.slice(Ecto.UUID.generate(), 0, 8)
 
   defp tap_version({:ok, %Item{}} = result, action, actor) do
     case result do
@@ -1615,6 +1669,29 @@ defmodule Kiroku.Repository do
       |> ItemKeyword.changeset(Map.merge(attrs, %{item_id: item_id, position: idx}))
       |> Repo.insert()
     end)
+  end
+
+  @doc """
+  Creates the related rows (authors, advisors, examiners, team members,
+  keywords) for an item from parsed form params. Each relation list holds
+  string-keyled maps as produced by the form; rows whose required name field is
+  blank are skipped silently. Keywords is a list of `%{keyword: "..."}` maps.
+  """
+  def create_item_relations(%Item{id: item_id}, relations) do
+    authors = Map.get(relations, :authors, [])
+    advisors = Map.get(relations, :advisors, [])
+    examiners = Map.get(relations, :examiners, [])
+    team_members = Map.get(relations, :team_members, [])
+    keywords = Map.get(relations, :keywords, [])
+
+    Enum.each(authors, &create_item_author(Map.put(&1, "item_id", item_id)))
+    Enum.each(advisors, &create_item_advisor(Map.put(&1, "item_id", item_id)))
+    Enum.each(examiners, &create_item_examiner(Map.put(&1, "item_id", item_id)))
+    Enum.each(team_members, &create_item_team_member(Map.put(&1, "item_id", item_id)))
+
+    if keywords != [], do: upsert_keywords_for_item(item_id, keywords)
+
+    :ok
   end
 
   # ── Advisors, Authors, Examiners, Team Members ───────────────────────────────

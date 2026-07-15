@@ -158,6 +158,10 @@ defmodule KirokuWeb.Router do
   scope "/admin", KirokuWeb.Admin do
     pipe_through [:browser, :require_authenticated_user]
 
+    # Logo upload — plain controller POST (no websocket dependency)
+    post "/settings/logo", SettingsLogoController, :upload
+    delete "/settings/logo", SettingsLogoController, :delete
+
     live_session :admin,
       on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
       # Dashboard
@@ -187,8 +191,12 @@ defmodule KirokuWeb.Router do
       live "/users/:id", UserLive.Show, :show
       live "/users/:id/edit", UserLive.Show, :edit
       live "/users/:id/password", UserLive.Show, :password
+      live "/users/:id/role-management", UserLive.RoleManagement, :index
       live "/users/:id/policies/new", UserLive.Show, :new_policy
       live "/users/:id/policies/:policy_id/edit", UserLive.Show, :edit_policy
+
+      # Role-scoped policy management
+      live "/role-policy", RolePolicyLive, :index
 
       # Storage settings
       live "/settings", SettingsLive, :index

@@ -19,4 +19,28 @@ defmodule Kiroku.SettingsTest do
       refute Settings.allow_user_submit?()
     end
   end
+
+  describe "brand_logo_url/0" do
+    test "returns nil when unset (so favicon/wordmark fallbacks apply)" do
+      refute Settings.brand_logo_url()
+    end
+
+    test "returns the URL when set" do
+      Settings.put("brand_logo_url", "/uploads/brand/logo.png")
+      assert Settings.brand_logo_url() == "/uploads/brand/logo.png"
+    end
+
+    test "normalizes an empty string to nil" do
+      Settings.put("brand_logo_url", "/uploads/brand/logo.png")
+      Settings.put("brand_logo_url", "")
+
+      refute Settings.brand_logo_url()
+    end
+
+    test "normalizes a whitespace-only string to nil" do
+      Settings.put("brand_logo_url", "   ")
+
+      refute Settings.brand_logo_url()
+    end
+  end
 end

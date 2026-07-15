@@ -158,7 +158,11 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
                   <div class="flex-1 min-w-0">
                     <span
                       class="text-sm font-medium truncate"
-                      style={if depth == 0, do: "color: var(--color-lilac);", else: "color: var(--color-wisteria);"}
+                      style={
+                        if depth == 0,
+                          do: "color: var(--color-lilac);",
+                          else: "color: var(--color-wisteria);"
+                      }
                     >
                       {community.name}
                     </span>
@@ -349,7 +353,10 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     {:noreply,
      socket
      |> assign(:collapsed, collapsed)
-     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
+     |> assign(
+       :tree_rows,
+       build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids)
+     )}
   end
 
   def handle_event("expand_all", _params, socket) do
@@ -358,20 +365,26 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
     {:noreply,
      socket
      |> assign(:collapsed, collapsed)
-     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
+     |> assign(
+       :tree_rows,
+       build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids)
+     )}
   end
 
   def handle_event("collapse_all", _params, socket) do
     collapsed =
       socket.assigns.communities
-      |> Enum.filter(&(MapSet.member?(socket.assigns.parent_ids, &1.id)))
+      |> Enum.filter(&MapSet.member?(socket.assigns.parent_ids, &1.id))
       |> Enum.map(& &1.id)
       |> MapSet.new()
 
     {:noreply,
      socket
      |> assign(:collapsed, collapsed)
-     |> assign(:tree_rows, build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids))}
+     |> assign(
+       :tree_rows,
+       build_tree_rows(socket.assigns.communities, collapsed, socket.assigns.parent_ids)
+     )}
   end
 
   # Treat an empty/select-prompt parent id as "no parent".
@@ -425,7 +438,14 @@ defmodule KirokuWeb.Admin.CommunityLive.Index do
             else: hidden_ancestors
 
         child_rows =
-          build_rows_recursive(by_parent, community.id, depth + 1, collapsed, parent_ids, new_hidden)
+          build_rows_recursive(
+            by_parent,
+            community.id,
+            depth + 1,
+            collapsed,
+            parent_ids,
+            new_hidden
+          )
 
         [row | child_rows]
       end

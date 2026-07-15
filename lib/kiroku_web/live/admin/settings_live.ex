@@ -2,6 +2,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
   use KirokuWeb, :live_view
 
   alias Kiroku.Settings
+  alias Kiroku.Storage.Uploader
 
   @impl true
   def mount(_params, _session, socket) do
@@ -26,6 +27,12 @@ defmodule KirokuWeb.Admin.SettingsLive do
       |> assign(:allow_submit, allow_submit)
       |> assign(:allow_registration, allow_reg)
       |> assign(:locked_descriptions, locked_descs)
+      |> assign(:brand_logo_url, Settings.brand_logo_url())
+      |> allow_upload(:logo,
+        accept: ~w(.png .jpg .jpeg .svg .ico .webp),
+        max_entries: 1,
+        max_file_size: 2_000_000
+      )
 
     {:ok, socket}
   end
@@ -245,13 +252,6 @@ defmodule KirokuWeb.Admin.SettingsLive do
             </div>
 
             <.input
-              field={@brand_form[:logo_url]}
-              type="text"
-              label="Logo URL"
-              placeholder="https://… (leave blank to use the text wordmark)"
-            />
-
-            <.input
               field={@brand_form[:handle_prefix]}
               type="text"
               label="Handle Prefix"
@@ -305,6 +305,122 @@ defmodule KirokuWeb.Admin.SettingsLive do
               </button>
             </div>
           </.form>
+
+          <%!-- Logo upload — managed separately from the brand text form --%>
+          <div
+            id="logo-upload"
+            class="space-y-3 pt-2 border-t"
+            style="border-color: rgba(155,126,200,0.15);"
+          >
+            <div>
+              <label class="block text-sm font-medium mb-1" style="color: var(--color-wisteria);">
+                Logo
+              </label>
+              <p class="text-xs" style="color: var(--color-quill);">
+                Upload a logo (PNG/JPG/SVG/ICO/WebP, maks. 2&nbsp;MB). Used as the site logo and the
+                browser favicon. Leave unset to fall back to the default <code>kiroku.ico</code>.
+              </p>
+            </div>
+
+            <%= if @brand_logo_url do %>
+              <div
+                class="flex items-center gap-3 rounded-xl p-3"
+                style="background: color-mix(in srgb, var(--color-patchouli) 7%, transparent); border: 1px solid color-mix(in srgb, var(--color-lavender) 14%, transparent);"
+              >
+                <span
+                  class="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+                  style="background: white;"
+                >
+                  <img src={@brand_logo_url} alt="Logo" class="max-h-10 max-w-full object-contain" />
+                </span>
+                <span
+                  class="text-xs truncate flex-1 min-w-0 font-mono"
+                  style="color: var(--color-quill);"
+                  title={@brand_logo_url}
+                >
+                  {@brand_logo_url}
+                </span>
+                <button
+                  type="button"
+                  phx-click="remove_logo"
+                  data-confirm="Remove the current logo and fall back to the default?"
+                  class="text-xs px-3 py-1.5 rounded-lg transition-colors hover:bg-white/5"
+                  style="color: var(--color-quill);"
+                >
+                  <.icon name="hero-trash" class="w-4 h-4 inline -mt-0.5" /> Remove
+                </button>
+              </div>
+            <% end %>
+
+            <%!-- Uploads are most reliable (and testable) inside a form; the
+                 phx-submit consumes the staged file and stores the logo. --%>
+            <form id="logo-form" phx-submit="upload_logo" class="block">
+              <div
+                class="upload-dropzone group relative flex flex-col items-center justify-center gap-2 px-6 py-6 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200"
+                phx-drop-target={@uploads.logo.ref}
+              >
+                <.live_file_input
+                  upload={@uploads.logo}
+                  class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <div class="flex flex-col items-center gap-1.5 text-center pointer-events-none">
+                  <span
+                    class="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110"
+                    style="background: color-mix(in srgb, var(--color-patchouli) 16%, transparent); color: var(--color-lavender);"
+                  >
+                    <.icon name="hero-photo" class="w-5 h-5" />
+                  </span>
+                  <p class="text-sm font-medium" style="color: var(--color-wisteria);">
+                    Pilih atau seret logo ke sini
+                  </p>
+                  <p class="text-xs" style="color: var(--color-quill);">
+                    Klik untuk memilih berkas
+                  </p>
+                </div>
+              </div>
+
+              <%= for entry <- @uploads.logo.entries do %>
+                <div
+                  class="flex items-center gap-2 text-xs rounded-lg px-3 py-2"
+                  style="background: color-mix(in srgb, var(--color-patchouli) 7%, transparent); color: var(--color-wisteria);"
+                >
+                  <.icon name="hero-document" class="w-4 h-4 shrink-0" />
+                  <span class="flex-1 truncate">{entry.client_name}</span>
+                  <span style="color: var(--color-quill);">
+                    {Float.round(entry.client_size / 1_000_000, 2)} MB
+                  </span>
+                  <button
+                    type="button"
+                    phx-click="cancel_logo_upload"
+                    phx-value-ref={entry.ref}
+                    class="hover:opacity-70 transition-opacity"
+                  >
+                    <.icon name="hero-x-mark" class="w-4 h-4" />
+                  </button>
+                </div>
+                <%= for err <- upload_errors(@uploads.logo, entry) do %>
+                  <p class="text-xs" style="color: var(--color-ribbon-red);">
+                    {upload_error_to_string(err)}
+                  </p>
+                <% end %>
+              <% end %>
+              <%= for err <- upload_errors(@uploads.logo) do %>
+                <p class="text-xs" style="color: var(--color-ribbon-red);">
+                  {upload_error_to_string(err)}
+                </p>
+              <% end %>
+
+              <div :if={@uploads.logo.entries != []} class="pt-1">
+                <button
+                  type="submit"
+                  class="inline-flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-sm transition-all duration-150 hover:brightness-110 active:scale-95"
+                  style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
+                >
+                  <.icon name="hero-arrow-up-tray" class="size-4" /> Upload Logo
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
 
         <%!-- Embargo scheduler settings --%>
@@ -582,13 +698,14 @@ defmodule KirokuWeb.Admin.SettingsLive do
 
   @impl true
   def handle_event("save_brand", %{"brand" => params}, socket) do
+    # Note: logo is managed via the separate upload_logo / remove_logo events,
+    # so it must NOT be part of brand_fields — otherwise saving would wipe it.
     brand_fields = [
       {"brand_name", params["name"]},
       {"brand_tagline", params["tagline"]},
       {"brand_description", params["description"]},
       {"brand_contact_email", params["contact_email"]},
       {"brand_contact_phone", params["contact_phone"]},
-      {"brand_logo_url", params["logo_url"]},
       {"handle_prefix", params["handle_prefix"]}
     ]
 
@@ -614,6 +731,58 @@ defmodule KirokuWeb.Admin.SettingsLive do
      socket
      |> assign(:brand_form, to_form(brand_form_params(brand), as: :brand))
      |> put_flash(:info, "Brand settings saved.")}
+  end
+
+  # ── Logo upload / removal ───────────────────────────────────────────────────
+
+  @impl true
+  def handle_event("upload_logo", _params, socket) do
+    bucket = Settings.storage_bucket()
+
+    result =
+      consume_uploaded_entries(socket, :logo, fn %{path: tmp_path}, entry ->
+        ext = entry.client_name |> Path.extname() |> String.downcase()
+        key = "brand/logo#{ext}"
+        content = File.read!(tmp_path)
+
+        case Uploader.upload(key, content, mime_type: entry.client_type) do
+          {:ok, _} ->
+            {:ok, Uploader.presign_url(bucket, key)}
+
+          {:error, reason} ->
+            require Logger
+            Logger.error("Logo upload failed: #{inspect(reason)}")
+            {:error, reason}
+        end
+      end)
+
+    case result do
+      [url | _] when is_binary(url) ->
+        Settings.put("brand_logo_url", url)
+
+        {:noreply,
+         socket
+         |> assign(:brand_logo_url, url)
+         |> put_flash(:info, "Logo uploaded. It is now used as the site logo and favicon.")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Logo upload failed. Please try again.")}
+    end
+  end
+
+  @impl true
+  def handle_event("remove_logo", _params, socket) do
+    Settings.put("brand_logo_url", "")
+
+    {:noreply,
+     socket
+     |> assign(:brand_logo_url, nil)
+     |> put_flash(:info, "Logo removed. Falling back to the default kiroku.ico.")}
+  end
+
+  @impl true
+  def handle_event("cancel_logo_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :logo, ref)}
   end
 
   @impl true
@@ -802,7 +971,6 @@ defmodule KirokuWeb.Admin.SettingsLive do
       "description" => brand.description || "",
       "contact_email" => brand.contact_email || "",
       "contact_phone" => brand.contact_phone || "",
-      "logo_url" => brand.logo_url || "",
       "handle_prefix" => Settings.handle_prefix(),
       "primary_color" => brand.primary_color || "#7B4FA6"
     }
@@ -824,4 +992,9 @@ defmodule KirokuWeb.Admin.SettingsLive do
       "password" => ""
     }
   end
+
+  defp upload_error_to_string(:too_large), do: "File is too large (max 2 MB)"
+  defp upload_error_to_string(:not_accepted), do: "File type not accepted"
+  defp upload_error_to_string(:too_many_files), do: "Too many files"
+  defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
 end

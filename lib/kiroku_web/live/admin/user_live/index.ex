@@ -7,8 +7,8 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   alias Kiroku.Accounts.User
   alias Kiroku.Pagination
 
-  @user_types_all ~w(submitter reviewer admin superadmin)
-  @user_types_admin ~w(submitter reviewer)
+  @user_types_all ~w(submitter internal reviewer admin superadmin)
+  @user_types_admin ~w(submitter internal reviewer)
 
   # ── Render ──────────────────────────────────────────────────────────────────
 
@@ -338,6 +338,7 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   defp role_badge_class(:superadmin), do: "submitted"
   defp role_badge_class(:admin), do: "under-review"
   defp role_badge_class(:reviewer), do: "embargoed"
+  defp role_badge_class(:internal), do: "published"
   defp role_badge_class(:submitter), do: "draft"
   defp role_badge_class(_), do: "draft"
 

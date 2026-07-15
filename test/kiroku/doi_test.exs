@@ -88,7 +88,18 @@ defmodule Kiroku.DoiTest do
 
     test "mock provider falls back to item id when handle is nil" do
       enable_doi()
-      item = create_item(%{"handle" => nil})
+      # Bypass Repository.create_item (which always assigns a handle now) to
+      # exercise the nil-handle fallback that still applies to legacy/imported
+      # rows inserted without going through the context.
+      item =
+        %Kiroku.Repository.Item{}
+        |> Kiroku.Repository.Item.changeset(%{
+          "title" => "No Handle Item",
+          "collection_id" => create_collection().id,
+          "handle" => nil
+        })
+        |> Kiroku.Repo.insert!()
+
       assert {:ok, doi} = Doi.mint(item)
       assert doi == "10.5555/#{item.id}"
     end

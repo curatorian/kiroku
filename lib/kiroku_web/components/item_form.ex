@@ -450,7 +450,7 @@ defmodule KirokuWeb.ItemForm do
           placeholder="Universitas Padjadjaran"
         />
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <.input
           field={@form[:faculty]}
           type="text"
@@ -460,8 +460,14 @@ defmodule KirokuWeb.ItemForm do
         <.input
           field={@form[:department]}
           type="text"
-          label="Departemen / Program Studi"
+          label="Departemen"
           placeholder="e.g. Ilmu Hukum"
+        />
+        <.input
+          field={@form[:program_study]}
+          type="text"
+          label="Program Studi"
+          placeholder="e.g. S1 Ilmu Hukum"
         />
       </div>
     </div>
@@ -490,7 +496,7 @@ defmodule KirokuWeb.ItemForm do
 
   # Returns true if the type should show the academic contributor section.
   def academic_type?(type)
-      when type in ~w(skripsi memorandum_hukum studi_kasus laporan_proyek capstone),
+      when type in ~w(skripsi tesis disertasi tugas_akhir memorandum_hukum studi_kasus laporan_proyek capstone),
       do: true
 
   def academic_type?(_), do: false
@@ -1412,4 +1418,632 @@ defmodule KirokuWeb.ItemForm do
     </div>
     """
   end
+
+  # ── Relations editor (authors, advisors, examiners, team members, keywords) ─
+
+  defp advisor_role_options do
+    [
+      {"Pembimbing Utama", "main_advisor"},
+      {"Pembimbing Pendamping", "co_advisor"},
+      {"Pembimbing Eksternal", "external"},
+      {"Industri", "industry"},
+      {"Klinik Hukum", "law_clinic"},
+      {"Kurator", "curator"}
+    ]
+  end
+
+  # ItemTeamMember.role options (distinct from Item.team_role / project submitter role)
+  defp team_member_role_options do
+    [
+      {"Lead Developer", "lead_developer"},
+      {"Developer", "developer"},
+      {"Designer", "designer"},
+      {"Researcher", "researcher"},
+      {"Tester", "tester"},
+      {"Performer", "performer"},
+      {"Collaborator", "collaborator"},
+      {"Lainnya", "other"}
+    ]
+  end
+
+  defp author_fields do
+    [
+      %{
+        name: :author_name,
+        label: "Nama",
+        type: :text,
+        placeholder: "e.g. Budi Santoso",
+        span: 2
+      },
+      %{
+        name: :affiliation,
+        label: "Afiliasi",
+        type: :text,
+        placeholder: "Universitas Padjadjaran"
+      },
+      %{name: :email, label: "Email", type: :text, placeholder: "opsional"},
+      %{name: :orcid, label: "ORCID", type: :text, placeholder: "opsional"}
+    ]
+  end
+
+  defp advisor_fields do
+    [
+      %{name: :advisor_name, label: "Nama", type: :text, placeholder: "", span: 2},
+      %{name: :advisor_role, label: "Peran", type: :select, options: advisor_role_options()},
+      %{name: :nidn, label: "NIDN", type: :text},
+      %{name: :affiliation, label: "Afiliasi", type: :text}
+    ]
+  end
+
+  defp examiner_fields do
+    [
+      %{name: :examiner_name, label: "Nama", type: :text, span: 2},
+      %{name: :nidn, label: "NIDN", type: :text},
+      %{name: :affiliation, label: "Afiliasi", type: :text}
+    ]
+  end
+
+  defp team_fields do
+    [
+      %{name: :member_name, label: "Nama", type: :text, span: 2},
+      %{name: :role, label: "Peran", type: :select, options: team_member_role_options()},
+      %{name: :student_id, label: "NIM", type: :text},
+      %{name: :affiliation, label: "Afiliasi", type: :text}
+    ]
+  end
+
+  attr :author_rows, :list, required: true
+  attr :advisor_rows, :list, required: true
+  attr :examiner_rows, :list, required: true
+  attr :team_rows, :list, required: true
+  attr :show_team, :boolean, default: false
+  attr :keywords, :string, default: ""
+
+  def relations_section(assigns) do
+    assigns =
+      assigns
+      |> assign(:author_fields, author_fields())
+      |> assign(:advisor_fields, advisor_fields())
+      |> assign(:examiner_fields, examiner_fields())
+      |> assign(:team_fields, team_fields())
+
+    ~H"""
+    <div id="relations-section" class="kiroku-card p-6 space-y-6">
+      <.section_header
+        icon="hero-users"
+        title="Kontributor"
+        subtitle="Penulis, pembimbing, penguji, dan anggota tim"
+      />
+
+      <.relation_group
+        title="Penulis / Authors"
+        icon="hero-user"
+        param_key="authors"
+        add_event="add_author"
+        remove_event="remove_author"
+        rows={@author_rows}
+        fields={@author_fields}
+      />
+
+      <.relation_group
+        title="Pembimbing / Advisors"
+        icon="hero-academic-cap"
+        param_key="advisors"
+        add_event="add_advisor"
+        remove_event="remove_advisor"
+        rows={@advisor_rows}
+        fields={@advisor_fields}
+      />
+
+      <.relation_group
+        title="Penguji / Examiners"
+        icon="hero-user-group"
+        param_key="examiners"
+        add_event="add_examiner"
+        remove_event="remove_examiner"
+        rows={@examiner_rows}
+        fields={@examiner_fields}
+      />
+
+      <.relation_group
+        :if={@show_team}
+        title="Anggota Tim"
+        icon="hero-user-plus"
+        param_key="team_members"
+        add_event="add_team"
+        remove_event="remove_team"
+        rows={@team_rows}
+        fields={@team_fields}
+      />
+
+      <div class="space-y-2 pt-2 border-t" style="border-color: rgba(155,126,200,0.12);">
+        <div class="flex items-baseline gap-2">
+          <label
+            class="block text-sm font-medium"
+            style="color: var(--color-wisteria);"
+            for="item-keywords"
+          >
+            Kata Kunci
+          </label>
+          <span class="text-xs" style="color: var(--color-quill);">
+            Pisahkan dengan koma atau baris baru
+          </span>
+        </div>
+        <textarea
+          id="item-keywords"
+          name="keywords"
+          rows="2"
+          class="kiroku-search-input w-full"
+          placeholder="mis. hukum pidana, analisis keputusan, komparatif"
+        >{@keywords}</textarea>
+      </div>
+    </div>
+    """
+  end
+
+  attr :title, :string, required: true
+  attr :icon, :string, required: true
+  attr :param_key, :string, required: true
+  attr :add_event, :string, required: true
+  attr :remove_event, :string, required: true
+  attr :rows, :list, required: true
+  attr :fields, :list, required: true
+
+  defp relation_group(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <div class="flex items-center justify-between">
+        <p
+          class="text-sm font-medium flex items-center gap-2"
+          style="color: var(--color-wisteria);"
+        >
+          <.icon name={@icon} class="w-4 h-4" /> {@title}
+          <span class="text-xs font-normal" style="color: var(--color-quill);">
+            ({length(@rows)})
+          </span>
+        </p>
+        <button
+          type="button"
+          phx-click={@add_event}
+          class="text-xs px-3 py-1.5 rounded-lg transition-colors hover:brightness-110"
+          style="background: rgba(155,126,200,0.1); color: var(--color-wisteria);"
+        >
+          + Tambah
+        </button>
+      </div>
+
+      <%= if @rows == [] do %>
+        <p class="text-xs" style="color: var(--color-quill);">
+          Belum ada. Klik "Tambah" untuk menambahkan baris baru.
+        </p>
+      <% else %>
+        <div class="space-y-2">
+          <%= for row <- @rows do %>
+            <div
+              class="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-lg relative"
+              style="background: rgba(123,79,166,0.04); border: 1px solid rgba(123,79,166,0.08);"
+            >
+              <%= for f <- @fields do %>
+                <div class={["space-y-1", f[:span] == 2 && "sm:col-span-2"]}>
+                  <label
+                    class="block text-xs"
+                    style="color: var(--color-quill);"
+                    for={"#{@param_key}-#{row.id}-#{f.name}"}
+                  >
+                    {f.label}
+                  </label>
+
+                  <%= case f.type do %>
+                    <% :select -> %>
+                      <select
+                        id={"#{@param_key}-#{row.id}-#{f.name}"}
+                        name={"#{@param_key}[#{row.id}][#{f.name}]"}
+                        class="kiroku-search-input w-full"
+                      >
+                        <option value="">Pilih…</option>
+                        <%= for {l, v} <- f.options do %>
+                          <option value={v} selected={Map.get(row, f.name, "") == v}>
+                            {l}
+                          </option>
+                        <% end %>
+                      </select>
+                    <% :textarea -> %>
+                      <textarea
+                        id={"#{@param_key}-#{row.id}-#{f.name}"}
+                        name={"#{@param_key}[#{row.id}][#{f.name}]"}
+                        rows={f[:rows] || 3}
+                        class="kiroku-search-input w-full"
+                        placeholder={Map.get(f, :placeholder, "")}
+                      >{Map.get(row, f.name, "")}</textarea>
+                    <% _ -> %>
+                      <input
+                        id={"#{@param_key}-#{row.id}-#{f.name}"}
+                        type="text"
+                        name={"#{@param_key}[#{row.id}][#{f.name}]"}
+                        value={Map.get(row, f.name, "")}
+                        placeholder={Map.get(f, :placeholder, "")}
+                        class="kiroku-search-input w-full"
+                      />
+                  <% end %>
+                </div>
+              <% end %>
+
+              <button
+                type="button"
+                phx-click={@remove_event}
+                phx-value-id={row.id}
+                class="absolute top-1.5 right-1.5 text-xs px-1.5 py-1 rounded hover:text-red-400 transition-colors"
+                style="color: var(--color-quill);"
+                title="Hapus baris"
+              >
+                <.icon name="hero-x-mark" class="w-4 h-4" />
+              </button>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # ── File uploads section ──────────────────────────────────────────────────
+
+  attr :uploads, :any, required: true
+  attr :type, :string, default: nil
+
+  def files_section(assigns) do
+    assigns = assign(assigns, :fields, shown_upload_fields(assigns.type))
+
+    ~H"""
+    <div id="files-section" class="kiroku-card p-6 space-y-6">
+      <div
+        class="flex items-center gap-3 pb-4 mb-1 border-b"
+        style="border-color: rgba(155,126,200,0.15);"
+      >
+        <div
+          class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style="background: color-mix(in srgb, var(--color-patchouli) 14%, transparent); color: var(--color-patchouli);"
+        >
+          <.icon name="hero-paper-clip" class="w-5 h-5" />
+        </div>
+        <div>
+          <p
+            class="font-heading font-semibold text-base leading-tight"
+            style="color: var(--color-wisteria);"
+          >
+            Berkas
+          </p>
+          <p class="text-xs leading-tight mt-0.5" style="color: var(--color-quill);">
+            Lampirkan berkas sesuai jenis karya (opsional saat pembuatan)
+          </p>
+        </div>
+      </div>
+
+      <p
+        :if={@fields == []}
+        class="text-sm text-center py-6"
+        style="color: var(--color-quill);"
+      >
+        Pilih jenis karya terlebih dahulu untuk menampilkan berkas yang relevan.
+      </p>
+
+      <%= for f <- @fields do %>
+        <.upload_field
+          upload={@uploads[f.field]}
+          label={f.label}
+          field_name={f.field}
+          hint={f.hint}
+        />
+      <% end %>
+
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".Dropzone">
+        // Toggles a `dragging` class on the dropzone while a file is dragged
+        // over it, giving clear visual affordance. Counter-based to handle
+        // nested dragenter/dragleave flicker.
+        export default {
+          mounted() {
+            let counter = 0;
+            const el = this.el;
+
+            const enter = (e) => {
+              e.preventDefault();
+              counter++;
+              el.classList.add("dragging");
+            };
+            const leave = (e) => {
+              e.preventDefault();
+              counter = Math.max(0, counter - 1);
+              if (counter === 0) el.classList.remove("dragging");
+            };
+            const over = (e) => e.preventDefault();
+            const drop = (e) => {
+              e.preventDefault();
+              counter = 0;
+              el.classList.remove("dragging");
+            };
+
+            el.addEventListener("dragenter", enter);
+            el.addEventListener("dragleave", leave);
+            el.addEventListener("dragover", over);
+            el.addEventListener("drop", drop);
+
+            this.onDestroy = () => {
+              el.removeEventListener("dragenter", enter);
+              el.removeEventListener("dragleave", leave);
+              el.removeEventListener("dragover", over);
+              el.removeEventListener("drop", drop);
+            };
+          },
+          destroyed() {
+            if (this.onDestroy) this.onDestroy();
+          }
+        }
+      </script>
+    </div>
+    """
+  end
+
+  # Maps an item type to the upload fields that apply to it. Derived from
+  # plans/02_metadata_and_files.md: CHAPTER is thesis-only, SOURCE/MEDIA belong
+  # to tech/creative/project types, journals need neither chapters nor media.
+  # Returns the full set when type is unknown/nil so callers without a type
+  # (e.g. the edit form) keep showing every bundle.
+  def bundles_for_type(nil),
+    do: [:cover, :abstract, :fulltext, :chapters, :supplemental, :media, :source, :administrative]
+
+  def bundles_for_type(type) do
+    # Cover, abstract page, and administrative docs apply to essentially every type.
+    base = [:cover, :abstract, :administrative]
+
+    extra =
+      case type do
+        t when t in ~w(skripsi tesis disertasi tugas_akhir) ->
+          [:fulltext, :chapters, :supplemental]
+
+        "memorandum_hukum" ->
+          [:fulltext, :supplemental]
+
+        "studi_kasus" ->
+          [:fulltext, :supplemental]
+
+        "laporan_proyek" ->
+          [:fulltext, :supplemental, :media, :source]
+
+        "karya_kreatif" ->
+          [:media, :supplemental, :source]
+
+        "karya_teknologi" ->
+          [:fulltext, :source, :media, :supplemental]
+
+        t when t in ~w(jurnal_nasional jurnal_internasional) ->
+          [:fulltext, :supplemental, :source]
+
+        "prosiding" ->
+          [:fulltext, :supplemental, :media, :source]
+
+        "capstone" ->
+          [:fulltext, :supplemental, :media, :source]
+
+        _ ->
+          [:fulltext, :supplemental]
+      end
+
+    base ++ extra
+  end
+
+  defp all_upload_fields do
+    [
+      %{field: :cover, label: "Sampul / Cover", hint: "JPG/PNG, maks. 5 MB"},
+      %{field: :abstract, label: "PDF Abstrak", hint: "PDF, maks. 20 MB"},
+      %{field: :fulltext, label: "Teks Lengkap (Full Text)", hint: "PDF, maks. 100 MB"},
+      %{
+        field: :chapters,
+        label: "Per-Bab (maks. 6 berkas)",
+        hint: "PDF per bab, maks. 50 MB masing-masing"
+      },
+      %{
+        field: :supplemental,
+        label: "Berkas Suplemen",
+        hint: "PDF, DOCX, XLSX, CSV, ZIP, PPTX — maks. 50 MB"
+      },
+      %{field: :media, label: "Berkas Media", hint: "MP3, MP4, MOV, gambar, ZIP — maks. 500 MB"},
+      %{field: :source, label: "Berkas Sumber", hint: "ZIP, TAR, IPYNB, PDF — maks. 200 MB"},
+      %{
+        field: :administrative,
+        label: "Dokumen Administratif",
+        hint: "PDF, maks. 20 MB — hanya terlihat oleh staf"
+      }
+    ]
+  end
+
+  defp shown_upload_fields(type) do
+    bundles = bundles_for_type(type)
+    Enum.filter(all_upload_fields(), fn f -> f.field in bundles end)
+  end
+
+  attr :upload, :any, required: true
+  attr :label, :string, required: true
+  attr :field_name, :string, required: true
+  attr :hint, :string, default: ""
+
+  def upload_field(assigns) do
+    ~H"""
+    <div id={"upload-#{@field_name}"} class="space-y-2.5">
+      <%!-- The dropzone (with .live_file_input inside) must stay in the DOM
+           even when max_entries is reached. If it's removed, the
+           Phoenix.LiveFileUpload JS hook is destroyed before auto_upload
+           can start uploading. We hide it with CSS instead of :if. --%>
+      <div
+        id={"dropzone-#{@field_name}"}
+        class={[
+          "upload-dropzone group relative flex flex-col items-center justify-center gap-3 px-6 py-7 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200",
+          if(length(@upload.entries) >= @upload.max_entries, do: "hidden")
+        ]}
+        phx-drop-target={@upload.ref}
+        phx-hook=".Dropzone"
+      >
+        <%!-- Native input overlays the whole zone (opacity-0) so clicking anywhere
+             opens the file picker, while a styled affordance communicates intent. --%>
+        <.live_file_input
+          upload={@upload}
+          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        />
+
+        <div class="flex flex-col items-center gap-2.5 text-center pointer-events-none">
+          <span
+            class="w-12 h-12 rounded-2xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110 group-hover:-translate-y-0.5"
+            style="background: color-mix(in srgb, var(--color-patchouli) 16%, transparent); color: var(--color-lavender);"
+          >
+            <.icon name="hero-cloud-arrow-up" class="w-6 h-6" />
+          </span>
+          <div class="space-y-0.5">
+            <p class="text-sm font-semibold leading-tight" style="color: var(--color-wisteria);">
+              {@label}
+            </p>
+            <p class="text-xs leading-tight" style="color: var(--color-quill);">
+              {@hint} · seret & lepas atau klik untuk memilih
+            </p>
+          </div>
+          <span
+            class="mt-0.5 text-xs font-semibold px-3.5 py-1.5 rounded-full transition-all duration-200 group-hover:shadow-lg"
+            style="background: color-mix(in srgb, var(--color-patchouli) 90%, transparent); color: white; box-shadow: 0 2px 8px color-mix(in srgb, var(--color-patchouli) 30%, transparent);"
+          >
+            Pilih Berkas
+          </span>
+        </div>
+      </div>
+
+      <%= for entry <- @upload.entries do %>
+        <.upload_entry entry={entry} field_name={@field_name} />
+        <%= for err <- upload_errors(@upload, entry) do %>
+          <p
+            class="text-xs flex items-center gap-1.5 px-1"
+            style="color: var(--color-ribbon-red);"
+          >
+            <.icon name="hero-exclamation-circle" class="w-3.5 h-3.5 shrink-0" />
+            {upload_error_to_string(err)}
+          </p>
+        <% end %>
+      <% end %>
+
+      <%= for err <- upload_errors(@upload) do %>
+        <p
+          class="text-xs flex items-center gap-1.5 px-1"
+          style="color: var(--color-ribbon-red);"
+        >
+          <.icon name="hero-exclamation-circle" class="w-3.5 h-3.5 shrink-0" />
+          {upload_error_to_string(err)}
+        </p>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr :entry, :any, required: true
+  attr :field_name, :string, required: true
+
+  defp upload_entry(assigns) do
+    ~H"""
+    <% done? = @entry.done? %>
+    <% uploading? = not done? and @entry.progress > 0 %>
+    <div
+      class="flex items-center gap-3 rounded-xl p-3 transition-colors"
+      style="background: color-mix(in srgb, var(--color-patchouli) 7%, transparent); border: 1px solid color-mix(in srgb, var(--color-lavender) 14%, transparent);"
+    >
+      <span
+        class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors"
+        style={
+          if done?,
+            do: "background: color-mix(in srgb, #4ade80 18%, transparent); color: #4ade80;",
+            else:
+              "background: color-mix(in srgb, var(--color-patchouli) 16%, transparent); color: var(--color-lavender);"
+        }
+      >
+        <.icon
+          name={if done?, do: "hero-check-circle", else: "hero-document-text"}
+          class="w-5 h-5"
+        />
+      </span>
+
+      <div class="flex-1 min-w-0 space-y-1.5">
+        <div class="flex items-center gap-2">
+          <span
+            class="text-sm font-medium truncate flex-1 min-w-0"
+            style="color: var(--color-lilac);"
+          >
+            {@entry.client_name}
+          </span>
+          <%= if done? do %>
+            <span
+              class="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-full shrink-0"
+              style="background: color-mix(in srgb, #4ade80 20%, transparent); color: #4ade80;"
+            >
+              Terunggah
+            </span>
+          <% end %>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+          <span
+            class="text-[11px] tabular-nums shrink-0"
+            style="color: var(--color-quill);"
+          >
+            {format_size(@entry.client_size)}
+          </span>
+          <%= if uploading? do %>
+            <div
+              class="flex-1 h-1.5 rounded-full overflow-hidden"
+              style="background: color-mix(in srgb, var(--color-lavender) 18%, transparent);"
+            >
+              <div
+                class="h-full rounded-full transition-all duration-300 ease-out"
+                style={"width: #{@entry.progress}%; background: var(--color-patchouli);"}
+              >
+              </div>
+            </div>
+            <span
+              class="text-[11px] tabular-nums shrink-0 w-9 text-right"
+              style="color: var(--color-quill);"
+            >
+              {@entry.progress}%
+            </span>
+          <% else %>
+            <span class="text-[11px] truncate" style="color: var(--color-quill);">
+              <%= if done? do %>
+                · selesai
+              <% else %>
+                · memulai unggahan…
+              <% end %>
+            </span>
+          <% end %>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        phx-click="cancel_upload"
+        phx-value-ref={@entry.ref}
+        phx-value-field={@field_name}
+        class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all hover:bg-white/5 active:scale-90"
+        style="color: var(--color-quill);"
+        title="Hapus berkas"
+      >
+        <.icon name="hero-x-mark" class="w-4 h-4" />
+      </button>
+    </div>
+    """
+  end
+
+  defp format_size(bytes) when bytes >= 1_000_000,
+    do: "#{Float.round(bytes / 1_000_000, 1)} MB"
+
+  defp format_size(bytes) when bytes >= 1_000,
+    do: "#{Float.round(bytes / 1_000, 0)} KB"
+
+  defp format_size(bytes), do: "#{bytes} B"
+
+  defp upload_error_to_string(:too_large), do: "File is too large"
+  defp upload_error_to_string(:not_accepted), do: "File type not accepted"
+  defp upload_error_to_string(:too_many_files), do: "Too many files"
+  defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
 end
