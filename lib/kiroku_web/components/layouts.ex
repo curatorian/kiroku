@@ -50,6 +50,7 @@ defmodule KirokuWeb.Layouts do
         <a href={~p"/"} class="flex items-center gap-2 group">
           <%= if @brand.logo_url do %>
             <img src={@brand.logo_url} alt={@brand.name} class="h-8 w-auto object-contain" />
+            <span class="kiroku-wordmark text-xl leading-none">{@brand.name}</span>
           <% else %>
             <span class="kiroku-kanji text-2xl leading-none">記</span>
             <span class="kiroku-wordmark text-xl leading-none">{@brand.name}</span>
@@ -139,8 +140,8 @@ defmodule KirokuWeb.Layouts do
               <img src={@brand.logo_url} alt={@brand.name} class="h-6 w-auto object-contain" />
             <% else %>
               <span class="kiroku-kanji text-xl leading-none">記</span>
-              <span class="kiroku-wordmark text-base leading-none">{@brand.name}</span>
             <% end %>
+            <span class="kiroku-wordmark text-base leading-none">{@brand.name}</span>
           </a>
           <span
             class="ml-auto text-xs px-1.5 py-0.5 rounded font-ui font-semibold tracking-wide"
@@ -225,14 +226,15 @@ defmodule KirokuWeb.Layouts do
               current_path={@page_title}
               match="API Tokens"
             />
+            <.admin_nav_item
+              icon="hero-cog-6-tooth"
+              label="Settings"
+              href={~p"/admin/settings"}
+              current_path={@page_title}
+              match="Settings"
+            />
           <% end %>
-          <.admin_nav_item
-            icon="hero-cog-6-tooth"
-            label="Settings"
-            href={~p"/admin/settings"}
-            current_path={@page_title}
-            match="Settings"
-          />
+
         </nav>
 
         <%!-- Footer --%>
@@ -324,10 +326,10 @@ defmodule KirokuWeb.Layouts do
             <img src={@brand.logo_url} alt={@brand.name} class="h-8 w-auto object-contain" />
           <% else %>
             <span class="kiroku-kanji text-2xl leading-none">記</span>
-            <span class="kiroku-wordmark text-xl leading-none">
-              {@brand[:name] || "Kiroku"}
-            </span>
           <% end %>
+          <span class="kiroku-wordmark text-xl leading-none">
+            {@brand[:name] || "Kiroku"}
+          </span>
         </div>
 
         <.setup_progress steps={@steps} current={@current_step} />
@@ -540,9 +542,8 @@ defmodule KirokuWeb.Layouts do
             <a href={~p"/"} class="flex items-center gap-2">
               <%= if @brand[:logo_url] do %>
                 <img src={@brand[:logo_url]} alt={@brand[:name]} class="h-7 w-auto object-contain" />
-              <% else %>
-                <span class="kiroku-wordmark text-lg leading-none">{@brand[:name] || "Kiroku"}</span>
               <% end %>
+              <span class="kiroku-wordmark text-lg leading-none">{@brand[:name] || "Kiroku"}</span>
             </a>
             <p class="text-sm font-body italic" style="color: var(--color-dust);">
               {@brand[:tagline] || "Every work recorded. Every scholar remembered."}
