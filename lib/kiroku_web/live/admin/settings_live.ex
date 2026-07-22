@@ -14,6 +14,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
     allow_submit = Settings.allow_user_submit?()
     allow_reg = Settings.allow_registration?()
     locked_descs = Settings.locked_bitstream_descriptions()
+    file_lock_mode = Settings.file_lock_mode()
 
     socket =
       socket
@@ -27,6 +28,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
       |> assign(:allow_submit, allow_submit)
       |> assign(:allow_registration, allow_reg)
       |> assign(:locked_descriptions, locked_descs)
+      |> assign(:file_lock_mode, file_lock_mode)
       |> assign(:brand_logo_url, Settings.brand_logo_url())
       |> allow_upload(:logo,
         accept: ~w(.png .jpg .jpeg .svg .ico .webp),
@@ -532,49 +534,136 @@ defmodule KirokuWeb.Admin.SettingsLive do
               File Access Control
             </h2>
             <p class="text-xs mt-1" style="color: var(--color-quill);">
-              Toggle which file types are locked from public view.
-              Locked files are visible to <strong>internal</strong> users (students/lecturers)
-              and staff. Applies globally to all items.
+              Toggle which file types are locked from public view, then choose
+              a lock mode. Applies globally to all items.
             </p>
           </div>
 
-          <.form for={nil} id="file-access-form" phx-submit="save_file_locks" class="space-y-3">
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <%= for desc <- ["Bab 1", "Bab 2", "Bab 3", "Bab 4", "Bab 5", "Bab 6", "Abstract", "Daftar isi", "Daftar pustaka", "Lampiran", "Lembar pengesahan", "Surat pengantar", "Full text"] do %>
-                <% checked = desc in @locked_descriptions %>
+          <.form for={nil} id="file-access-form" phx-submit="save_file_locks" class="space-y-4">
+            <%!-- Lock Mode --%>
+            <div class="space-y-2">
+              <span
+                class="text-xs font-semibold uppercase tracking-wide"
+                style="color: var(--color-quill);"
+              >
+                Lock Mode
+              </span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <label
                   class={[
-                    "flex items-center gap-2 p-2.5 rounded-lg cursor-pointer text-sm transition-colors",
-                    if checked do
-                      "text-white"
-                    else
-                      ""
-                    end
+                    "flex items-start gap-2.5 p-3 rounded-lg cursor-pointer text-sm transition-all",
+                    if(@file_lock_mode == :internal,
+                      do: "ring-2 ring-offset-1",
+                      else: "hover:brightness-105"
+                    )
                   ]}
                   style={
-                    if checked,
-                      do: "background: rgba(196,65,90,0.15); border: 1px solid rgba(196,65,90,0.3);",
+                    if @file_lock_mode == :internal,
+                      do:
+                        "background: rgba(123,79,166,0.12); border: 1px solid var(--color-patchouli); ring-color: var(--color-patchouli);",
                       else:
-                        "background: rgba(155,126,200,0.08); border: 1px solid rgba(155,126,200,0.15);"
+                        "background: rgba(155,126,200,0.06); border: 1px solid rgba(155,126,200,0.15);"
                   }
                 >
                   <input
-                    type="checkbox"
-                    name="locked[]"
-                    value={desc}
-                    checked={checked}
-                    class="h-4 w-4 rounded"
-                    style="accent-color: var(--color-ribbon-red);"
+                    type="radio"
+                    name="mode"
+                    value="internal"
+                    checked={@file_lock_mode == :internal}
+                    class="mt-0.5 h-4 w-4"
+                    style="accent-color: var(--color-patchouli);"
                   />
-                  <span style={
-                    if checked,
-                      do: "color: var(--color-ribbon-red);",
-                      else: "color: var(--color-wisteria);"
-                  }>
-                    {desc}
+                  <span>
+                    <span class="font-medium block" style="color: var(--color-wisteria);">
+                      Internal unlock
+                    </span>
+                    <span class="text-[11px] block mt-0.5" style="color: var(--color-quill);">
+                      Visible to <strong>internal</strong> users (students/lecturers) and staff.
+                    </span>
                   </span>
                 </label>
-              <% end %>
+
+                <label
+                  class={[
+                    "flex items-start gap-2.5 p-3 rounded-lg cursor-pointer text-sm transition-all",
+                    if(@file_lock_mode == :closed,
+                      do: "ring-2 ring-offset-1",
+                      else: "hover:brightness-105"
+                    )
+                  ]}
+                  style={
+                    if @file_lock_mode == :closed,
+                      do:
+                        "background: rgba(196,65,90,0.12); border: 1px solid var(--color-ribbon-red); ring-color: var(--color-ribbon-red);",
+                      else:
+                        "background: rgba(155,126,200,0.06); border: 1px solid rgba(155,126,200,0.15);"
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="mode"
+                    value="closed"
+                    checked={@file_lock_mode == :closed}
+                    class="mt-0.5 h-4 w-4"
+                    style="accent-color: var(--color-ribbon-red);"
+                  />
+                  <span>
+                    <span class="font-medium block" style="color: var(--color-ribbon-red);">
+                      Fully closed
+                    </span>
+                    <span class="text-[11px] block mt-0.5" style="color: var(--color-quill);">
+                      Visible <strong>only</strong> to superadmin. All other roles are denied.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <span
+                class="text-xs font-semibold uppercase tracking-wide"
+                style="color: var(--color-quill);"
+              >
+                Locked File Types
+              </span>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <%= for desc <- ["Bab 1", "Bab 2", "Bab 3", "Bab 4", "Bab 5", "Bab 6", "Abstract", "Daftar isi", "Daftar pustaka", "Lampiran", "Lembar pengesahan", "Surat pengantar", "Full text"] do %>
+                  <% checked = desc in @locked_descriptions %>
+                  <label
+                    class={[
+                      "flex items-center gap-2 p-2.5 rounded-lg cursor-pointer text-sm transition-colors",
+                      if checked do
+                        "text-white"
+                      else
+                        ""
+                      end
+                    ]}
+                    style={
+                      if checked,
+                        do:
+                          "background: rgba(196,65,90,0.15); border: 1px solid rgba(196,65,90,0.3);",
+                        else:
+                          "background: rgba(155,126,200,0.08); border: 1px solid rgba(155,126,200,0.15);"
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      name="locked[]"
+                      value={desc}
+                      checked={checked}
+                      class="h-4 w-4 rounded"
+                      style="accent-color: var(--color-ribbon-red);"
+                    />
+                    <span style={
+                      if checked,
+                        do: "color: var(--color-ribbon-red);",
+                        else: "color: var(--color-wisteria);"
+                    }>
+                      {desc}
+                    </span>
+                  </label>
+                <% end %>
+              </div>
             </div>
 
             <div class="pt-1">
@@ -895,27 +984,24 @@ defmodule KirokuWeb.Admin.SettingsLive do
   end
 
   @impl true
-  def handle_event("save_file_locks", %{"locked" => locked}, socket) do
+  def handle_event("save_file_locks", params, socket) do
+    locked = params["locked"] || []
     descriptions = if is_list(locked), do: locked, else: [locked]
+    mode = if params["mode"] == "closed", do: :closed, else: :internal
+
     Settings.put_locked_bitstream_descriptions(descriptions)
+    Settings.put_file_lock_mode(mode)
+
+    mode_label = if mode == :closed, do: "superadmin only", else: "internal + staff"
 
     {:noreply,
      socket
      |> assign(:locked_descriptions, descriptions)
+     |> assign(:file_lock_mode, mode)
      |> put_flash(
        :info,
-       "File access controls saved. #{length(descriptions)} file type(s) locked."
+       "File access controls saved. #{length(descriptions)} file type(s) locked (#{mode_label})."
      )}
-  end
-
-  @impl true
-  def handle_event("save_file_locks", _params, socket) do
-    Settings.put_locked_bitstream_descriptions([])
-
-    {:noreply,
-     socket
-     |> assign(:locked_descriptions, [])
-     |> put_flash(:info, "All file locks cleared.")}
   end
 
   @impl true

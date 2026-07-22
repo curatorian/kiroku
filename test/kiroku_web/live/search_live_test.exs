@@ -105,11 +105,11 @@ defmodule KirokuWeb.SearchLiveTest do
       assert html =~ "Siti Aminah"
     end
 
-    test "does not render facet counts before any search/filter is applied", %{conn: conn} do
+    test "shows the empty results state before any search/filter is applied", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/search")
 
-      # Empty state shown, not facet counts.
-      assert html =~ "Enter a search term to begin."
+      # Empty results state is shown when there is no query.
+      assert html =~ "Search above, or browse using the filters on the left."
     end
 
     test "facet sidebar contains links that toggle filters", %{conn: conn} do
