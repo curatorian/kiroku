@@ -324,7 +324,37 @@ defmodule Kiroku.Settings do
     put(
       "locked_bitstream_descriptions",
       Enum.join(descriptions, ","),
-      "Bitstream descriptions locked from public view (visible to internal + staff)"
+      "Bitstream descriptions locked from public view (governed by file_lock_mode)"
+    )
+  end
+
+  @doc """
+  Returns the current file lock mode governing access to locked bitstreams.
+
+    * `:internal` (default) — locked files are visible to :internal users
+      (students/lecturers) plus staff (reviewer/admin/superadmin).
+    * `:closed` — locked files are visible **only** to :superadmin.
+
+  Other staff roles (reviewer/admin) and internal users are denied when
+  the mode is `:closed`.
+  """
+  def file_lock_mode do
+    case get("file_lock_mode", "internal") do
+      "closed" -> :closed
+      _ -> :internal
+    end
+  end
+
+  @doc "Sets the file lock mode. Accepts :internal, :closed, or string equivalents."
+  def put_file_lock_mode(mode) when mode in [:internal, :closed] do
+    put_file_lock_mode(to_string(mode))
+  end
+
+  def put_file_lock_mode(mode) when mode in ["internal", "closed"] do
+    put(
+      "file_lock_mode",
+      mode,
+      "File lock mode: internal=internal+staff, closed=superadmin only"
     )
   end
 

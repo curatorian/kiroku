@@ -576,9 +576,16 @@ defmodule KirokuWeb.ItemLive.Show do
                             class="flex items-center gap-2.5 p-2.5 rounded-lg opacity-70"
                             style="background: rgba(155,126,200,0.03); border: 1px solid rgba(155,126,200,0.08);"
                             title={
-                              if locked,
-                                do: "Locked — sign in with an internal account to view",
-                                else: "Restricted"
+                              cond do
+                                locked and Kiroku.Settings.file_lock_mode() == :closed ->
+                                  "Locked — restricted to superadmin"
+
+                                locked ->
+                                  "Locked — sign in with an internal account to view"
+
+                                true ->
+                                  "Restricted"
+                              end
                             }
                           >
                             <.icon

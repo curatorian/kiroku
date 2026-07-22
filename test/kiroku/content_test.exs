@@ -240,6 +240,82 @@ defmodule Kiroku.ContentTest do
     end
   end
 
+  # ── File Access Control modes ─────────────────────────────────────────────
+
+  describe "accessible?/3 — file lock mode" do
+    test ":internal mode unlocks locked files for internal + staff" do
+      Kiroku.Settings.put_file_lock_mode(:internal)
+      Kiroku.Settings.put_locked_bitstream_descriptions(["Bab 2"])
+
+      item = create_item()
+
+      bs =
+        create_bitstream(item, %{
+          "description" => "Bab 2",
+          "sequence" => 2,
+          "access_level" => "open"
+        })
+
+      refute Content.accessible?(bs, anonymous(), item)
+      refute Content.accessible?(bs, regular_user(), item)
+
+      assert Content.accessible?(bs, %{user_type: :internal}, item)
+      assert Content.accessible?(bs, %{user_type: :reviewer}, item)
+      assert Content.accessible?(bs, %{user_type: :admin}, item)
+      assert Content.accessible?(bs, %{user_type: :superadmin}, item)
+    end
+
+    test ":closed mode restricts locked files to superadmin only" do
+      Kiroku.Settings.put_file_lock_mode(:closed)
+      Kiroku.Settings.put_locked_bitstream_descriptions(["Bab 2"])
+
+      item = create_item()
+
+      bs =
+        create_bitstream(item, %{
+          "description" => "Bab 2",
+          "sequence" => 2,
+          "access_level" => "open"
+        })
+
+      refute Content.accessible?(bs, anonymous(), item)
+      refute Content.accessible?(bs, regular_user(), item)
+      refute Content.accessible?(bs, %{user_type: :internal}, item)
+      refute Content.accessible?(bs, %{user_type: :reviewer}, item)
+      refute Content.accessible?(bs, %{user_type: :admin}, item)
+
+      assert Content.accessible?(bs, %{user_type: :superadmin}, item)
+    end
+
+    test ":closed mode does not affect non-locked bitstreams" do
+      Kiroku.Settings.put_file_lock_mode(:closed)
+      Kiroku.Settings.put_locked_bitstream_descriptions(["Bab 2"])
+
+      item = create_item()
+
+      bs =
+        create_bitstream(item, %{
+          "description" => "Bab 3",
+          "sequence" => 2,
+          "access_level" => "open"
+        })
+
+      assert Content.accessible?(bs, anonymous(), item)
+      assert Content.accessible?(bs, regular_user(), item)
+      assert Content.accessible?(bs, %{user_type: :internal}, item)
+      assert Content.accessible?(bs, %{user_type: :admin}, item)
+    end
+
+    test "bitstream_locked?/1 reflects the configured descriptions" do
+      Kiroku.Settings.put_locked_bitstream_descriptions(["Full text", "Bab 2"])
+
+      assert Content.bitstream_locked?(%Kiroku.Content.Bitstream{description: "Bab 2"})
+      assert Content.bitstream_locked?(%Kiroku.Content.Bitstream{description: "Full text"})
+      refute Content.bitstream_locked?(%Kiroku.Content.Bitstream{description: "Bab 3"})
+      refute Content.bitstream_locked?(%Kiroku.Content.Bitstream{description: nil})
+    end
+  end
+
   # ── files_embargoed? ───────────────────────────────────────────────────────
 
   describe "files_embargoed?/1" do

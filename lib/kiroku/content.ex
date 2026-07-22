@@ -83,9 +83,13 @@ defmodule Kiroku.Content do
   2. ADMINISTRATIVE / LICENSE bundles → reviewer, admin, superadmin only.
   3. ORIGINAL sequence == 1 (abstract PDF) → never embargoed, but still
      subject to the bitstream's own access_level.
-  4. Staff (reviewer/admin/superadmin) → always accessible (bypass embargo).
-  5. If the item's files are embargoed → not accessible.
-  6. Otherwise → evaluate the bitstream's own access_level:
+  4. Locked bitstreams under `:closed` mode → **superadmin only**.
+     Evaluated before the staff bypass so reviewer/admin are also blocked.
+  5. Staff (reviewer/admin/superadmin) → always accessible (bypass embargo).
+  6. Locked bitstreams under `:internal` mode → require :internal role
+     (or any higher staff role, already handled above).
+  7. If the item's files are embargoed → not accessible.
+  8. Otherwise → evaluate the bitstream's own access_level:
        :open       → accessible to everyone
        :internal   → accessible to any logged-in user
        :inherit    → use the parent item's access_level
@@ -101,6 +105,9 @@ defmodule Kiroku.Content do
 
   def accessible?(%Bitstream{} = bitstream, user, %Item{} = item) do
     cond do
+      bitstream_locked?(bitstream) and Kiroku.Settings.file_lock_mode() == :closed ->
+        user_is_superadmin?(user)
+
       user_is_staff?(user) ->
         true
 
@@ -148,6 +155,9 @@ defmodule Kiroku.Content do
 
   defp user_is_internal?(%{user_type: :internal}), do: true
   defp user_is_internal?(_), do: false
+
+  defp user_is_superadmin?(%{user_type: :superadmin}), do: true
+  defp user_is_superadmin?(_), do: false
 
   # ── Fixity (checksum verification) ─────────────────────────────────────────
   #
