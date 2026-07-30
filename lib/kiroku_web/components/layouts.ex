@@ -234,7 +234,6 @@ defmodule KirokuWeb.Layouts do
               match="Settings"
             />
           <% end %>
-
         </nav>
 
         <%!-- Footer --%>

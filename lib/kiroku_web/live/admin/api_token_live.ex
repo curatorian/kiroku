@@ -496,6 +496,74 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
                   class="text-xs font-ui font-semibold uppercase tracking-wider mb-2"
                   style="color: var(--color-quill);"
                 >
+                  Write Endpoints
+                </h3>
+                <div class="space-y-3">
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <span
+                        class="text-xs font-mono font-bold px-1.5 py-0.5 rounded"
+                        style="background: color-mix(in srgb, #e6a817 20%, transparent); color: #e6a817;"
+                      >
+                        POST
+                      </span>
+                      <code class="text-xs font-mono" style="color: var(--color-lavender);">
+                        /api/v1/items
+                      </code>
+                    </div>
+                    <p class="text-xs ml-7" style="color: var(--color-quill);">
+                      Create item with relations. Body:
+                    </p>
+                    <pre
+                      phx-no-curly-interpolation
+                      class="mt-1 text-xs font-mono p-2.5 rounded-lg overflow-x-auto"
+                      style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.08);"
+                    ><code>{ "item": { "title": "Judul Skripsi", "collection_id": "uuid", "item_type": "skripsi", "status": "submitted", "student_name": "...", "faculty": "...", "department": "..." }, "relations": { "authors": [{"author_name": "Penulis", "sequence": 1}], "advisors": [{"advisor_name": "Pembimbing", "advisor_role": "main_advisor"}], "keywords": ["kata kunci 1", "kata kunci 2"] } }</code></pre>
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <span
+                        class="text-xs font-mono font-bold px-1.5 py-0.5 rounded"
+                        style="background: color-mix(in srgb, #e6a817 20%, transparent); color: #e6a817;"
+                      >
+                        PATCH
+                      </span>
+                      <code class="text-xs font-mono" style="color: var(--color-lavender);">
+                        /api/v1/items/:id
+                      </code>
+                    </div>
+                    <p class="text-xs ml-7" style="color: var(--color-quill);">
+                      Update item metadata. Body:
+                      <code phx-no-curly-interpolation style="color: var(--color-ribbon-gold);">
+                        {"item": {...}}
+                      </code>
+                    </p>
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <span
+                        class="text-xs font-mono font-bold px-1.5 py-0.5 rounded"
+                        style="background: color-mix(in srgb, #e6a817 20%, transparent); color: #e6a817;"
+                      >
+                        POST
+                      </span>
+                      <code class="text-xs font-mono" style="color: var(--color-lavender);">
+                        /api/v1/items/:id/bitstreams
+                      </code>
+                    </div>
+                    <p class="text-xs ml-7" style="color: var(--color-quill);">
+                      Upload file (multipart/form-data). Fields: <code style="color: var(--color-ribbon-gold);">file</code>, <code style="color: var(--color-ribbon-gold);">bundle_name</code>, <code style="color: var(--color-ribbon-gold);">description</code>, <code style="color: var(--color-ribbon-gold);">sequence</code>,
+                      <code style="color: var(--color-ribbon-gold);">access_level</code>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pt-2" style="border-top: 1px solid rgba(155,126,200,0.08);">
+                <h3
+                  class="text-xs font-ui font-semibold uppercase tracking-wider mb-2"
+                  style="color: var(--color-quill);"
+                >
                   Query Parameters
                   <span class="ml-1 normal-case font-normal" style="color: var(--color-dust);">
                     for /api/v1/items
@@ -607,6 +675,22 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
                 </h3>
                 <div class="space-y-2">
                   <p class="text-xs font-ui" style="color: var(--color-dust);">
+                    Create a skripsi with author and advisor:
+                  </p>
+                  <pre
+                    phx-no-curly-interpolation
+                    class="text-xs font-mono p-2.5 rounded-lg overflow-x-auto"
+                    style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.08);"
+                  ><code>curl -X POST -H "Authorization: Bearer kiroku_..." -H "Content-Type: application/json" -d '{ "item": { "title": "Judul Skripsi", "collection_id": "UUID", "item_type": "skripsi", "status": "submitted", "student_name": "...", "faculty": "...", "department": "..." }, "relations": { "authors": [{"author_name": "Penulis", "sequence": 1}], "advisors": [{"advisor_name": "Pembimbing", "advisor_role": "main_advisor"}], "keywords": ["AI", "Machine Learning"] } }' /api/v1/items</code></pre>
+                  <p class="text-xs font-ui pt-1" style="color: var(--color-dust);">
+                    Upload a file to an item:
+                  </p>
+                  <pre
+                    phx-no-curly-interpolation
+                    class="text-xs font-mono p-2.5 rounded-lg overflow-x-auto"
+                    style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.08);"
+                  ><code>curl -X POST -H "Authorization: Bearer kiroku_..." -F "file=@bab1.pdf" -F "bundle_name=CHAPTER" -F "description=Bab 1" /api/v1/items/:id/bitstreams</code></pre>
+                  <p class="text-xs font-ui pt-1" style="color: var(--color-dust);">
                     Search for "machine learning":
                   </p>
                   <pre
