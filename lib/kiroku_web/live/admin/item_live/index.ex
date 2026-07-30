@@ -802,8 +802,13 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
       {done, in_progress} = uploaded_entries(socket, field)
 
       if done != [] and in_progress == [] do
+        # Use the original entries order (insertion order) instead of the
+        # done list, because uploaded_entries/2 internally reverses the list
+        # — without this, Bab 1 would get the last sequence instead of the first.
+        all_entries = socket.assigns.uploads[field].entries
+
         consume_uploaded_entries(socket, field, fn %{path: tmp_path}, entry ->
-          seq_index = Enum.find_index(done, &(&1.ref == entry.ref)) || 0
+          seq_index = Enum.find_index(all_entries, &(&1.ref == entry.ref)) || 0
           seq = start_seq + seq_index
 
           content = File.read!(tmp_path)
@@ -845,7 +850,7 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   defp bundle_description(:THUMBNAIL, _), do: "Cover image"
   defp bundle_description(:ORIGINAL, 1), do: "Abstract"
   defp bundle_description(:ORIGINAL, _), do: "Full text"
-  defp bundle_description(:CHAPTER, seq), do: "Chapter #{seq}"
+  defp bundle_description(:CHAPTER, seq), do: "Bab #{seq}"
   defp bundle_description(:SUPPLEMENTAL, _), do: "Supplemental document"
   defp bundle_description(:MEDIA, _), do: "Media file"
   defp bundle_description(:SOURCE, _), do: "Source file"

@@ -1158,7 +1158,7 @@ defmodule Kiroku.Repository do
   # Builds the WHERE-only base query shared by search + facets. Does NOT
   # apply ordering, limit, or select — callers compose those on top.
   defp search_base_query(opts) do
-    from(i in Item, where: i.status == :published and i.discoverable == true)
+    from(i in Item, as: :item, where: i.status == :published and i.discoverable == true)
     |> visibility_filter(opts.scope)
     |> maybe_full_text_filter(opts.term)
     |> maybe_filter(:department, opts.department)
@@ -1319,13 +1319,38 @@ defmodule Kiroku.Repository do
   defp maybe_full_text_filter(query, nil), do: query
 
   # Uses the GENERATED `search_vector` column (see migration
-  # add_search_vector_to_items) so the `@@` match is GIN-index-backed instead
-  # of recomputing the tsvector per row. `search_vector` is not an Ecto schema
-  # field, so it is referenced as a bare SQL column inside the fragment — safe
-  # because these queries are single-table over `items`.
+  # expand_search_vector_metadata) so the `@@` match is GIN-index-backed for
+  # all item-level metadata (title, abstract, alternates, student_name,
+  # subject_classification, department, faculty, program_study, full text).
+  #
+  # Author names and keywords live in child tables and so cannot be part of a
+  # single-table GENERATED column. They are matched here via correlated
+  # `EXISTS` subqueries (no join into the base query, so they never clash
+  # with the joins the facet aggregations add on top of `search_base_query`).
   defp maybe_full_text_filter(query, term) do
     from i in query,
-      where: fragment("search_vector @@ plainto_tsquery('indonesian', ?)", ^term)
+      where:
+        fragment("search_vector @@ plainto_tsquery('indonesian', ?)", ^term) or
+          exists(
+            from a in ItemAuthor,
+              where: a.item_id == parent_as(:item).id,
+              where:
+                fragment(
+                  "to_tsvector('indonesian', coalesce(?, '')) @@ plainto_tsquery('indonesian', ?)",
+                  a.author_name,
+                  ^term
+                )
+          ) or
+          exists(
+            from k in ItemKeyword,
+              where: k.item_id == parent_as(:item).id,
+              where:
+                fragment(
+                  "to_tsvector('indonesian', coalesce(?, '')) @@ plainto_tsquery('indonesian', ?)",
+                  k.keyword,
+                  ^term
+                )
+          )
   end
 
   # When a search term is present, rank by relevance (ts_rank over the indexed

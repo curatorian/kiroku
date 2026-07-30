@@ -206,6 +206,18 @@ defmodule Kiroku.Sync do
       field(record, :LinkPath),
       field(record, :FileCover),
       field(record, :FileAbstrak),
+      field(record, :FileBab1),
+      field(record, :FileBab2),
+      field(record, :FileBab3),
+      field(record, :FileBab4),
+      field(record, :FileBab5),
+      field(record, :FileBab6),
+      field(record, :FileDaftarIsi),
+      field(record, :FilePustaka),
+      field(record, :FileLampiran),
+      field(record, :FilePengesahan),
+      field(record, :FileSurat),
+      field(record, :FileSuratIsi),
       field(record, :Tgl_Upload)
     ]
 
