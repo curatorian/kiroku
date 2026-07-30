@@ -297,12 +297,15 @@ defmodule KirokuWeb.SubmissionLive.New do
     ]
 
     Enum.each(upload_specs, fn {field, bundle, start_seq, _access} ->
-      entries = socket.assigns.uploads[field].entries
+      {done, in_progress} = uploaded_entries(socket, field)
 
-      entries
-      |> Enum.with_index(start_seq)
-      |> Enum.each(fn {_entry, seq} ->
+      if done != [] and in_progress == [] do
+        all_entries = socket.assigns.uploads[field].entries
+
         consume_uploaded_entries(socket, field, fn %{path: tmp_path}, entry ->
+          seq_index = Enum.find_index(all_entries, &(&1.ref == entry.ref)) || 0
+          seq = start_seq + seq_index
+
           content = File.read!(tmp_path)
           key = Uploader.storage_key(item.id, bundle, entry.client_name)
 
@@ -333,7 +336,7 @@ defmodule KirokuWeb.SubmissionLive.New do
 
           :ok
         end)
-      end)
+      end
     end)
 
     socket
@@ -342,7 +345,7 @@ defmodule KirokuWeb.SubmissionLive.New do
   defp bundle_description(:THUMBNAIL, _), do: "Cover image"
   defp bundle_description(:ORIGINAL, 1), do: "Abstract"
   defp bundle_description(:ORIGINAL, _), do: "Full text"
-  defp bundle_description(:CHAPTER, seq), do: "Chapter #{seq}"
+  defp bundle_description(:CHAPTER, seq), do: "Bab #{seq}"
   defp bundle_description(:SUPPLEMENTAL, _), do: "Supplemental document"
   defp bundle_description(:MEDIA, _), do: "Media file"
   defp bundle_description(:SOURCE, _), do: "Source file"

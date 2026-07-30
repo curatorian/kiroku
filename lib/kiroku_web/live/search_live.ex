@@ -102,7 +102,7 @@ defmodule KirokuWeb.SearchLive do
               name="q"
               id="search-query"
               value={@query}
-              placeholder="Search titles, abstracts, full-text, keywords…"
+              placeholder="Search titles, abstracts, authors, keywords, full-text…"
               class="kiroku-search-input flex-1"
               autocomplete="off"
             />

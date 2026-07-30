@@ -105,11 +105,14 @@ defmodule KirokuWeb.SearchLiveTest do
       assert html =~ "Siti Aminah"
     end
 
-    test "shows the empty results state before any search/filter is applied", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/search")
+    test "shows an empty state before any search/filter is applied", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/search")
 
-      # Empty results state is shown when there is no query.
+      # The sidebar is browseable even before a search (facets are always
+      # fetched), but the results area shows the empty/browsing state and
+      # no result-count summary.
       assert html =~ "Search above, or browse using the filters on the left."
+      refute has_element?(view, "p", "result(s)")
     end
 
     test "facet sidebar contains links that toggle filters", %{conn: conn} do
@@ -154,6 +157,85 @@ defmodule KirokuWeb.SearchLiveTest do
       # The author link should URL-encode the name.
       assert html =~ "author=Siti"
       assert html =~ "author=Budi"
+    end
+  end
+
+  describe "metadata search" do
+    # The q box searches across all metadata, not just title/abstract.
+    # Author names and keywords live in child tables (matched at query time
+    # via EXISTS); student_name / subject_classification are item-table
+    # columns folded into the generated search_vector.
+
+    test "matches by author name", %{conn: conn} do
+      c = create_collection()
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Quantitative methods in social science",
+        abstract: "A methodological framework for empirical analysis.",
+        item_type: "tesis",
+        faculty: "MIPA",
+        publication_year: 2024,
+        authors: ["Wibowo Narotama"]
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=Narotama")
+
+      assert has_element?(view, "p", "1 result(s)")
+    end
+
+    test "matches by keyword", %{conn: conn} do
+      c = create_collection()
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Coastal dynamics and sediment transport",
+        abstract: "Field measurements of shoreline change over a decade.",
+        item_type: "disertasi",
+        faculty: "Teknik",
+        publication_year: 2022,
+        keywords: ["kristalografi"]
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=kristalografi")
+
+      assert has_element?(view, "p", "1 result(s)")
+    end
+
+    test "matches by student name", %{conn: conn} do
+      c = create_collection()
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "On the stability of distributed systems",
+        abstract: "Formal proofs of consensus under partial failure.",
+        item_type: "skripsi",
+        student_name: "Cendana Putradipta",
+        faculty: "FTI",
+        publication_year: 2024
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=Putradipta")
+
+      assert has_element?(view, "p", "1 result(s)")
+    end
+
+    test "matches by subject classification", %{conn: conn} do
+      c = create_collection()
+
+      create_published_item(%{
+        collection_id: c.id,
+        title: "Volcanic ash layers in marine sediment cores",
+        abstract: "Stratigraphic correlation of deposits across the region.",
+        item_type: "tesis",
+        subject_classification: "Tephrochronology",
+        faculty: "Teknik Geologi",
+        publication_year: 2023
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=Tephrochronology")
+
+      assert has_element?(view, "p", "1 result(s)")
     end
   end
 end

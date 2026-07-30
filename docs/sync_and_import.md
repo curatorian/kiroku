@@ -228,7 +228,9 @@ The checksum is computed over a fixed set of relevant fields joined by `|`:
 
 ```
 Judul | Abstrak | Fakultas | Program_Studi | Jenjang | Nama |
-stPublikasi | Verifikasi | Validasi | LinkPath | FileCover | FileAbstrak | Tgl_Upload
+stPublikasi | Verifikasi | Validasi | LinkPath |
+FileCover | FileAbstrak | FileBab1–6 | FileDaftarIsi | FilePustaka | FileLampiran |
+FilePengesahan | FileSurat | FileSuratIsi | Tgl_Upload
 ```
 
 Full imports ignore this entirely — they re-process every record unconditionally.
