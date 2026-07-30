@@ -1702,6 +1702,15 @@ defmodule Kiroku.Repository do
   string-keyled maps as produced by the form; rows whose required name field is
   blank are skipped silently. Keywords is a list of `%{keyword: "..."}` maps.
   """
+  def replace_item_relations(%Item{} = item, relations) do
+    Repo.delete_all(from a in ItemAuthor, where: a.item_id == ^item.id)
+    Repo.delete_all(from a in ItemAdvisor, where: a.item_id == ^item.id)
+    Repo.delete_all(from a in ItemExaminer, where: a.item_id == ^item.id)
+    Repo.delete_all(from a in ItemTeamMember, where: a.item_id == ^item.id)
+    Repo.delete_all(from k in ItemKeyword, where: k.item_id == ^item.id)
+    create_item_relations(item, relations)
+  end
+
   def create_item_relations(%Item{id: item_id}, relations) do
     authors = Map.get(relations, :authors, [])
     advisors = Map.get(relations, :advisors, [])

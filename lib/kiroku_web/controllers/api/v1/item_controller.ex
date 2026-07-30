@@ -25,7 +25,7 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
   use KirokuWeb, :controller
 
-  alias Kiroku.{Repository, Content}
+  alias Kiroku.{Repo, Repository, Content}
   alias Kiroku.Repository.Item
   alias Kiroku.Access.Authorization
   alias Kiroku.Storage.Uploader
@@ -98,18 +98,63 @@ defmodule KirokuWeb.Api.V1.ItemController do
   # ── Write endpoints ───────────────────────────────────────────────────────
 
   @doc """
-  POST /api/v1/items — create a draft item.
+  POST /api/v1/items — create an item with granular relations.
 
-  Body: `{"item": {"title": "...", "collection_id": "...", ...}}`.
+  Body:
+      {
+        "item": {
+          "title": "...",
+          "collection_id": "...",
+          "item_type": "skripsi",
+          "student_name": "...",
+          "status": "submitted",       // optional: "draft" (default) or "submitted"
+          ...
+        },
+        "relations": {                 // optional
+          "authors": [
+            {"author_name": "...", "sequence": 1, ...}
+          ],
+          "advisors": [
+            {"advisor_name": "...", "advisor_role": "main_advisor", ...}
+          ],
+          "examiners": [
+            {"examiner_name": "...", "sequence": 1, ...}
+          ],
+          "team_members": [
+            {"member_name": "...", "role": "lead_developer", ...}
+          ],
+          "keywords": ["keyword1", "keyword2"],
+          "metadata_extras": [
+            {"field_schema": "dc", "field_element": "relation", "field_qualifier": "uri", "field_value": "https://..."}
+          ]
+        }
+      }
+
   The API user becomes the submitter. Requires `:create` permission.
+  Returns the created item with all relations preloaded.
   """
   def create(conn, %{"item" => item_params}) do
     user = conn.assigns[:current_user]
 
     if Authorization.can?(user, :create, %Item{}) do
+      relations = Map.get(conn.params, "relations", %{})
+      status = Map.get(item_params, "status", "draft")
+      item_params = Map.drop(item_params, ["status", "relations"])
       params = Map.put(item_params, "submitter_id", user.id)
 
-      case Repository.create_item(params) do
+      result =
+        Repo.transaction(fn ->
+          with {:ok, item} <- Repository.create_item(params),
+               :ok <- create_relations(item, relations),
+               :ok <- maybe_submit(item, status, user) do
+            item
+          else
+            {:error, changeset} ->
+              Repo.rollback(changeset)
+          end
+        end)
+
+      case result do
         {:ok, item} ->
           item = Repository.get_item_with_preloads!(item.id)
 
@@ -127,6 +172,99 @@ defmodule KirokuWeb.Api.V1.ItemController do
   end
 
   def create(conn, _params), do: bad_request(conn, "Missing 'item' parameter")
+
+  defp create_relations(_item, %{} = relations) when relations == %{}, do: :ok
+
+  defp create_relations(item, relations) do
+    authors = Map.get(relations, "authors", [])
+    advisors = Map.get(relations, "advisors", [])
+    examiners = Map.get(relations, "examiners", [])
+    team_members = Map.get(relations, "team_members", [])
+    keywords = Map.get(relations, "keywords", [])
+    metadata_extras = Map.get(relations, "metadata_extras", [])
+
+    with :ok <- insert_each(:author, item, authors),
+         :ok <- insert_each(:advisor, item, advisors),
+         :ok <- insert_each(:examiner, item, examiners),
+         :ok <- insert_each(:team_member, item, team_members),
+         :ok <- upsert_keywords(item, keywords),
+         :ok <- insert_metadata_extras(item, metadata_extras) do
+      :ok
+    end
+  end
+
+  defp insert_each(:author, item, authors) when is_list(authors) do
+    Enum.reduce_while(authors, :ok, fn attrs, _acc ->
+      case Repository.create_item_author(Map.put(attrs, "item_id", item.id)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, cs} -> {:halt, {:error, cs}}
+      end
+    end)
+  end
+
+  defp insert_each(:advisor, item, advisors) when is_list(advisors) do
+    Enum.reduce_while(advisors, :ok, fn attrs, _acc ->
+      case Repository.create_item_advisor(Map.put(attrs, "item_id", item.id)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, cs} -> {:halt, {:error, cs}}
+      end
+    end)
+  end
+
+  defp insert_each(:examiner, item, examiners) when is_list(examiners) do
+    Enum.reduce_while(examiners, :ok, fn attrs, _acc ->
+      case Repository.create_item_examiner(Map.put(attrs, "item_id", item.id)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, cs} -> {:halt, {:error, cs}}
+      end
+    end)
+  end
+
+  defp insert_each(:team_member, item, team_members) when is_list(team_members) do
+    Enum.reduce_while(team_members, :ok, fn attrs, _acc ->
+      case Repository.create_item_team_member(Map.put(attrs, "item_id", item.id)) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, cs} -> {:halt, {:error, cs}}
+      end
+    end)
+  end
+
+  defp upsert_keywords(_item, keywords) when keywords in [nil, []], do: :ok
+
+  defp upsert_keywords(%{id: item_id}, keywords) when is_list(keywords) do
+    Repository.upsert_keywords_for_item(item_id, keywords)
+    :ok
+  end
+
+  defp insert_metadata_extras(_item, extras) when extras in [nil, []], do: :ok
+
+  defp insert_metadata_extras(%{id: item_id}, extras) when is_list(extras) do
+    Enum.reduce_while(extras, :ok, fn attrs, _acc ->
+      attrs = Map.put(attrs, "item_id", item_id)
+
+      case Repository.put_metadata(
+             item_id,
+             attrs["field_schema"],
+             attrs["field_element"],
+             attrs["field_qualifier"],
+             attrs["field_value"],
+             language: attrs["language"],
+             position: attrs["position"] || 0
+           ) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, cs} -> {:halt, {:error, cs}}
+      end
+    end)
+  end
+
+  defp maybe_submit(item, "submitted", _user) do
+    case Repository.submit_item(item) do
+      {:ok, _} -> :ok
+      {:error, :invalid_transition} -> :ok
+    end
+  end
+
+  defp maybe_submit(_item, _status, _user), do: :ok
 
   @doc """
   PATCH /api/v1/items/:id — update item metadata.
@@ -306,18 +444,24 @@ defmodule KirokuWeb.Api.V1.ItemController do
       conference_location: item.conference_location,
       subject_classification: item.subject_classification,
       date_issued: item.date_issued,
+      status: item.status,
       collection: collection_brief(item.collection),
       authors: Enum.map(item.item_authors || [], &author_json/1),
       advisors: Enum.map(item.item_advisors || [], &advisor_json/1),
-      keywords: Enum.map(item.item_keywords || [], & &1.keyword)
+      examiners: Enum.map(item.item_examiners || [], &examiner_json/1),
+      team_members: Enum.map(item.item_team_members || [], &team_member_json/1),
+      keywords: Enum.map(item.item_keywords || [], & &1.keyword),
+      metadata_extras: Enum.map(item.metadata_extras || [], &metadata_extra_json/1)
     })
   end
 
   defp author_json(author) do
     %{
+      id: author.id,
       name: author.author_name,
       name_alt: author.author_name_alt,
       affiliation: author.affiliation,
+      email: author.email,
       orcid: author.orcid,
       sequence: author.sequence
     }
@@ -325,10 +469,47 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
   defp advisor_json(advisor) do
     %{
+      id: advisor.id,
       name: advisor.advisor_name,
+      name_alt: advisor.advisor_name_alt,
       role: advisor.advisor_role,
       affiliation: advisor.affiliation,
-      nidn: advisor.nidn
+      nidn: advisor.nidn,
+      sequence: advisor.sequence
+    }
+  end
+
+  defp examiner_json(examiner) do
+    %{
+      id: examiner.id,
+      name: examiner.examiner_name,
+      name_alt: examiner.examiner_name_alt,
+      affiliation: examiner.affiliation,
+      nidn: examiner.nidn,
+      sequence: examiner.sequence
+    }
+  end
+
+  defp team_member_json(member) do
+    %{
+      id: member.id,
+      name: member.member_name,
+      name_alt: member.member_name_alt,
+      role: member.role,
+      student_id: member.student_id,
+      affiliation: member.affiliation,
+      sequence: member.sequence
+    }
+  end
+
+  defp metadata_extra_json(extra) do
+    %{
+      id: extra.id,
+      schema: extra.field_schema,
+      element: extra.field_element,
+      qualifier: extra.field_qualifier,
+      value: extra.field_value,
+      language: extra.language
     }
   end
 
