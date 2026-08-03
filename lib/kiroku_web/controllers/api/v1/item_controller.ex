@@ -313,6 +313,397 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
   def deposit_bitstream(conn, _params), do: bad_request(conn, "Missing 'file' upload")
 
+  # ── Full deposit (item + relations + bitstreams) ────────────────────────────
+
+  @doc """
+  POST /api/v1/items/deposit — create an item with metadata, relations, and files.
+
+  Supports two modes:
+
+    1. **Multipart/form-data** (default) — files uploaded as form parts:
+
+        POST /api/v1/items/deposit
+        Content-Type: multipart/form-data
+
+        item[title]=...&item[collection_id]=...&item[item_type]=skripsi
+        relations[authors][0][author_name]=...
+        files[cover][0]=@cover.jpg
+        files[fulltext][0]=@paper.pdf
+        files[chapters][0]=@ch1.pdf&files[chapters][1]=@ch2.pdf
+
+    2. **JSON with link-based files** — files referenced by URL:
+
+        POST /api/v1/items/deposit
+        Content-Type: application/json
+
+        {
+          "deposit_type": "link",
+          "item": {"title": "...", "collection_id": "...", "item_type": "skripsi"},
+          "relations": {"authors": [...], "keywords": [...]},
+          "files": {
+            "cover": ["https://s3.../cover.jpg"],
+            "fulltext": ["https://s3.../paper.pdf"],
+            "chapters": ["https://s3.../ch1.pdf", "https://s3.../ch2.pdf"]
+          },
+          "storage_mode": "download"   // optional: "download" (default) or "reference"
+        }
+
+  The `storage_mode` option for link-based deposits:
+    - `"download"` (default) — downloads the file and stores it in local/S3 storage
+    - `"reference"` — stores the URL as storage_path with storage_type :url
+  """
+  def deposit(conn, params) do
+    user = conn.assigns[:current_user]
+
+    if Authorization.can?(user, :create, %Item{}) do
+      content_type = get_req_header(conn, "content-type") |> List.first() || ""
+
+      if conn.params["deposit_type"] == "link" or
+           (String.contains?(content_type, "json") and
+              not String.contains?(content_type, "multipart")) do
+        handle_link_deposit(conn, params, user)
+      else
+        handle_multipart_deposit(conn, params, user)
+      end
+    else
+      forbidden(conn)
+    end
+  end
+
+  defp handle_multipart_deposit(conn, %{"item" => item_params} = params, user) do
+    relations = Map.get(params, "relations", %{})
+    status = Map.get(item_params, "status", "draft")
+    item_params = Map.drop(item_params, ["status", "relations"])
+    params_with_user = Map.put(item_params, "submitter_id", user.id)
+    files = Map.get(params, "files", %{})
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, item} <- Repository.create_item(params_with_user),
+             :ok <- create_relations(item, relations),
+             :ok <- maybe_submit(item, status, user),
+             :ok <- upload_multipart_files(item, files) do
+          item
+        else
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+          {:error, reason} -> Repo.rollback({:upload_error, reason})
+        end
+      end)
+
+    case result do
+      {:ok, item} ->
+        item = Repository.get_item_with_preloads!(item.id)
+
+        conn
+        |> put_status(:created)
+        |> put_resp_header("location", "/api/v1/items/#{item.id}")
+        |> json(%{data: item_full_json(item)})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        unprocessable(conn, changeset)
+
+      {:error, {:upload_error, reason}} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "File upload failed", detail: inspect(reason)})
+    end
+  end
+
+  defp handle_multipart_deposit(conn, _params, _user),
+    do: bad_request(conn, "Missing 'item' parameter")
+
+  defp handle_link_deposit(conn, %{"item" => item_params} = params, user) do
+    relations = Map.get(params, "relations", %{})
+    status = Map.get(item_params, "status", "draft")
+    item_params = Map.drop(item_params, ["status", "relations"])
+    params_with_user = Map.put(item_params, "submitter_id", user.id)
+    files = Map.get(params, "files", %{})
+    storage_mode = Map.get(params, "storage_mode", "download")
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, item} <- Repository.create_item(params_with_user),
+             :ok <- create_relations(item, relations),
+             :ok <- maybe_submit(item, status, user),
+             :ok <- upload_link_files(item, files, storage_mode) do
+          item
+        else
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+          {:error, reason} -> Repo.rollback({:upload_error, reason})
+        end
+      end)
+
+    case result do
+      {:ok, item} ->
+        item = Repository.get_item_with_preloads!(item.id)
+
+        conn
+        |> put_status(:created)
+        |> put_resp_header("location", "/api/v1/items/#{item.id}")
+        |> json(%{data: item_full_json(item)})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        unprocessable(conn, changeset)
+
+      {:error, {:upload_error, reason}} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "File upload failed", detail: inspect(reason)})
+    end
+  end
+
+  defp handle_link_deposit(conn, _params, _user),
+    do: bad_request(conn, "Missing 'item' parameter")
+
+  # ── Multipart file processing ──────────────────────────────────────────────
+
+  @spec upload_multipart_files(Item.t(), map()) :: :ok | {:error, any()}
+  defp upload_multipart_files(_item, files) when files == %{}, do: :ok
+
+  defp upload_multipart_files(item, files) do
+    upload_specs = upload_specs_for_type(to_string(item.item_type))
+
+    Enum.reduce_while(upload_specs, :ok, fn {field, bundle, start_seq}, _acc ->
+      case Map.get(files, to_string(field)) do
+        nil ->
+          {:cont, :ok}
+
+        entries when is_list(entries) ->
+          result =
+            entries
+            |> Enum.with_index()
+            |> Enum.reduce_while(:ok, fn {entry, idx}, _acc ->
+              case entry do
+                %Plug.Upload{} = upload ->
+                  seq = start_seq + idx
+                  content = File.read!(upload.path)
+                  key = Uploader.storage_key(item.id, bundle, upload.filename)
+                  mime = upload.content_type || "application/octet-stream"
+
+                  case Uploader.upload(key, content, mime_type: mime) do
+                    {:ok, %{checksum: checksum, size: size}} ->
+                      attrs =
+                        %{
+                          item_id: item.id,
+                          filename: upload.filename,
+                          bundle_name: bundle,
+                          sequence: seq,
+                          description: bundle_description(bundle, seq),
+                          mime_type: mime,
+                          file_size: size,
+                          storage_path: key,
+                          checksum: checksum,
+                          checksum_algorithm: "MD5",
+                          access_level: "inherit"
+                        }
+                        |> Map.merge(Uploader.record_attrs())
+
+                      case Content.create_bitstream(attrs) do
+                        {:ok, _} -> {:cont, :ok}
+                        {:error, cs} -> {:halt, {:error, cs}}
+                      end
+
+                    {:error, reason} ->
+                      {:halt, {:error, reason}}
+                  end
+
+                _ ->
+                  {:halt, {:error, :invalid_upload}}
+              end
+            end)
+
+          case result do
+            :ok -> {:cont, :ok}
+            error -> {:halt, error}
+          end
+
+        _ ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  # ── Link-based file processing ─────────────────────────────────────────────
+
+  @spec upload_link_files(Item.t(), map(), String.t()) :: :ok | {:error, any()}
+  defp upload_link_files(_item, files, _storage_mode) when files == %{}, do: :ok
+
+  defp upload_link_files(item, files, storage_mode) do
+    upload_specs = upload_specs_for_type(to_string(item.item_type))
+
+    Enum.reduce_while(upload_specs, :ok, fn {field, bundle, start_seq}, _acc ->
+      case Map.get(files, to_string(field)) do
+        nil ->
+          {:cont, :ok}
+
+        urls when is_list(urls) ->
+          result =
+            urls
+            |> Enum.with_index()
+            |> Enum.reduce_while(:ok, fn {url, idx}, _acc ->
+              seq = start_seq + idx
+
+              case download_and_store_url(item.id, bundle, url, seq, storage_mode) do
+                :ok -> {:cont, :ok}
+                {:error, reason} -> {:halt, {:error, reason}}
+              end
+            end)
+
+          case result do
+            :ok -> {:cont, :ok}
+            error -> {:halt, error}
+          end
+
+        _ ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp download_and_store_url(item_id, bundle, url, seq, "reference") do
+    filename = url |> Path.basename() |> URI.decode() |> Path.basename()
+    filename = if filename == "", do: "file_#{seq}", else: filename
+
+    attrs =
+      %{
+        item_id: item_id,
+        filename: filename,
+        bundle_name: bundle,
+        sequence: seq,
+        description: bundle_description(bundle, seq),
+        mime_type: MIME.type(filename),
+        file_size: 0,
+        storage_type: :url,
+        storage_path: url,
+        checksum: nil,
+        checksum_algorithm: nil,
+        access_level: "inherit"
+      }
+      |> Map.merge(Uploader.record_attrs())
+
+    case Content.create_bitstream(attrs) do
+      {:ok, _} -> :ok
+      {:error, cs} -> {:error, cs}
+    end
+  end
+
+  defp download_and_store_url(item_id, bundle, url, seq, _storage_mode) do
+    case Req.get(url, decode_body: false) do
+      {:ok, %{status: 200, body: body} = resp} when is_binary(body) ->
+        filename = extract_filename_from_url(url, resp)
+        content_type = extract_content_type(resp) || MIME.type(filename)
+        key = Uploader.storage_key(item_id, bundle, filename)
+
+        case Uploader.upload(key, body, mime_type: content_type) do
+          {:ok, %{checksum: checksum, size: size}} ->
+            attrs =
+              %{
+                item_id: item_id,
+                filename: filename,
+                bundle_name: bundle,
+                sequence: seq,
+                description: bundle_description(bundle, seq),
+                mime_type: content_type,
+                file_size: size,
+                storage_path: key,
+                checksum: checksum,
+                checksum_algorithm: "MD5",
+                access_level: "inherit"
+              }
+              |> Map.merge(Uploader.record_attrs())
+
+            case Content.create_bitstream(attrs) do
+              {:ok, _} -> :ok
+              {:error, cs} -> {:error, cs}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, {:http_error, status, url}}
+
+      {:error, reason} ->
+        {:error, {:download_failed, url, reason}}
+    end
+  end
+
+  defp extract_filename_from_url(url, resp) do
+    # Try Content-Disposition header first
+    content_disp =
+      case get_resp_header(resp, "content-disposition") do
+        [val | _] -> val
+        _ -> nil
+      end
+
+    filename =
+      case content_disp do
+        "attachment" <> _ ->
+          ~r/filename="?([^";\s]+)"?/
+          |> Regex.run(content_disp)
+          |> then(fn
+            [_, name] -> name
+            _ -> nil
+          end)
+
+        _ ->
+          nil
+      end
+
+    # Fall back to URL path
+    filename =
+      if filename do
+        URI.decode(filename)
+      else
+        url
+        |> URI.parse()
+        |> Map.get(:path, "")
+        |> Path.basename()
+      end
+
+    if filename == "" or filename == "/" do
+      "file_#{System.unique_integer([:positive])}"
+    else
+      filename
+    end
+  end
+
+  defp extract_content_type(resp) do
+    case get_resp_header(resp, "content-type") do
+      [ct | _] -> ct |> String.split(";") |> List.first() |> String.trim()
+      _ -> nil
+    end
+  end
+
+  # ── Upload spec helpers ─────────────────────────────────────────────────────
+
+  defp upload_specs_for_type(type) do
+    all_specs = [
+      {:cover, :THUMBNAIL, 1},
+      {:abstract, :ORIGINAL, 1},
+      {:fulltext, :ORIGINAL, 2},
+      {:chapters, :CHAPTER, 1},
+      {:supplemental, :SUPPLEMENTAL, 1},
+      {:media, :MEDIA, 1},
+      {:source, :SOURCE, 1},
+      {:administrative, :ADMINISTRATIVE, 1}
+    ]
+
+    keep = KirokuWeb.ItemForm.bundles_for_type(type)
+
+    Enum.filter(all_specs, fn {field, _bundle, _seq} -> field in keep end)
+  end
+
+  defp bundle_description(:THUMBNAIL, _), do: "Cover image"
+  defp bundle_description(:ORIGINAL, 1), do: "Abstract"
+  defp bundle_description(:ORIGINAL, _), do: "Full text"
+  defp bundle_description(:CHAPTER, seq), do: "Bab #{seq}"
+  defp bundle_description(:SUPPLEMENTAL, _), do: "Supplemental document"
+  defp bundle_description(:MEDIA, _), do: "Media file"
+  defp bundle_description(:SOURCE, _), do: "Source file"
+  defp bundle_description(:ADMINISTRATIVE, _), do: "Administrative document"
+
   defp deposit(conn, item, %Plug.Upload{} = upload, bundle) do
     content = File.read!(upload.path)
     key = Uploader.storage_key(item.id, bundle, upload.filename)
