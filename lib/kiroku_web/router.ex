@@ -25,6 +25,12 @@ defmodule KirokuWeb.Router do
     plug KirokuWeb.Plugs.RequireApiToken
   end
 
+  pipeline :authenticated_api_multipart do
+    plug :accepts, ["json", "multipart/form-data"]
+    plug KirokuWeb.Plugs.ApiAuth
+    plug KirokuWeb.Plugs.RequireApiToken
+  end
+
   # ── Health check (container liveness/readiness probe) ─────────────────────────
   scope "/", KirokuWeb do
     pipe_through :api
@@ -85,6 +91,12 @@ defmodule KirokuWeb.Router do
       get "/bitstreams", ItemController, :bitstreams, as: :bitstreams
       post "/bitstreams", ItemController, :deposit_bitstream, as: :bitstreams
     end
+  end
+
+  scope "/api/v1", KirokuWeb.Api.V1 do
+    pipe_through :authenticated_api_multipart
+
+    post "/items/deposit", ItemController, :deposit
   end
 
   # ── SWORD v2 deposit API ─────────────────────────────────────────────────────
@@ -211,6 +223,7 @@ defmodule KirokuWeb.Router do
     live_session :admin_api_tokens,
       on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
       live "/api-tokens", Admin.ApiTokenLive, :index
+      live "/api-reference", Admin.ApiReferenceLive, :index
     end
   end
 
