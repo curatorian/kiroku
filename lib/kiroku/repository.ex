@@ -1691,7 +1691,10 @@ defmodule Kiroku.Repository do
     |> Enum.with_index(0)
     |> Enum.map(fn {attrs, idx} ->
       %ItemKeyword{}
-      |> ItemKeyword.changeset(Map.merge(attrs, %{item_id: item_id, position: idx}))
+      |> ItemKeyword.changeset(
+        Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+        |> Map.merge(%{"item_id" => item_id, "position" => idx})
+      )
       |> Repo.insert()
     end)
   end
