@@ -84,8 +84,8 @@ defmodule KirokuWeb.Router do
   scope "/api/v1", KirokuWeb.Api.V1 do
     pipe_through :authenticated_api
 
-    resources "/communities", CommunityController, only: [:index, :show]
-    resources "/collections", CollectionController, only: [:index, :show]
+    resources "/communities", CommunityController, only: [:index, :show, :create]
+    resources "/collections", CollectionController, only: [:index, :show, :create]
 
     resources "/items", ItemController, only: [:index, :show, :create, :update] do
       get "/bitstreams", ItemController, :bitstreams, as: :bitstreams

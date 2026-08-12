@@ -115,6 +115,67 @@
             "$ref": "#/components/responses/Unauthorized"
           }
         }
+      },
+      "post": {
+        "tags": ["Communities"],
+        "summary": "Create community",
+        "description": "Create a new community. Requires superadmin privileges.",
+        "operationId": "createCommunity",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunityCreateRequest"
+              },
+              "example": {
+                "community": {
+                  "name": "Fakultas Teknik",
+                  "handle": "ft",
+                  "short_description": "Faculty of Engineering",
+                  "description": "Academic works from the Faculty of Engineering",
+                  "position": 1,
+                  "access_level": "open"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Community created",
+            "headers": {
+              "Location": {
+                "description": "URL of the created community",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Community"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       }
     },
     "/api/v1/communities/{id}": {
@@ -226,6 +287,69 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": ["Collections"],
+        "summary": "Create collection",
+        "description": "Create a new collection within a community. Requires admin privileges.",
+        "operationId": "createCollection",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionCreateRequest"
+              },
+              "example": {
+                "collection": {
+                  "name": "Teknik Informatika",
+                  "handle": "ti",
+                  "short_description": "Computer Science",
+                  "description": "Computer Science department works",
+                  "community_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "position": 1,
+                  "access_level": "open",
+                  "default_item_access_level": "internal"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Collection created",
+            "headers": {
+              "Location": {
+                "description": "URL of the created collection",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Collection"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2013,6 +2137,122 @@
             "type": "string",
             "enum": ["open", "internal", "inherit", "restricted", "closed"],
             "example": "inherit"
+          }
+        }
+      },
+      "CommunityCreateRequest": {
+        "type": "object",
+        "required": ["community"],
+        "properties": {
+          "community": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Community name",
+                "example": "Fakultas Teknik"
+              },
+              "handle": {
+                "type": "string",
+                "description": "Unique handle (optional, auto-generated if not provided)",
+                "example": "ft"
+              },
+              "short_description": {
+                "type": "string",
+                "description": "Short description",
+                "example": "Faculty of Engineering"
+              },
+              "description": {
+                "type": "string",
+                "description": "Full description",
+                "example": "Academic works from the Faculty of Engineering"
+              },
+              "position": {
+                "type": "integer",
+                "description": "Display order position",
+                "example": 1
+              },
+              "access_level": {
+                "type": "string",
+                "enum": ["open", "internal", "restricted", "closed"],
+                "description": "Visibility level",
+                "default": "open"
+              },
+              "parent_community_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Parent community UUID (optional, for subcommunities)"
+              },
+              "is_active": {
+                "type": "boolean",
+                "description": "Whether the community is active",
+                "default": true
+              }
+            }
+          }
+        }
+      },
+      "CollectionCreateRequest": {
+        "type": "object",
+        "required": ["collection"],
+        "properties": {
+          "collection": {
+            "type": "object",
+            "required": ["name", "community_id"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Collection name",
+                "example": "Teknik Informatika"
+              },
+              "handle": {
+                "type": "string",
+                "description": "Unique handle (optional, auto-generated if not provided)",
+                "example": "ti"
+              },
+              "short_description": {
+                "type": "string",
+                "description": "Short description",
+                "example": "Computer Science"
+              },
+              "description": {
+                "type": "string",
+                "description": "Full description",
+                "example": "Computer Science department works"
+              },
+              "community_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Parent community UUID (required)"
+              },
+              "position": {
+                "type": "integer",
+                "description": "Display order position",
+                "example": 1
+              },
+              "access_level": {
+                "type": "string",
+                "enum": ["open", "internal", "restricted", "closed"],
+                "description": "Visibility level",
+                "default": "open"
+              },
+              "default_item_access_level": {
+                "type": "string",
+                "enum": ["open", "internal", "restricted", "closed"],
+                "description": "Default access level for new items in this collection",
+                "default": "open"
+              },
+              "is_active": {
+                "type": "boolean",
+                "description": "Whether the collection is active",
+                "default": true
+              },
+              "license_text": {
+                "type": "string",
+                "description": "License text for items in this collection"
+              }
+            }
           }
         }
       },

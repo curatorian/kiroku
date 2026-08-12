@@ -2,14 +2,18 @@ defmodule KirokuWeb.Api.V1.CollectionController do
   @moduledoc """
   REST API v1 — Collections.
 
-  GET /api/v1/collections           — list all active collections
-  GET /api/v1/collections/:id       — show a single collection with item count
+  GET  /api/v1/collections           — list all active collections
+  GET  /api/v1/collections/:id       — show a single collection with item count
+  POST /api/v1/collections           — create a collection (admin only)
   """
 
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Repo}
   alias Kiroku.Access.Authorization
+  alias Kiroku.Repository.Collection
+
+  action_fallback KirokuWeb.FallbackController
 
   def index(conn, params) do
     community_id = params["community_id"]
@@ -49,6 +53,29 @@ defmodule KirokuWeb.Api.V1.CollectionController do
     end
   end
 
+  def create(conn, %{"collection" => collection_params}) do
+    user = conn.assigns[:current_user]
+
+    if Authorization.can?(user, :create, %Collection{}) do
+      case Repository.create_collection(collection_params) do
+        {:ok, collection} ->
+          conn
+          |> put_status(:created)
+          |> put_resp_header("location", "/api/v1/collections/#{collection.id}")
+          |> json(%{data: collection_json(collection)})
+
+        {:error, changeset} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{errors: format_errors(changeset)})
+      end
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{error: "Forbidden"})
+    end
+  end
+
   defp collection_json(collection, opts \\ []) do
     base = %{
       id: collection.id,
@@ -77,5 +104,13 @@ defmodule KirokuWeb.Api.V1.CollectionController do
     else
       base
     end
+  end
+
+  defp format_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
   end
 end

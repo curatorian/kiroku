@@ -2,14 +2,16 @@ defmodule KirokuWeb.Api.V1.CommunityController do
   @moduledoc """
   REST API v1 — Communities.
 
-  GET /api/v1/communities       — list active communities
-  GET /api/v1/communities/:id   — show a single community
+  GET  /api/v1/communities       — list active communities
+  GET  /api/v1/communities/:id   — show a single community
+  POST /api/v1/communities       — create a community (superadmin only)
   """
 
   use KirokuWeb, :controller
 
   alias Kiroku.{Repository, Repo}
   alias Kiroku.Access.Authorization
+  alias Kiroku.Repository.Community
 
   action_fallback KirokuWeb.FallbackController
 
@@ -36,6 +38,29 @@ defmodule KirokuWeb.Api.V1.CommunityController do
           |> put_status(:not_found)
           |> json(%{error: "Community not found"})
         end
+    end
+  end
+
+  def create(conn, %{"community" => community_params}) do
+    user = conn.assigns[:current_user]
+
+    if Authorization.can?(user, :create, %Community{}) do
+      case Repository.create_community(community_params) do
+        {:ok, community} ->
+          conn
+          |> put_status(:created)
+          |> put_resp_header("location", "/api/v1/communities/#{community.id}")
+          |> json(%{data: community_json(community)})
+
+        {:error, changeset} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{errors: format_errors(changeset)})
+      end
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{error: "Forbidden"})
     end
   end
 
@@ -72,5 +97,13 @@ defmodule KirokuWeb.Api.V1.CommunityController do
       handle: collection.handle,
       short_description: collection.short_description
     }
+  end
+
+  defp format_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
   end
 end
