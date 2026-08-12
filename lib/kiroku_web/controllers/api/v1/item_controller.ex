@@ -232,7 +232,13 @@ defmodule KirokuWeb.Api.V1.ItemController do
   defp upsert_keywords(_item, keywords) when keywords in [nil, []], do: :ok
 
   defp upsert_keywords(%{id: item_id}, keywords) when is_list(keywords) do
-    Repository.upsert_keywords_for_item(item_id, keywords)
+    normalized =
+      Enum.map(keywords, fn
+        keyword when is_binary(keyword) -> %{"keyword" => keyword}
+        %{} = map -> Map.new(map, fn {k, v} -> {to_string(k), v} end)
+      end)
+
+    Repository.upsert_keywords_for_item(item_id, normalized)
     :ok
   end
 

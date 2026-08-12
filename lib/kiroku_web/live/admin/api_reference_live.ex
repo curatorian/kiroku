@@ -317,9 +317,15 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
             })}
             {curl_example(assigns, %{
               id: "curl-full-deposit",
-              title: "Full deposit (item + files)",
+              title: "Full deposit — multipart (item + files)",
               command:
                 "curl -X POST -H \"Authorization: Bearer kiroku_...\" -F \"item[title]=Judul Skripsi\" -F \"item[collection_id]=UUID\" -F \"item[item_type]=skripsi\" -F \"relations[authors][0][author_name]=Penulis\" -F \"files[fulltext]=@skripsi.pdf\" /api/v1/items/deposit"
+            })}
+            {curl_example(assigns, %{
+              id: "curl-link-deposit",
+              title: "Full deposit — link mode (item + URL files)",
+              command:
+                ~s(curl -X POST -H "Authorization: Bearer kiroku_..." -H "Content-Type: application/json" -d '{"deposit_type":"link","item":{"title":"Judul Skripsi","collection_id":"UUID","item_type":"skripsi"},"relations":{"authors":[{"author_name":"Penulis","sequence":1}],"keywords":["AI"]},"files":{"fulltext":["https://s3.example.com/paper.pdf"],"chapters":["https://s3.example.com/ch1.pdf"]},"storage_mode":"reference"}' /api/v1/items/deposit)
             })}
           </div>
         </div>
@@ -424,22 +430,61 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
 
   defp full_deposit_body do
     """
+    ════════════════════════════════════════════════════════════════
+    Mode 1: Multipart/form-data (file uploads)
+    ════════════════════════════════════════════════════════════════
     Content-Type: multipart/form-data
 
     item[title]           (string)  - Item title (required)
     item[collection_id]   (UUID)    - Target collection (required)
-    item[item_type]       (string)  - skripsi, tesis, disertasi, tugas-akhir
+    item[item_type]       (string)  - skripsi, tesis, disertasi, tugas-akhir,
+                                      jurnal_nasional, jurnal_internasional, etc.
     item[abstract]        (string)  - Abstract / summary
     item[student_name]    (string)  - Student author name
     item[status]          (string)  - draft (default), submitted
 
-    relations[authors]      (array)   - List of author objects: author_name, sequence, affiliation, email, orcid
-    relations[advisors]     (array)   - List of advisor objects: advisor_name, advisor_role, affiliation, nidn
-    relations[keywords]     (array)   - List of keyword strings
+    relations[authors]      (array)   - Author objects: author_name, sequence, affiliation, email, orcid
+    relations[advisors]     (array)   - Advisor objects: advisor_name, advisor_role, affiliation, nidn
+    relations[keywords]     (array)   - Keyword strings: ["keyword1", "keyword2"]
 
-    files[fulltext]       (binary)  - Full text PDF upload
-    files[cover]          (binary)  - Cover image upload
-    files[chapters]       (binary)  - Chapter file uploads (multiple allowed)
+    files[cover]          (binary)  - Cover image (JPG/PNG, max 5 MB)
+    files[fulltext]       (binary)  - Full text PDF (max 100 MB)
+    files[chapters]       (binary)  - Chapter PDFs (multiple allowed, max 50 MB each)
+    files[supplemental]   (binary)  - Supplemental documents
+    files[media]          (binary)  - Media files (MP3, MP4, etc.)
+    files[administrative] (binary)  - Administrative docs (staff-only)
+
+    ════════════════════════════════════════════════════════════════
+    Mode 2: JSON with link-based files
+    ════════════════════════════════════════════════════════════════
+    Content-Type: application/json
+
+    {
+      "deposit_type": "link",
+      "item": {
+        "title": "Judul Skripsi",
+        "collection_id": "e5f6g7h8-...",
+        "item_type": "skripsi",
+        "abstract": "Abstrak...",
+        "student_name": "Mahasiswa",
+        "status": "draft"
+      },
+      "relations": {
+        "authors": [{"author_name": "Penulis", "sequence": 1}],
+        "advisors": [{"advisor_name": "Dr. X", "advisor_role": "main_advisor"}],
+        "keywords": ["kata kunci"]
+      },
+      "files": {
+        "fulltext": ["https://s3.example.com/paper.pdf"],
+        "chapters": ["https://s3.example.com/ch1.pdf", "https://s3.example.com/ch2.pdf"],
+        "cover": ["https://s3.example.com/cover.jpg"]
+      },
+      "storage_mode": "reference"
+    }
+
+    storage_mode options:
+      "reference" — stores the URL as-is (no download)
+      "download"  — downloads file and stores in local/S3 storage (default)
     """
   end
 
