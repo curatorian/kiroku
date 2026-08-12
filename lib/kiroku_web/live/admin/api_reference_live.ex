@@ -130,6 +130,15 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
             params: [%{name: "id", type: "UUID", required: true, description: "Community UUID"}],
             response: %{status: "200 OK", body: communities_show_json()}
           })}
+          {endpoint_card(assigns, %{
+            id: "communities-create",
+            method: "POST",
+            path: "/communities",
+            description: "Create a new community. Requires superadmin privileges.",
+            params: [],
+            body: communities_create_body(),
+            response: %{status: "201 Created", body: communities_create_json()}
+          })}
         </div>
 
         <div class="kiroku-card p-6 space-y-4">
@@ -161,6 +170,15 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
             description: "Retrieve a single collection with item count and parent community.",
             params: [%{name: "id", type: "UUID", required: true, description: "Collection UUID"}],
             response: %{status: "200 OK", body: collections_show_json()}
+          })}
+          {endpoint_card(assigns, %{
+            id: "collections-create",
+            method: "POST",
+            path: "/collections",
+            description: "Create a new collection within a community. Requires admin privileges.",
+            params: [],
+            body: collections_create_body(),
+            response: %{status: "201 Created", body: collections_create_json()}
           })}
         </div>
 
@@ -310,6 +328,18 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
                 "curl -X POST -H \"Authorization: Bearer kiroku_...\" -H \"Content-Type: application/json\" -d '{\"item\":{\"title\":\"Judul\",\"collection_id\":\"UUID\",\"item_type\":\"skripsi\"}}' /api/v1/items"
             })}
             {curl_example(assigns, %{
+              id: "curl-create-community",
+              title: "Create a community",
+              command:
+                "curl -X POST -H \"Authorization: Bearer kiroku_...\" -H \"Content-Type: application/json\" -d '{\"community\":{\"name\":\"Fakultas Teknik\",\"handle\":\"ft\",\"short_description\":\"Faculty of Engineering\"}}' /api/v1/communities"
+            })}
+            {curl_example(assigns, %{
+              id: "curl-create-collection",
+              title: "Create a collection",
+              command:
+                "curl -X POST -H \"Authorization: Bearer kiroku_...\" -H \"Content-Type: application/json\" -d '{\"collection\":{\"name\":\"Skripsi\",\"handle\":\"ft-skripsi\",\"community_id\":\"UUID\",\"short_description\":\"Undergraduate theses\"}}' /api/v1/collections"
+            })}
+            {curl_example(assigns, %{
               id: "curl-upload",
               title: "Upload a file",
               command:
@@ -392,6 +422,22 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
   defp collections_show_json,
     do:
       ~s({"data":{"id":"e5f6g7h8-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses","community_id":"a1b2c3d4-...","position":1,"inserted_at":"2024-01-15T09:00:00Z","item_count":142,"community":{"id":"a1b2c3d4-...","name":"Fakultas Teknik","handle":"ft"}}})
+
+  defp communities_create_body do
+    ~s({"community":{"name":"Fakultas Teknik","handle":"ft","short_description":"Faculty of Engineering","description":"Academic works from the Faculty of Engineering","position":1,"access_level":"open","parent_community_id":"optional-parent-uuid"}})
+  end
+
+  defp communities_create_json,
+    do:
+      ~s({"data":{"id":"new-uuid-...","name":"Fakultas Teknik","handle":"ft","short_description":"Faculty of Engineering","description":"...","position":1,"inserted_at":"2024-01-15T08:30:00Z"}})
+
+  defp collections_create_body do
+    ~s({"collection":{"name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses","description":"Collection for undergraduate theses","community_id":"a1b2c3d4-...","position":1,"access_level":"open","default_item_access_level":"internal"}})
+  end
+
+  defp collections_create_json,
+    do:
+      ~s({"data":{"id":"new-uuid-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses","community_id":"a1b2c3d4-...","position":1,"inserted_at":"2024-01-15T09:00:00Z"}})
 
   defp items_list_json,
     do:
