@@ -395,4 +395,55 @@ defmodule Kiroku.Settings do
       endpoint: get("doi_endpoint", System.get_env("DOI_ENDPOINT", "https://api.datacite.org"))
     }
   end
+
+  # ── OAI-PMH helpers ─────────────────────────────────────────────────────────
+
+  @doc """
+  Returns the OAI-PMH repository identifier namespace prefix.
+
+  Emitted in every OAI record header as `<identifier>oai:host:item_id</identifier>`
+  and used to parse `GetRecord` requests. The value is the full prefix including
+  the `oai:` scheme (e.g. `oai:repository.unpad.ac.id`).
+
+  Priority: DB setting → OAI_REPO_IDENTIFIER env var → compile-time config →
+  "oai:kiroku.ac.id" (default).
+  """
+  def oai_repo_identifier do
+    get("oai_repo_identifier") ||
+      System.get_env("OAI_REPO_IDENTIFIER") ||
+      Application.get_env(:kiroku, :oai_repo_identifier, "oai:kiroku.ac.id")
+  end
+
+  @doc """
+  Returns the OAI-PMH repository name advertised in the `Identify` response.
+
+  Priority: DB setting → OAI_REPO_NAME env var → compile-time config →
+  "Kiroku Institutional Repository" (default).
+  """
+  def oai_repo_name do
+    get("oai_repo_name") ||
+      System.get_env("OAI_REPO_NAME") ||
+      Application.get_env(:kiroku, :oai_repo_name, "Kiroku Institutional Repository")
+  end
+
+  @doc """
+  Returns the OAI-PMH admin contact e-mail advertised in the `Identify` response.
+
+  Priority: DB setting → OAI_ADMIN_EMAIL env var → compile-time config →
+  "admin@kiroku.ac.id" (default).
+  """
+  def oai_admin_email do
+    get("oai_admin_email") ||
+      System.get_env("OAI_ADMIN_EMAIL") ||
+      Application.get_env(:kiroku, :oai_admin_email, "admin@kiroku.ac.id")
+  end
+
+  @doc "Returns a map of OAI-PMH settings for the admin UI."
+  def oai_settings do
+    %{
+      repo_identifier: oai_repo_identifier(),
+      repo_name: oai_repo_name(),
+      admin_email: oai_admin_email()
+    }
+  end
 end

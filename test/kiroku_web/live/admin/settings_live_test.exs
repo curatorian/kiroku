@@ -74,4 +74,40 @@ defmodule KirokuWeb.Admin.SettingsLiveTest do
       refute has_element?(view, "#logo-upload img")
     end
   end
+
+  describe "OAI-PMH settings" do
+    test "renders the OAI form fields", %{conn: conn} do
+      conn = log_in(conn, create_admin_user())
+
+      {:ok, view, _html} = live(conn, ~p"/admin/settings")
+
+      assert has_element?(view, "#oai-form")
+      assert has_element?(view, "#oai-form input[name='oai[repo_identifier]']")
+      assert has_element?(view, "#oai-form input[name='oai[repo_name]']")
+      assert has_element?(view, "#oai-form input[name='oai[admin_email]']")
+    end
+
+    test "saves the OAI repository identifier, name, and admin e-mail", %{conn: conn} do
+      conn = log_in(conn, create_admin_user())
+
+      {:ok, view, _html} = live(conn, ~p"/admin/settings")
+
+      refute Settings.oai_repo_identifier() == "oai:repository.unpad.ac.id"
+      refute Settings.oai_repo_name() == "Universitas Padjadjaran Repository"
+
+      view
+      |> form("#oai-form",
+        oai: %{
+          repo_identifier: "oai:repository.unpad.ac.id",
+          repo_name: "Universitas Padjadjaran Repository",
+          admin_email: "repository@unpad.ac.id"
+        }
+      )
+      |> render_submit()
+
+      assert Settings.oai_repo_identifier() == "oai:repository.unpad.ac.id"
+      assert Settings.oai_repo_name() == "Universitas Padjadjaran Repository"
+      assert Settings.oai_admin_email() == "repository@unpad.ac.id"
+    end
+  end
 end

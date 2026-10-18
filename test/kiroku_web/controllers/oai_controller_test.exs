@@ -57,6 +57,18 @@ defmodule KirokuWeb.OaiControllerTest do
       assert body =~ "protocolVersion>2.0"
       assert body =~ "granularity>YYYY-MM-DDThh:mm:ssZ"
     end
+
+    test "uses the configured repository name and admin e-mail", %{conn: conn} do
+      Kiroku.Settings.put("oai_repo_name", "Universitas Padjadjaran Repository")
+      Kiroku.Settings.put("oai_admin_email", "repository@unpad.ac.id")
+
+      body = response(oai(conn, %{"verb" => "Identify"}), 200)
+
+      assert body =~ "<repositoryName>Universitas Padjadjaran Repository</repositoryName>"
+      assert body =~ "<adminEmail>repository@unpad.ac.id</adminEmail>"
+      refute body =~ "Kiroku Institutional Repository"
+      refute body =~ "admin@kiroku.ac.id"
+    end
   end
 
   describe "ListMetadataFormats" do
@@ -123,6 +135,18 @@ defmodule KirokuWeb.OaiControllerTest do
       assert MapSet.subset?(titles, all_titles)
     end
 
+    test "uses the configured repository identifier", %{conn: conn} do
+      {_, collection} = create_collection()
+      item = published_item(collection.id)
+
+      Kiroku.Settings.put("oai_repo_identifier", "oai:repository.unpad.ac.id")
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert body =~ "oai:repository.unpad.ac.id:#{item.id}"
+      refute body =~ "oai:kiroku.ac.id:#{item.id}"
+    end
+
     test "set filter scopes to a collection", %{conn: conn} do
       {_, coll_a} = create_collection()
       {_, coll_b} = create_collection()
@@ -148,7 +172,13 @@ defmodule KirokuWeb.OaiControllerTest do
       {_, collection} = create_collection()
       published_item(collection.id)
 
-      future = DateTime.utc_now() |> DateTime.add(86_400, :second) |> DateTime.to_iso8601()
+      # Seconds-granularity dates must match the exact format the spec
+      # declares (YYYY-MM-DDThh:mm:ssZ) — fractional seconds are illegal.
+      future =
+        DateTime.utc_now()
+        |> DateTime.add(86_400, :second)
+        |> DateTime.truncate(:second)
+        |> DateTime.to_iso8601()
 
       body =
         response(
@@ -163,7 +193,11 @@ defmodule KirokuWeb.OaiControllerTest do
       {_, collection} = create_collection()
       published_item(collection.id)
 
-      past = DateTime.utc_now() |> DateTime.add(-86_400, :second) |> DateTime.to_iso8601()
+      past =
+        DateTime.utc_now()
+        |> DateTime.add(-86_400, :second)
+        |> DateTime.truncate(:second)
+        |> DateTime.to_iso8601()
 
       body =
         response(
@@ -226,6 +260,26 @@ defmodule KirokuWeb.OaiControllerTest do
       assert body =~ "Abstrak unik."
     end
 
+    test "GetRecord accepts the configured identifier prefix", %{conn: conn} do
+      {_, collection} = create_collection()
+      item = published_item(collection.id, %{"abstract" => "Abstrak unik."})
+
+      Kiroku.Settings.put("oai_repo_identifier", "oai:repository.unpad.ac.id")
+
+      body =
+        response(
+          oai(conn, %{
+            "verb" => "GetRecord",
+            "metadataPrefix" => "oai_dc",
+            "identifier" => "oai:repository.unpad.ac.id:#{item.id}"
+          }),
+          200
+        )
+
+      assert body =~ item.title
+      assert body =~ "Abstrak unik."
+    end
+
     test "idDoesNotExist for unknown identifier", %{conn: conn} do
       body =
         response(
@@ -252,6 +306,206 @@ defmodule KirokuWeb.OaiControllerTest do
         response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "proc_xml"}), 200)
 
       assert body =~ ~s(code="cannotDisseminateFormat")
+    end
+  end
+
+  describe "spec conformance (OAI-PMH.xsd)" do
+    test "error responses carry the mandatory <request> element", %{conn: conn} do
+      {_, collection} = create_collection()
+      published_item(collection.id)
+
+      body =
+        response(
+          oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc", "set" => "col_none"}),
+          200
+        )
+
+      assert body =~ "<request verb=\"ListRecords\" metadataPrefix=\"oai_dc\" set=\"col_none\">"
+      assert body =~ ~s(code="noRecordsMatch")
+      # responseDate/request/error element order enforced by the XSD
+      assert Regex.run(~r/<responseDate>.*?<request[^>]*>.*?<error/s, body) != nil
+    end
+
+    test "badVerb / badArgument echo the bare base URL without attributes", %{conn: conn} do
+      bad_verb = response(oai(conn, %{"verb" => "Frobnicate"}), 200)
+      assert bad_verb =~ "<request>http://localhost:4000/oai</request>"
+      refute bad_verb =~ ~r/<request [^>]/
+
+      bad_arg = response(oai(conn, %{"verb" => "Identify", "from" => "2024-01-01"}), 200)
+      assert bad_arg =~ ~s(code="badArgument")
+      assert bad_arg =~ "<request>http://localhost:4000/oai</request>"
+      refute bad_arg =~ ~r/<request [^>]/
+    end
+
+    test "illegal arguments yield badArgument", %{conn: conn} do
+      body = response(oai(conn, %{"verb" => "ListSets", "set" => "col_none"}), 200)
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "resumptionToken must be the only argument", %{conn: conn} do
+      body =
+        response(
+          oai(conn, %{"verb" => "ListRecords", "resumptionToken" => "abc", "from" => "2024-01-01"}),
+          200
+        )
+
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "mixed from/until granularity is badArgument", %{conn: conn} do
+      body =
+        response(
+          oai(conn, %{
+            "verb" => "ListRecords",
+            "metadataPrefix" => "oai_dc",
+            "from" => "2024-01-01",
+            "until" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+          }),
+          200
+        )
+
+      assert body =~ ~s(code="badArgument")
+      assert body =~ "same granularity"
+    end
+
+    test "from after until is badArgument", %{conn: conn} do
+      body =
+        response(
+          oai(conn, %{
+            "verb" => "ListRecords",
+            "metadataPrefix" => "oai_dc",
+            "from" => "2024-02-01",
+            "until" => "2024-01-01"
+          }),
+          200
+        )
+
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "malformed metadataPrefix is badArgument", %{conn: conn} do
+      body = response(oai(conn, %{"verb" => "GetRecord"}), 200)
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "record headers include setSpec membership", %{conn: conn} do
+      {community, collection} = create_collection()
+      item = published_item(collection.id)
+
+      records = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      headers =
+        response(oai(conn, %{"verb" => "ListIdentifiers", "metadataPrefix" => "oai_dc"}), 200)
+
+      single =
+        response(
+          oai(conn, %{
+            "verb" => "GetRecord",
+            "metadataPrefix" => "oai_dc",
+            "identifier" => "oai:kiroku.ac.id:#{item.id}"
+          }),
+          200
+        )
+
+      assert records =~ "<setSpec>col_#{collection.id}</setSpec>"
+      assert records =~ "<setSpec>com_#{community.id}</setSpec>"
+      assert headers =~ "<setSpec>col_#{collection.id}</setSpec>"
+      assert headers =~ "<setSpec>com_#{community.id}</setSpec>"
+      assert single =~ "<setSpec>com_#{community.id}</setSpec>"
+    end
+
+    test "final paginated page carries an empty resumptionToken", %{conn: conn} do
+      {_, collection} = create_collection()
+      for _ <- 1..5, do: published_item(collection.id)
+
+      first = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+      token = extract_token(first)
+
+      second = response(oai(conn, %{"verb" => "ListRecords", "resumptionToken" => token}), 200)
+
+      # §3.5: the response completing the list includes an EMPTY token element
+      assert second =~ ~s(<resumptionToken completeListSize="5" cursor="3"/>)
+    end
+
+    test "unknown set yields noRecordsMatch instead of silently listing everything", %{conn: conn} do
+      {_, collection} = create_collection()
+      published_item(collection.id)
+
+      body =
+        response(
+          oai(conn, %{
+            "verb" => "ListRecords",
+            "metadataPrefix" => "oai_dc",
+            "set" => "col_0000"
+          }),
+          200
+        )
+
+      assert body =~ ~s(code="noRecordsMatch")
+      refute body =~ "<record>"
+    end
+
+    test "ListMetadataFormats returns idDoesNotExist for an unknown identifier", %{conn: conn} do
+      body =
+        response(
+          oai(
+            conn,
+            %{"verb" => "ListMetadataFormats", "identifier" => "oai:kiroku.ac.id:nope"}
+          ),
+          200
+        )
+
+      assert body =~ ~s(code="idDoesNotExist")
+    end
+
+    test "earliestDatestamp is a guaranteed lower bound of record datestamps", %{conn: conn} do
+      {_, collection} = create_collection()
+      item = published_item(collection.id)
+
+      identify = response(oai(conn, %{"verb" => "Identify"}), 200)
+
+      [earliest] =
+        Regex.run(~r/<earliestDatestamp>([^<]+)<\/earliestDatestamp>/, identify) |> tl()
+
+      first_page =
+        response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      [datestamp] = Regex.run(~r/<datestamp>([^<]+)<\/datestamp>/, first_page) |> tl()
+
+      earliest_date = Date.from_iso8601!(String.slice(earliest, 0, 10))
+      record_date = Date.from_iso8601!(String.slice(datestamp, 0, 10))
+      assert Date.compare(earliest_date, record_date) != :gt
+      assert item.updated_at != nil
+    end
+
+    test "GetRecord hides items that are not public/open", %{conn: conn} do
+      {_, collection} = create_collection()
+      item = published_item(collection.id, %{"access_level" => "restricted"})
+
+      identifier = "oai:kiroku.ac.id:#{item.id}"
+
+      body =
+        response(
+          oai(conn, %{
+            "verb" => "GetRecord",
+            "metadataPrefix" => "oai_dc",
+            "identifier" => identifier
+          }),
+          200
+        )
+
+      assert body =~ ~s(code="idDoesNotExist")
+      refute body =~ item.title
+    end
+
+    test "GetRecord with a missing identifier is badArgument", %{conn: conn} do
+      body = response(oai(conn, %{"verb" => "GetRecord", "metadataPrefix" => "oai_dc"}), 200)
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "ListSets with an invalid token is badResumptionToken", %{conn: conn} do
+      body = response(oai(conn, %{"verb" => "ListSets", "resumptionToken" => "junk"}), 200)
+      assert body =~ ~s(code="badResumptionToken")
     end
   end
 end
