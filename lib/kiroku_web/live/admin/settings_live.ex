@@ -11,6 +11,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
 
     embargo = Settings.embargo_settings()
     mailer = Settings.mailer_settings()
+    oai = Settings.oai_settings()
     allow_submit = Settings.allow_user_submit?()
     allow_reg = Settings.allow_registration?()
     locked_descs = Settings.locked_bitstream_descriptions()
@@ -25,6 +26,7 @@ defmodule KirokuWeb.Admin.SettingsLive do
       |> assign(:embargo_form, to_form(embargo_form_params(embargo), as: :embargo))
       |> assign(:mailer_adapter, mailer.provider)
       |> assign(:mailer_form, to_form(mailer_form_params(mailer), as: :mailer))
+      |> assign(:oai_form, to_form(oai_form_params(oai), as: :oai))
       |> assign(:allow_submit, allow_submit)
       |> assign(:allow_registration, allow_reg)
       |> assign(:locked_descriptions, locked_descs)
@@ -763,6 +765,95 @@ defmodule KirokuWeb.Admin.SettingsLive do
             </div>
           </.form>
         </div>
+
+        <%!-- OAI-PMH settings --%>
+        <div id="oai-settings" class="kiroku-card p-6 space-y-5">
+          <div>
+            <h2 class="font-heading text-lg" style="color: var(--color-wisteria);">
+              OAI-PMH
+            </h2>
+            <p class="text-xs mt-1" style="color: var(--color-quill);">
+              Configure the OAI-PMH endpoint identifier. Changes take effect immediately.
+            </p>
+          </div>
+
+          <.form
+            for={@oai_form}
+            id="oai-form"
+            phx-submit="save_oai"
+            class="space-y-5"
+          >
+            <.input
+              field={@oai_form[:repo_name]}
+              type="text"
+              label="Repository Name"
+              placeholder="Kiroku Institutional Repository"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Advertised as <code>&lt;repositoryName&gt;</code>
+              in the OAI <code>Identify</code>
+              response. Default: <code>Kiroku Institutional Repository</code>.
+              Env var: <code>OAI_REPO_NAME</code>.
+            </p>
+
+            <.input
+              field={@oai_form[:admin_email]}
+              type="email"
+              label="Admin E-Mail"
+              placeholder="admin@unpad.ac.id"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Advertised as <code>&lt;adminEmail&gt;</code>
+              in the OAI <code>Identify</code>
+              response. Default: <code>admin@kiroku.ac.id</code>.
+              Env var: <code>OAI_ADMIN_EMAIL</code>.
+            </p>
+
+            <.input
+              field={@oai_form[:repo_identifier]}
+              type="text"
+              label="Repository Identifier"
+              placeholder="oai:repository.unpad.ac.id"
+            />
+            <p class="text-xs" style="color: var(--color-quill);">
+              Namespace prefix emitted in record headers
+              (e.g. <code>oai:repository.unpad.ac.id:&lt;uuid&gt;</code>).
+              Default: <code>oai:kiroku.ac.id</code>.
+              Env var: <code>OAI_REPO_IDENTIFIER</code>.
+            </p>
+
+            <div class="pt-2">
+              <button
+                type="submit"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-150 hover:brightness-110 active:scale-95"
+                style="background: var(--color-patchouli); color: white; box-shadow: 0 2px 8px rgba(123,79,166,0.35);"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" /> Save OAI Settings
+              </button>
+            </div>
+          </.form>
+
+          <%!-- Current effective settings --%>
+          <div class="pt-4 border-t" style="border-color: rgba(155,126,200,0.15);">
+            <p class="text-xs font-medium mb-2" style="color: var(--color-wisteria);">
+              Effective values (DB overrides env vars):
+            </p>
+            <dl class="space-y-1 text-xs" style="color: var(--color-quill);">
+              <div class="flex gap-2">
+                <dt class="font-medium w-32 shrink-0">Name:</dt>
+                <dd><code>{Settings.oai_repo_name()}</code></dd>
+              </div>
+              <div class="flex gap-2">
+                <dt class="font-medium w-32 shrink-0">Admin e-mail:</dt>
+                <dd><code>{Settings.oai_admin_email()}</code></dd>
+              </div>
+              <div class="flex gap-2">
+                <dt class="font-medium w-32 shrink-0">Identifier:</dt>
+                <dd><code>{Settings.oai_repo_identifier()}</code></dd>
+              </div>
+            </dl>
+          </div>
+        </div>
       </div>
     </Layouts.admin>
 
@@ -1040,6 +1131,20 @@ defmodule KirokuWeb.Admin.SettingsLive do
      |> put_flash(:info, "Mailer settings saved.")}
   end
 
+  @impl true
+  def handle_event("save_oai", %{"oai" => params}, socket) do
+    put_if_present("oai_repo_identifier", params["repo_identifier"])
+    put_if_present("oai_repo_name", params["repo_name"])
+    put_if_present("oai_admin_email", params["admin_email"])
+
+    oai = Settings.oai_settings()
+
+    {:noreply,
+     socket
+     |> assign(:oai_form, to_form(oai_form_params(oai), as: :oai))
+     |> put_flash(:info, "OAI settings saved.")}
+  end
+
   defp put_if_present(_key, val) when val in [nil, ""], do: :ignore
   defp put_if_present(key, val), do: Settings.put(key, String.trim(val))
 
@@ -1081,6 +1186,14 @@ defmodule KirokuWeb.Admin.SettingsLive do
       "port" => to_string(mailer.port || ""),
       "username" => mailer.username || "",
       "password" => ""
+    }
+  end
+
+  defp oai_form_params(oai) do
+    %{
+      "repo_name" => oai.repo_name || "",
+      "admin_email" => oai.admin_email || "",
+      "repo_identifier" => oai.repo_identifier || ""
     }
   end
 

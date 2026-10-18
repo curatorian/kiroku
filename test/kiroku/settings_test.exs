@@ -43,4 +43,40 @@ defmodule Kiroku.SettingsTest do
       refute Settings.brand_logo_url()
     end
   end
+
+  describe "oai_repo_identifier/0" do
+    test "defaults to oai:kiroku.ac.id when unset" do
+      assert Settings.oai_repo_identifier() == "oai:kiroku.ac.id"
+    end
+
+    test "returns the DB value when set" do
+      Settings.put("oai_repo_identifier", "oai:repository.unpad.ac.id")
+
+      assert Settings.oai_repo_identifier() == "oai:repository.unpad.ac.id"
+    end
+  end
+
+  describe "oai_repo_name/0" do
+    test "defaults to Kiroku Institutional Repository when unset" do
+      assert Settings.oai_repo_name() == "Kiroku Institutional Repository"
+    end
+
+    test "returns the DB value when set" do
+      Settings.put("oai_repo_name", "Universitas Padjadjaran Repository")
+
+      assert Settings.oai_repo_name() == "Universitas Padjadjaran Repository"
+    end
+  end
+
+  describe "oai_admin_email/0" do
+    test "defaults to admin@kiroku.ac.id when unset" do
+      assert Settings.oai_admin_email() == "admin@kiroku.ac.id"
+    end
+
+    test "returns the DB value when set" do
+      Settings.put("oai_admin_email", "repository@unpad.ac.id")
+
+      assert Settings.oai_admin_email() == "repository@unpad.ac.id"
+    end
+  end
 end

@@ -817,7 +817,7 @@ defmodule Kiroku.Repository do
       |> order_by([i], asc: i.updated_at, asc: i.id)
       |> limit(^limit)
       |> offset(^offset)
-      |> preload([:item_authors, :item_keywords])
+      |> preload([:item_authors, :item_keywords, :collection])
       |> Repo.all()
 
     {items, total}
@@ -834,7 +834,10 @@ defmodule Kiroku.Repository do
     |> where([_, c], c.community_id == ^community_id)
   end
 
-  defp apply_oai_set_filter(query, _invalid_set), do: query
+  # Defensive: an unrecognized setSpec must match nothing (defense in depth
+  # alongside the builder-side known-set validation against forged tokens).
+  defp apply_oai_set_filter(query, _invalid_set),
+    do: where(query, [i], i.collection_id == ^Ecto.UUID.generate())
 
   defp apply_oai_date_filter(query, nil, nil), do: query
 
