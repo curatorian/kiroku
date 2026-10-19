@@ -28,6 +28,45 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
           </.link>
         </div>
 
+        <%!-- Item type statistics --%>
+        <div class="kiroku-card p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <.icon name="hero-chart-bar" class="w-4 h-4" style="color: var(--color-wisteria);" />
+            <h2
+              class="text-xs font-semibold uppercase tracking-widest"
+              style="color: var(--color-quill);"
+            >
+              Inventory by Type
+            </h2>
+            <span class="text-xs ml-auto" style="color: var(--color-quill);">
+              Total: {@total_item_count} items
+            </span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <%= for type <- @item_types, count = Map.get(@item_type_counts, type, 0) do %>
+              <button
+                phx-click="filter"
+                phx-value-item_type={if @item_type_filter == type, do: "", else: type}
+                class={[
+                  "px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                  if(@item_type_filter == type,
+                    do: "ring-2 ring-offset-1",
+                    else: "hover:brightness-110"
+                  )
+                ]}
+                style={
+                  if @item_type_filter == type,
+                    do: "background: var(--color-patchouli); color: white;",
+                    else: "background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
+                }
+              >
+                {String.capitalize(String.replace(to_string(type), "_", " "))}
+                <span class="ml-1 tabular-nums">{count}</span>
+              </button>
+            <% end %>
+          </div>
+        </div>
+
         <%!-- Search and filters --%>
         <div class="kiroku-card p-4 space-y-4">
           <div class="flex flex-col sm:flex-row gap-3">
@@ -438,6 +477,7 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
 
   def mount(_params, _session, socket) do
     collections = list_all_collections()
+    item_type_counts = Repository.count_items_by_type()
 
     {:ok,
      socket
@@ -450,6 +490,8 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
      |> assign(:selected_type, "skripsi")
      |> assign(:form, nil)
      |> assign(:keywords, "")
+     |> assign(:item_type_counts, item_type_counts)
+     |> assign(:total_item_count, item_type_counts |> Map.values() |> Enum.sum())
      |> assign_relation_rows([])
      |> assign(:search_form, to_form(%{}))
      |> assign(:filter_form, to_form(%{}))

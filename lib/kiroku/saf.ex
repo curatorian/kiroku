@@ -7,20 +7,28 @@ defmodule Kiroku.Saf do
   exports can be cleaned up periodically.
   """
 
-  @exports_dir "priv/saf_exports"
-  @imports_dir "priv/saf_imports"
+  @doc """
+  Returns the exports directory, preferring the `SAF_DATA_DIR` env var when set
+  (for production containers where `priv/` is read-only).
+  """
+  def exports_dir, do: data_dir("saf_exports")
+  def imports_dir, do: data_dir("saf_imports")
 
-  def exports_dir, do: @exports_dir
-  def imports_dir, do: @imports_dir
+  defp data_dir(subdir) do
+    case System.get_env("SAF_DATA_DIR") do
+      nil -> Path.join(:code.priv_dir(:kiroku), subdir)
+      base -> Path.join(base, subdir)
+    end
+  end
 
   @doc "Path where the zip produced by export job `job_id` lives."
   def export_path(job_id) when is_binary(job_id) or is_integer(job_id),
-    do: Path.join(@exports_dir, "#{job_id}.zip")
+    do: Path.join(exports_dir(), "#{job_id}.zip")
 
   @doc "Ensures the export/import scratch directories exist."
   def ensure_dirs! do
-    File.mkdir_p!(@exports_dir)
-    File.mkdir_p!(@imports_dir)
+    File.mkdir_p!(exports_dir())
+    File.mkdir_p!(imports_dir())
   end
 
   @doc """
@@ -30,11 +38,11 @@ defmodule Kiroku.Saf do
   def list_exports do
     ensure_dirs!()
 
-    @exports_dir
+    exports_dir()
     |> File.ls!()
     |> Enum.filter(&String.ends_with?(&1, ".zip"))
     |> Enum.map(fn name ->
-      path = Path.join(@exports_dir, name)
+      path = Path.join(exports_dir(), name)
       stat = File.stat!(path)
 
       %{

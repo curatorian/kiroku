@@ -10,6 +10,12 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   @user_types_all ~w(submitter internal reviewer admin superadmin)
   @user_types_admin ~w(submitter internal reviewer)
 
+  @sort_columns %{
+    "email" => :email,
+    "user_type" => :user_type,
+    "joined" => :inserted_at
+  }
+
   # ── Render ──────────────────────────────────────────────────────────────────
 
   def render(assigns) do
@@ -35,10 +41,94 @@ defmodule KirokuWeb.Admin.UserLive.Index do
           <% end %>
         </div>
 
+        <%!-- Search and sort --%>
+        <div class="kiroku-card p-4 space-y-4">
+          <div class="flex flex-col sm:flex-row gap-3">
+            <div class="flex-1">
+              <.form for={@search_form} id="search-form" phx-change="search">
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2">
+                    <.icon
+                      name="hero-magnifying-glass"
+                      class="w-4 h-4"
+                      style="color: var(--color-quill);"
+                    />
+                  </span>
+                  <input
+                    type="text"
+                    name="q"
+                    id="user-search-input"
+                    value={@search_query}
+                    placeholder="Search by email or name..."
+                    class="kiroku-search-input w-full"
+                    style="padding-left: 2.5rem;"
+                    autocomplete="off"
+                  />
+                  <button
+                    :if={@search_query != ""}
+                    type="button"
+                    phx-click="clear_search"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-xs hover:text-white transition-colors"
+                    style="color: var(--color-quill);"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </.form>
+            </div>
+            <div class="sm:w-48">
+              <.form for={@sort_form} id="sort-form" phx-change="sort">
+                <select
+                  name="sort"
+                  id="sort-select"
+                  class="kiroku-search-input w-full"
+                >
+                  <option value="user_type" selected={@sort_by == :user_type}>Role</option>
+                  <option value="email" selected={@sort_by == :email}>Email</option>
+                  <option value="joined" selected={@sort_by == :inserted_at}>Date Joined</option>
+                </select>
+              </.form>
+            </div>
+            <div class="sm:w-32">
+              <.form for={@sort_form} id="dir-form" phx-change="sort_dir">
+                <select
+                  name="dir"
+                  id="dir-select"
+                  class="kiroku-search-input w-full"
+                >
+                  <option value="asc" selected={@sort_dir == :asc}>A → Z</option>
+                  <option value="desc" selected={@sort_dir == :desc}>Z → A</option>
+                </select>
+              </.form>
+            </div>
+          </div>
+          <%= if @search_query != "" do %>
+            <div class="flex items-center gap-2 text-xs" style="color: var(--color-quill);">
+              <span>Active filters:</span>
+              <span
+                class="px-2 py-1 rounded-full"
+                style="background: rgba(155,126,200,0.12); color: var(--color-wisteria);"
+              >
+                Search: "{@search_query}"
+                <button type="button" phx-click="clear_search" class="ml-1 hover:text-white">
+                  &times;
+                </button>
+              </span>
+              <button
+                type="button"
+                phx-click="clear_all_filters"
+                class="underline hover:text-white transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
+          <% end %>
+        </div>
+
         <%!-- Filter tabs --%>
         <div class="flex gap-2 flex-wrap">
           <.link
-            patch={~p"/admin/users"}
+            patch={user_list_url(assigns, type: "all")}
             class={[
               "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
               (@filter == "all" && "text-white") || "hover:bg-base-300"
@@ -53,7 +143,7 @@ defmodule KirokuWeb.Admin.UserLive.Index do
           </.link>
           <%= for type <- @available_types do %>
             <.link
-              patch={~p"/admin/users?type=#{type}"}
+              patch={user_list_url(assigns, type: type)}
               class={[
                 "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
                 (@filter == type && "text-white") || "hover:bg-base-300"
@@ -81,10 +171,14 @@ defmodule KirokuWeb.Admin.UserLive.Index do
                   User
                 </th>
                 <th
-                  class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider"
+                  class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none hover:opacity-80 transition-opacity"
                   style="color: var(--color-wisteria);"
+                  phx-click="sort_by"
+                  phx-value-sort="user_type"
                 >
-                  Role
+                  <span class="inline-flex items-center gap-1">
+                    Role <.sort_arrow field={:user_type} sort_by={@sort_by} sort_dir={@sort_dir} />
+                  </span>
                 </th>
                 <th
                   class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider"
@@ -93,10 +187,15 @@ defmodule KirokuWeb.Admin.UserLive.Index do
                   Confirmed
                 </th>
                 <th
-                  class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider"
+                  class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none hover:opacity-80 transition-opacity"
                   style="color: var(--color-wisteria);"
+                  phx-click="sort_by"
+                  phx-value-sort="joined"
                 >
-                  Joined
+                  <span class="inline-flex items-center gap-1">
+                    Joined
+                    <.sort_arrow field={:inserted_at} sort_by={@sort_by} sort_dir={@sort_dir} />
+                  </span>
                 </th>
                 <th class="px-4 py-3"></th>
               </tr>
@@ -169,7 +268,7 @@ defmodule KirokuWeb.Admin.UserLive.Index do
         <.pagination
           pagination={@pagination}
           path="/admin/users"
-          params={%{"type" => if(@filter != "all", do: @filter)}}
+          params={user_list_params(assigns)}
         />
       </div>
 
@@ -233,6 +332,26 @@ defmodule KirokuWeb.Admin.UserLive.Index do
     """
   end
 
+  # ── Sort arrow function component ──────────────────────────────────────────
+
+  defp sort_arrow(assigns) do
+    active = assigns.sort_by == assigns.field
+    dir = if active, do: assigns.sort_dir, else: :asc
+
+    arrow =
+      cond do
+        not active -> ""
+        dir == :asc -> "\u2191"
+        dir == :desc -> "\u2193"
+      end
+
+    assigns = assign(assigns, :arrow, arrow)
+
+    ~H"""
+    <span :if={@arrow != ""} class="text-[10px] opacity-70">{@arrow}</span>
+    """
+  end
+
   # ── Mount & params ───────────────────────────────────────────────────────────
 
   def mount(_params, _session, socket) do
@@ -240,6 +359,11 @@ defmodule KirokuWeb.Admin.UserLive.Index do
      socket
      |> assign(:total_users, 0)
      |> assign(:filter, "all")
+     |> assign(:search_query, "")
+     |> assign(:sort_by, :user_type)
+     |> assign(:sort_dir, :asc)
+     |> assign(:search_form, to_form(%{"q" => ""}))
+     |> assign(:sort_form, to_form(%{"sort" => "user_type", "dir" => "asc"}))
      |> assign(:pagination, Pagination.build(0, 1, 20))
      |> assign(:available_types, available_types_for(socket.assigns.current_user))
      |> assign(:form, nil)
@@ -247,16 +371,36 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   end
 
   def handle_params(params, _uri, socket) do
+    require Logger
+    Logger.info("[UserLive] handle_params params=#{inspect(params)}")
     filter = Map.get(params, "type", "all")
+    search = Map.get(params, "q", "") |> String.trim()
+    sort_by = Map.get(params, "sort", "user_type") |> parse_sort_by()
+    sort_dir = Map.get(params, "dir", "asc") |> parse_sort_dir()
     page = parse_page(params["page"])
 
     {users, pagination} =
-      Accounts.list_users_with_policies_pagination(type: filter, page: page, per_page: 20)
+      Accounts.list_users_with_policies_pagination(
+        type: filter,
+        search: search,
+        sort_by: sort_by,
+        sort_dir: sort_dir,
+        page: page,
+        per_page: 20
+      )
 
     socket =
       socket
       |> assign(:total_users, pagination.total_count)
       |> assign(:filter, filter)
+      |> assign(:search_query, search)
+      |> assign(:sort_by, sort_by)
+      |> assign(:sort_dir, sort_dir)
+      |> assign(:search_form, to_form(%{"q" => search}))
+      |> assign(
+        :sort_form,
+        to_form(%{"sort" => to_string(sort_by), "dir" => to_string(sort_dir)})
+      )
       |> assign(:pagination, pagination)
       |> stream(:users, users, reset: true)
       |> apply_action(socket.assigns.live_action, params)
@@ -272,6 +416,46 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   defp apply_action(socket, _action, _params), do: socket
 
   # ── Events ───────────────────────────────────────────────────────────────────
+
+  def handle_event("search", %{"q" => query}, socket) do
+    {:noreply, push_patch(socket, to: build_params(socket.assigns, q: query))}
+  end
+
+  def handle_event("sort", %{"sort" => sort}, socket) do
+    {:noreply, push_patch(socket, to: build_params(socket.assigns, sort: sort, dir: "asc"))}
+  end
+
+  def handle_event("sort_dir", %{"dir" => dir}, socket) do
+    {:noreply, push_patch(socket, to: build_params(socket.assigns, dir: dir))}
+  end
+
+  def handle_event("sort_by", %{"sort" => sort}, socket) do
+    require Logger
+
+    Logger.info(
+      "[UserLive] sort_by sort=#{sort} current_sort=#{socket.assigns.sort_by} current_dir=#{socket.assigns.sort_dir}"
+    )
+
+    # Toggle direction if clicking the same column
+    new_dir =
+      if sort == to_string(socket.assigns.sort_by) and socket.assigns.sort_dir == :asc,
+        do: "desc",
+        else: "asc"
+
+    Logger.info(
+      "[UserLive] sort_by new_dir=#{new_dir} url=#{build_params(socket.assigns, sort: sort, dir: new_dir)}"
+    )
+
+    {:noreply, push_patch(socket, to: build_params(socket.assigns, sort: sort, dir: new_dir))}
+  end
+
+  def handle_event("clear_search", _, socket) do
+    {:noreply, push_patch(socket, to: build_params(socket.assigns, q: ""))}
+  end
+
+  def handle_event("clear_all_filters", _, socket) do
+    {:noreply, push_patch(socket, to: ~p"/admin/users")}
+  end
 
   def handle_event("validate_user", %{"user" => params}, socket) do
     changeset =
@@ -313,6 +497,60 @@ defmodule KirokuWeb.Admin.UserLive.Index do
     end
   end
 
+  # ── URL building ────────────────────────────────────────────────────────────
+
+  defp user_list_params(assigns) do
+    %{
+      "q" => assigns.search_query,
+      "type" => if(assigns.filter != "all", do: assigns.filter),
+      "sort" => to_string(assigns.sort_by),
+      "dir" => to_string(assigns.sort_dir)
+    }
+    |> Enum.reject(fn
+      {_, nil} -> true
+      {_, ""} -> true
+      _ -> false
+    end)
+    |> Map.new()
+  end
+
+  defp user_list_url(assigns, overrides) do
+    params =
+      assigns
+      |> user_list_params()
+      |> Map.merge(Map.new(overrides, fn {k, v} -> {to_string(k), v} end))
+      |> Enum.reject(fn
+        {_, nil} -> true
+        {_, ""} -> true
+        _ -> false
+      end)
+      |> Map.new()
+
+    "/admin/users?#{URI.encode_query(params)}"
+  end
+
+  defp build_params(state, overrides) do
+    base = %{
+      "q" => Map.get(state, :search_query, ""),
+      "type" => if(Map.get(state, :filter, "all") != "all", do: Map.get(state, :filter)),
+      "sort" => to_string(Map.get(state, :sort_by, :user_type)),
+      "dir" => to_string(Map.get(state, :sort_dir, :asc))
+    }
+
+    params =
+      base
+      |> Map.merge(Map.new(overrides, fn {k, v} -> {to_string(k), v} end))
+      |> Enum.reject(fn
+        {_, nil} -> true
+        {_, ""} -> true
+        _ -> false
+      end)
+      |> Map.new()
+
+    query = URI.encode_query(params)
+    "/admin/users?#{query}"
+  end
+
   # ── Permission helpers ───────────────────────────────────────────────────────
 
   defp can_create_user?(%{user_type: type}) when type in [:admin, :superadmin], do: true
@@ -341,6 +579,13 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   defp role_badge_class(:internal), do: "published"
   defp role_badge_class(:submitter), do: "draft"
   defp role_badge_class(_), do: "draft"
+
+  defp parse_sort_by(value) do
+    Map.get(@sort_columns, value, :user_type)
+  end
+
+  defp parse_sort_dir("desc"), do: :desc
+  defp parse_sort_dir(_), do: :asc
 
   defp parse_page(nil), do: 1
 

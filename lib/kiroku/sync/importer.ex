@@ -289,14 +289,39 @@ defmodule Kiroku.Sync.Importer do
 
     effective_batch = if limit, do: min(batch_size, limit), else: batch_size
 
+    # Fetch sync position once for the entire run instead of per-record.
+    sync_position =
+      if incremental? and sync_run do
+        Sync.get_sync_position(sync_run.source_view)
+      else
+        nil
+      end
+
     stream = paginate_records(view_name, effective_batch)
     stream = if limit, do: Stream.take(stream, limit), else: stream
 
     {stats, _cache} =
       stream
       |> Enum.reduce({initial, %{}}, fn record, {acc, cache} ->
-        process_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc)
+        process_record(
+          record,
+          cache,
+          root,
+          dry_run?,
+          incremental?,
+          sync_run,
+          sync_position,
+          log?,
+          acc
+        )
       end)
+
+    if log? do
+      Logger.info(
+        "[Importer] #{view_name} summary — total=#{stats.total} processed=#{stats.processed} " <>
+          "inserted=#{stats.inserted} updated=#{stats.updated} skipped=#{stats.skipped} failed=#{stats.failed}"
+      )
+    end
 
     stats
   end
@@ -382,7 +407,7 @@ defmodule Kiroku.Sync.Importer do
         initial = %{total: 1, processed: 0, inserted: 0, updated: 0, skipped: 0, failed: 0}
 
         {stats, _cache} =
-          process_record(record, %{}, root, dry_run?, false, sync_run, false, initial)
+          process_record(record, %{}, root, dry_run?, false, sync_run, nil, false, initial)
 
         cond do
           stats.failed > 0 -> {:error, :failed}
@@ -415,25 +440,58 @@ defmodule Kiroku.Sync.Importer do
 
   # ── Per-record processing ──────────────────────────────────────────────────
 
-  defp process_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc) do
+  defp process_record(
+         record,
+         cache,
+         root,
+         dry_run?,
+         incremental?,
+         sync_run,
+         sync_position,
+         log?,
+         acc
+       ) do
     judul = field(record, :Judul)
+
+    # Fallback: if view's Judul is empty, try tbtMhsUploadThesis
+    judul =
+      if is_nil(judul) or String.trim(to_string(judul)) == "" do
+        npm = field(record, :NPM)
+        fallback_judul = fetch_fallback_title(npm)
+        if fallback_judul, do: fallback_judul, else: judul
+      else
+        judul
+      end
+
+    record = if judul != field(record, :Judul), do: %{record | Judul: judul}, else: record
 
     cond do
       is_nil(judul) or String.trim(judul || "") == "" ->
-        {%{acc | skipped: acc.skipped + 1}, cache}
+        record = %{record | Judul: "Empty Title"}
 
-      incremental? and not Sync.should_sync_record?(record, sync_run.source_view) ->
-        {%{acc | skipped: acc.skipped + 1}, cache}
-
-      true ->
         {status, new_cache} =
-          upsert_record(record, cache, root, dry_run?, sync_run, log?)
+          upsert_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc)
 
         updated =
           case status do
             :inserted -> %{acc | inserted: acc.inserted + 1, processed: acc.processed + 1}
             :updated -> %{acc | updated: acc.updated + 1, processed: acc.processed + 1}
-            :skipped -> %{acc | skipped: acc.skipped + 1}
+            :error -> %{acc | failed: acc.failed + 1, processed: acc.processed + 1}
+          end
+
+        {updated, new_cache}
+
+      incremental? and not Sync.should_sync_record?(record, sync_position) ->
+        {%{acc | skipped: acc.skipped + 1}, cache}
+
+      true ->
+        {status, new_cache} =
+          upsert_record(record, cache, root, dry_run?, incremental?, sync_run, log?, acc)
+
+        updated =
+          case status do
+            :inserted -> %{acc | inserted: acc.inserted + 1, processed: acc.processed + 1}
+            :updated -> %{acc | updated: acc.updated + 1, processed: acc.processed + 1}
             :error -> %{acc | failed: acc.failed + 1, processed: acc.processed + 1}
           end
 
@@ -441,7 +499,7 @@ defmodule Kiroku.Sync.Importer do
     end
   end
 
-  defp upsert_record(record, cache, root, dry_run?, sync_run, log?) do
+  defp upsert_record(record, cache, root, dry_run?, _incremental?, sync_run, log?, _acc) do
     fakultas = field(record, :Fakultas) || "Tidak Diketahui"
     jenjang = field(record, :Jenjang) || "Tidak Diketahui"
     program_studi = field(record, :Program_Studi) || "Tidak Diketahui"
@@ -455,19 +513,26 @@ defmodule Kiroku.Sync.Importer do
 
     cond do
       dry_run? ->
-        if log? do
-          Logger.info("[Importer] [DRY RUN] #{String.slice(attrs.title, 0, 70)}")
-        end
-
-        {:skipped, new_cache}
-
-      true ->
-        existing_item = Repository.get_item_by_handle(attrs.handle)
+        # In dry-run, check if item exists to label correctly.
+        existing_item = Repository.get_item_by_legacy_id(legacy_id)
         action = if existing_item, do: :updated, else: :inserted
 
+        if log? do
+          Logger.info("[Importer] [DRY RUN] #{action} #{String.slice(attrs.title, 0, 70)}")
+        end
+
+        {action, new_cache}
+
+      true ->
+        # import_item does the upsert on legacy_id — no need to pre-check.
+        # The RETURNING clause tells us whether it was a new insert or update.
         try do
           case Repository.import_item(attrs) do
             {:ok, item} ->
+              # Determine action from timestamps: on update, inserted_at is
+              # preserved while updated_at changes; on insert they're equal.
+              action = if item.inserted_at == item.updated_at, do: :inserted, else: :updated
+
               create_bitstreams_for_record(item, record)
 
               if sync_run do
@@ -694,6 +759,7 @@ defmodule Kiroku.Sync.Importer do
     npm = field(r, :NPM)
     idpustaka = field(r, :idpustaka)
     idpustaka_str = if is_integer(idpustaka), do: Integer.to_string(idpustaka)
+    legacy_id = build_legacy_id(field(r, :Jenis), npm)
 
     status =
       map_status(
@@ -704,7 +770,7 @@ defmodule Kiroku.Sync.Importer do
 
     %{
       handle: build_handle(npm),
-      legacy_id: build_legacy_id(field(r, :Jenis), npm),
+      legacy_id: legacy_id,
       idpustaka: idpustaka_str,
       title: field(r, :Judul),
       abstract: field(r, :Abstrak),
@@ -765,26 +831,31 @@ defmodule Kiroku.Sync.Importer do
     # have bitstreams from a prior run.
     Repo.delete_all(from b in Content.Bitstream, where: b.item_id == ^item.id)
 
-    file_map = [
-      {field(r, :FileCover), :THUMBNAIL, 1, :open},
-      {field(r, :FileAbstrak), :ORIGINAL, 1, :inherit},
-      {field(r, :FileBab1), :CHAPTER, 1, :inherit},
-      {field(r, :FileBab2), :CHAPTER, 2, :inherit},
-      {field(r, :FileBab3), :CHAPTER, 3, :inherit},
-      {field(r, :FileBab4), :CHAPTER, 4, :inherit},
-      {field(r, :FileBab5), :CHAPTER, 5, :inherit},
-      {field(r, :FileBab6), :CHAPTER, 6, :inherit},
-      {field(r, :FileDaftarIsi), :SUPPLEMENTAL, 1, :inherit},
-      {field(r, :FilePustaka), :SUPPLEMENTAL, 2, :inherit},
-      {field(r, :FileLampiran), :SUPPLEMENTAL, 3, :inherit},
-      {field(r, :FilePengesahan), :ADMINISTRATIVE, 1, :restricted},
-      {field(r, :FileSurat), :ADMINISTRATIVE, 2, :restricted},
-      {field(r, :FileSuratIsi), :ADMINISTRATIVE, 3, :restricted}
-    ]
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-    Enum.each(file_map, fn {file_col, bundle, seq, access} ->
-      if not is_nil(file_col) and file_col != "" do
-        attrs = %{
+    bitstream_attrs =
+      [
+        {field(r, :FileCover), :THUMBNAIL, 1, :open},
+        {field(r, :FileAbstrak), :ORIGINAL, 1, :inherit},
+        {field(r, :FileBab1), :CHAPTER, 1, :inherit},
+        {field(r, :FileBab2), :CHAPTER, 2, :inherit},
+        {field(r, :FileBab3), :CHAPTER, 3, :inherit},
+        {field(r, :FileBab4), :CHAPTER, 4, :inherit},
+        {field(r, :FileBab5), :CHAPTER, 5, :inherit},
+        {field(r, :FileBab6), :CHAPTER, 6, :inherit},
+        {field(r, :FileDaftarIsi), :SUPPLEMENTAL, 1, :inherit},
+        {field(r, :FilePustaka), :SUPPLEMENTAL, 2, :inherit},
+        {field(r, :FileLampiran), :SUPPLEMENTAL, 3, :inherit},
+        {field(r, :FilePengesahan), :ADMINISTRATIVE, 1, :restricted},
+        {field(r, :FileSurat), :ADMINISTRATIVE, 2, :restricted},
+        {field(r, :FileSuratIsi), :ADMINISTRATIVE, 3, :restricted}
+      ]
+      |> Enum.filter(fn {file_col, _bundle, _seq, _access} ->
+        not is_nil(file_col) and file_col != ""
+      end)
+      |> Enum.map(fn {file_col, bundle, seq, access} ->
+        %{
+          id: Ecto.UUID.generate(),
           item_id: item.id,
           filename: Path.basename(file_col),
           bundle_name: bundle,
@@ -793,20 +864,18 @@ defmodule Kiroku.Sync.Importer do
           storage_type: :url,
           storage_url: build_file_url(link_path, file_col),
           access_level: access,
-          embargo_open_date: item.embargo_open_date
+          embargo_open_date: item.embargo_open_date,
+          inserted_at: now,
+          updated_at: now
         }
+      end)
 
-        case Content.create_bitstream(attrs) do
-          {:ok, _} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "[Importer] bitstream failed item=#{item.id} #{bundle}/#{seq}: #{inspect(reason)}"
-            )
-        end
-      end
-    end)
+    if bitstream_attrs != [] do
+      {count, _} = Repo.insert_all(Content.Bitstream, bitstream_attrs)
+      count
+    else
+      0
+    end
   end
 
   # ── Mapping helpers ────────────────────────────────────────────────────────
@@ -894,6 +963,18 @@ defmodule Kiroku.Sync.Importer do
   defp abbrev_jenjang("Diploma III"), do: "d3"
   defp abbrev_jenjang("Diploma IV"), do: "d4"
   defp abbrev_jenjang(other), do: slugify(other)
+
+  # Fallback: query tbtMhsUploadThesis for title when view's Judul is empty.
+  defp fetch_fallback_title(nil), do: nil
+
+  defp fetch_fallback_title(npm) do
+    case LegacyRepo.query!("SELECT TOP 1 Judul FROM tbtMhsUploadThesis WHERE NPM = '#{npm}'", []) do
+      %{rows: [[title]]} -> title
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
 
   # Key-agnostic field accessor. `Kiroku.LegacyView` is an Ecto schema so records
   # arrive with atom keys, but we tolerate string-keyed maps defensively.

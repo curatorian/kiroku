@@ -430,12 +430,12 @@ defmodule Kiroku.Settings do
   Returns the OAI-PMH admin contact e-mail advertised in the `Identify` response.
 
   Priority: DB setting → OAI_ADMIN_EMAIL env var → compile-time config →
-  "admin@kiroku.ac.id" (default).
+  "chrisnaadhip@gmail.com" (default).
   """
   def oai_admin_email do
     get("oai_admin_email") ||
       System.get_env("OAI_ADMIN_EMAIL") ||
-      Application.get_env(:kiroku, :oai_admin_email, "admin@kiroku.ac.id")
+      Application.get_env(:kiroku, :oai_admin_email, "chrisnaadhip@gmail.com")
   end
 
   @doc "Returns a map of OAI-PMH settings for the admin UI."

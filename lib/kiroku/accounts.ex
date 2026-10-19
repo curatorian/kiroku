@@ -31,21 +31,48 @@ defmodule Kiroku.Accounts do
     page = Keyword.get(opts, :page, 1)
     per_page = Keyword.get(opts, :per_page, 20)
     type = Keyword.get(opts, :type)
+    search = Keyword.get(opts, :search, "") |> String.trim()
+    sort_by = Keyword.get(opts, :sort_by, :user_type)
+    sort_dir = Keyword.get(opts, :sort_dir, :asc)
 
     base_query = user_type_query(type)
+    base_query = search_query(base_query, search)
 
     count = Repo.aggregate(base_query, :count, :id)
     pagination = Pagination.build(count, page, per_page)
 
+    order = sort_order(sort_by, sort_dir)
+
     users =
       Repo.all(
         from u in base_query,
-          order_by: [asc: u.user_type, asc: u.email],
+          order_by: ^order,
           limit: ^per_page,
           offset: ^Pagination.offset(pagination)
       )
 
     {users, pagination}
+  end
+
+  defp search_query(query, ""), do: query
+
+  defp search_query(query, term) do
+    import Ecto.Query
+    pattern = "%#{term}%"
+    from(u in query, where: ilike(u.email, ^pattern) or ilike(u.display_name, ^pattern))
+  end
+
+  defp sort_order(sort_by, sort_dir) do
+    import Ecto.Query
+
+    field =
+      case sort_by do
+        :email -> dynamic([u], u.email)
+        :inserted_at -> dynamic([u], u.inserted_at)
+        _ -> dynamic([u], u.user_type)
+      end
+
+    [{sort_dir, field}]
   end
 
   defp user_type_query(nil), do: User

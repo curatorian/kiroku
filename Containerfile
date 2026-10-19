@@ -104,7 +104,7 @@ RUN chown app:app /app
 
 # Create the local uploads directory so STORAGE_ADAPTER=local works
 # immediately and so named volumes mounted here inherit app ownership.
-RUN mkdir -p /app/priv/uploads && chown app:app /app/priv/uploads
+RUN mkdir -p /app/priv/uploads /app/data && chown app:app /app/priv/uploads /app/data
 
 # Copy the assembled release from the builder.
 COPY --from=builder --chown=app:app /app/_build/prod/rel/kiroku ./
@@ -116,6 +116,7 @@ USER app
 #   ECTO_DB_SSL=true → encrypts the Postgres connection (DB is on another host).
 ENV PHX_SERVER="true" \
     ECTO_DB_SSL="true" \
+    SAF_DATA_DIR="/app/data" \
     PORT="4000" \
     HOME="/home/app"
 

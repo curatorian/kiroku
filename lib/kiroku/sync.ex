@@ -91,6 +91,7 @@ defmodule Kiroku.Sync do
       records_processed: Map.get(stats, :processed, 0),
       records_inserted: Map.get(stats, :inserted, 0),
       records_updated: Map.get(stats, :updated, 0),
+      records_skipped: Map.get(stats, :skipped, 0),
       records_failed: Map.get(stats, :failed, 0),
       last_synced_at: Map.get(stats, :last_synced_at),
       last_synced_legacy_id: Map.get(stats, :last_synced_legacy_id)
@@ -116,6 +117,7 @@ defmodule Kiroku.Sync do
       SUM(records_processed) as total_records_processed,
       SUM(records_inserted) as total_records_inserted,
       SUM(records_updated) as total_records_updated,
+      SUM(records_skipped) as total_records_skipped,
       SUM(records_failed) as total_records_failed
     FROM sync_runs
     GROUP BY source_view
@@ -231,14 +233,6 @@ defmodule Kiroku.Sync do
     |> Base.encode16(case: :lower)
   end
 
-  def record_changed?(legacy_id, new_checksum) do
-    case get_latest_record_tracking(legacy_id) do
-      # No previous record, so it's new
-      nil -> true
-      tracking -> tracking.checksum != new_checksum
-    end
-  end
-
   # ── Change Detection ─────────────────────────────────────────────────────────
 
   def get_sync_position(source_view) do
@@ -258,15 +252,22 @@ defmodule Kiroku.Sync do
     end
   end
 
-  def should_sync_record?(record, source_view) do
-    # For incremental sync, check if record has changed since last sync
+  def should_sync_record?(record, source_view) when is_binary(source_view) do
     position = get_sync_position(source_view)
+    should_sync_record?(record, position)
+  end
+
+  @doc """
+  Like `should_sync_record?/2` but accepts a pre-fetched `position` map
+  (from `get_sync_position/1`) to avoid querying `sync_runs` per record.
+  """
+  def should_sync_record?(record, %{} = position) do
     checksum = calculate_record_checksum(record)
     legacy_id = build_legacy_id(field(record, :Jenis), field(record, :NPM))
 
-    # Check if record is new or changed
-    new_record? = is_nil(get_latest_record_tracking(legacy_id))
-    changed_record? = record_changed?(legacy_id, checksum)
+    tracking = get_latest_record_tracking(legacy_id)
+    new_record? = is_nil(tracking)
+    changed_record? = if tracking, do: tracking.checksum != checksum, else: true
 
     upload_after_sync? =
       case {field(record, :Tgl_Upload), position.last_synced_at} do

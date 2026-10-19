@@ -69,8 +69,8 @@ defmodule Kiroku.SettingsTest do
   end
 
   describe "oai_admin_email/0" do
-    test "defaults to admin@kiroku.ac.id when unset" do
-      assert Settings.oai_admin_email() == "admin@kiroku.ac.id"
+    test "defaults to chrisnaadhip@gmail.com when unset" do
+      assert Settings.oai_admin_email() == "chrisnaadhip@gmail.com"
     end
 
     test "returns the DB value when set" do
