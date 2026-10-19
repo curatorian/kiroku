@@ -48,6 +48,15 @@ defmodule KirokuWeb.AdminSyncLive do
               <.icon name="hero-arrow-path" class="size-3 inline" /> running…
             </span>
             <button
+              :if={has_active_runs?(assigns)}
+              phx-click="cancel_running_sync"
+              data-confirm="Cancel all running sync jobs? This marks them as failed."
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors hover:brightness-110"
+              style="background: rgba(196,65,90,0.15); color: var(--color-ribbon-red); border: 1px solid rgba(196,65,90,0.25);"
+            >
+              <.icon name="hero-stop" class="size-4" /> Cancel
+            </button>
+            <button
               phx-click="refresh"
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors hover:brightness-110"
               style="background: rgba(155,126,200,0.12); color: var(--color-lavender);"
@@ -58,7 +67,7 @@ defmodule KirokuWeb.AdminSyncLive do
         </div>
 
         <%!-- Stats cards ────────────────────────────────────────────────── --%>
-        <div :if={@sync_enabled} class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div :if={@sync_enabled} class="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <.sync_stat_card
             label="Total Runs"
             value={stat_value(@sync_stats, "total_runs")}
@@ -82,6 +91,12 @@ defmodule KirokuWeb.AdminSyncLive do
             value={stat_value(@sync_stats, "total_records_processed")}
             icon="hero-document-text"
             tint="patchouli"
+          />
+          <.sync_stat_card
+            label="Records Skipped"
+            value={stat_value(@sync_stats, "total_records_skipped")}
+            icon="hero-forward"
+            tint="amber"
           />
         </div>
 
@@ -157,13 +172,14 @@ defmodule KirokuWeb.AdminSyncLive do
                   <th class="px-3 py-3">Runs</th>
                   <th class="px-3 py-3">Inserted</th>
                   <th class="px-3 py-3">Updated</th>
+                  <th class="px-3 py-3">Skipped</th>
                   <th class="px-3 py-3">Failed</th>
                   <th class="px-5 py-3">Last Run</th>
                 </tr>
               </thead>
               <tbody>
                 <tr :if={@sync_stats == []} style="border-top: 1px solid rgba(155,126,200,0.08);">
-                  <td colspan="6" class="px-5 py-8 text-center" style="color: var(--color-quill);">
+                  <td colspan="7" class="px-5 py-8 text-center" style="color: var(--color-quill);">
                     No sync runs recorded yet.
                   </td>
                 </tr>
@@ -177,6 +193,7 @@ defmodule KirokuWeb.AdminSyncLive do
                   <td class="px-3 py-3" style="color: var(--color-quill);">{stat["total_runs"]}</td>
                   <td class="px-3 py-3 text-emerald-300">{stat["total_records_inserted"]}</td>
                   <td class="px-3 py-3 text-sky-300">{stat["total_records_updated"]}</td>
+                  <td class="px-3 py-3 text-amber-300">{stat["total_records_skipped"]}</td>
                   <td class="px-3 py-3 text-red-300">{stat["total_records_failed"]}</td>
                   <td class="px-5 py-3 text-xs" style="color: var(--color-quill);">
                     {format_datetime(stat["last_run_at"])}
@@ -206,7 +223,7 @@ defmodule KirokuWeb.AdminSyncLive do
                   <th class="px-3 py-3">Status</th>
                   <th class="px-3 py-3">Started</th>
                   <th class="px-3 py-3">Duration</th>
-                  <th class="px-3 py-3">Ins / Upd / Fail</th>
+                  <th class="px-3 py-3">Ins / Upd / Skip / Fail</th>
                 </tr>
               </thead>
               <tbody>
@@ -244,6 +261,8 @@ defmodule KirokuWeb.AdminSyncLive do
                     <span class="text-emerald-300">{run.records_inserted || 0}</span>
                     <span style="color: var(--color-quill);"> / </span>
                     <span class="text-sky-300">{run.records_updated || 0}</span>
+                    <span style="color: var(--color-quill);"> / </span>
+                    <span class="text-amber-300">{run.records_skipped || 0}</span>
                     <span style="color: var(--color-quill);"> / </span>
                     <span class="text-red-300">{run.records_failed || 0}</span>
                   </td>
@@ -403,6 +422,25 @@ defmodule KirokuWeb.AdminSyncLive do
   @impl true
   def handle_event("refresh", _, socket) do
     {:noreply, assign_sync_data(socket)}
+  end
+
+  def handle_event("cancel_running_sync", _, socket) do
+    import Ecto.Query
+
+    {count, _} =
+      Kiroku.Repo.update_all(
+        from(r in Kiroku.Sync.SyncRun, where: r.status == "running"),
+        set: [
+          status: "failed",
+          completed_at: DateTime.utc_now(),
+          error_message: "Cancelled by admin"
+        ]
+      )
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Cancelled #{count} running sync job(s).")
+     |> assign_sync_data()}
   end
 
   # ── Incremental sync (manual) ──────────────────────────────────────────────
@@ -746,11 +784,13 @@ defmodule KirokuWeb.AdminSyncLive do
 
   defp tint_bg("emerald"), do: "background: rgba(16,185,129,0.15);"
   defp tint_bg("red"), do: "background: rgba(196,65,90,0.15);"
+  defp tint_bg("amber"), do: "background: rgba(245,158,11,0.15);"
   defp tint_bg(_), do: "background: rgba(155,126,200,0.12);"
 
   defp tint_fg("patchouli"), do: "color: var(--color-patchouli);"
   defp tint_fg("emerald"), do: "color: #6ee7b7;"
   defp tint_fg("red"), do: "color: var(--color-ribbon-red);"
+  defp tint_fg("amber"), do: "color: #fcd34d;"
   defp tint_fg(_), do: "color: var(--color-lavender);"
 
   defp render_mssql_connection_status(assigns) do

@@ -17,6 +17,7 @@ defmodule Kiroku.Sync.SyncRun do
     field :records_processed, :integer, default: 0
     field :records_inserted, :integer, default: 0
     field :records_updated, :integer, default: 0
+    field :records_skipped, :integer, default: 0
     field :records_failed, :integer, default: 0
     field :last_synced_at, :utc_datetime
     field :last_synced_legacy_id, :string
@@ -39,6 +40,7 @@ defmodule Kiroku.Sync.SyncRun do
       :records_processed,
       :records_inserted,
       :records_updated,
+      :records_skipped,
       :records_failed,
       :last_synced_at,
       :last_synced_legacy_id,
@@ -50,6 +52,7 @@ defmodule Kiroku.Sync.SyncRun do
     |> validate_number(:records_processed, greater_than_or_equal_to: 0)
     |> validate_number(:records_inserted, greater_than_or_equal_to: 0)
     |> validate_number(:records_updated, greater_than_or_equal_to: 0)
+    |> validate_number(:records_skipped, greater_than_or_equal_to: 0)
     |> validate_number(:records_failed, greater_than_or_equal_to: 0)
   end
 end

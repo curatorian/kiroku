@@ -676,17 +676,43 @@ defmodule Kiroku.Oai.Builder do
   end
 
   defp item_to_oai_dc(item) do
-    creators =
-      (item.item_authors || [])
-      |> Enum.map_join("\n", fn a ->
-        "<dc:creator>#{xml_escape(a.author_name)}</dc:creator>"
-      end)
+    {primary, extras} =
+      case ordered_authors(item) do
+        [first | rest] -> {first, rest}
+        [] -> {nil, []}
+      end
 
     keywords =
-      (item.item_keywords || [])
-      |> Enum.map_join("\n", fn k ->
-        "<dc:subject>#{xml_escape(k.keyword)}</dc:subject>"
+      (item.item_keywords || []) |> Enum.map(&clean_value(&1.keyword)) |> Enum.reject(&is_nil/1)
+
+    creators = if primary, do: "<dc:creator>#{xml_escape(primary)}</dc:creator>", else: ""
+
+    contributors =
+      extras
+      |> Enum.map_join("\n", fn name ->
+        "<dc:contributor>#{xml_escape(name)}</dc:contributor>"
       end)
+
+    subjects =
+      keywords
+      |> Enum.map_join("\n", fn k ->
+        "<dc:subject>#{xml_escape(k)}</dc:subject>"
+      end)
+
+    sources =
+      [item.journal_name, item.conference_name]
+      |> Enum.map(&clean_value/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.map_join("\n", fn source ->
+        "<dc:source>#{xml_escape(source)}</dc:source>"
+      end)
+
+    publisher = clean_value(item.publisher)
+    institution = clean_value(item.institution)
+    doi = clean_value(item.doi)
+    description = clean_value(item.abstract)
+    date = dc_date(item)
 
     """
     <record>
@@ -700,23 +726,49 @@ defmodule Kiroku.Oai.Builder do
                    xmlns:dc="http://purl.org/dc/elements/1.1/"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
-          <dc:title>#{xml_escape(item.title)}</dc:title>
+          <dc:title>#{xml_escape(clean_value(item.title) || "")}</dc:title>
           #{creators}
-          #{keywords}
-          <dc:date>#{dc_date(item)}</dc:date>
-          #{if item.abstract, do: "<dc:description>#{xml_escape(item.abstract)}</dc:description>"}
-          #{if item.doi, do: "<dc:identifier>#{xml_escape(item.doi)}</dc:identifier>"}
+          #{contributors}
+          #{subjects}
+          #{sources}
+          #{if description, do: "<dc:description>#{xml_escape(description)}</dc:description>"}
+          #{if doi, do: "<dc:identifier>#{xml_escape(doi)}</dc:identifier>"}
           <dc:identifier>#{xml_escape(base_url())}/items/#{item.handle || item.id}</dc:identifier>
           <dc:type>#{xml_escape(item.item_type)}</dc:type>
           <dc:language>#{xml_escape(item.language || "id")}</dc:language>
-          #{if item.publisher, do: "<dc:publisher>#{xml_escape(item.publisher)}</dc:publisher>"}
-          #{if item.institution, do: "<dc:publisher>#{xml_escape(item.institution)}</dc:publisher>"}
+          #{if date != "", do: "<dc:date>#{date}</dc:date>", else: ""}
+          #{if publisher, do: "<dc:publisher>#{xml_escape(publisher)}</dc:publisher>"}
+          #{if institution, do: "<dc:publisher>#{xml_escape(institution)}</dc:publisher>"}
           <dc:rights>#{xml_escape(rights_statement(item))}</dc:rights>
         </oai_dc:dc>
       </metadata>
     </record>
     """
   end
+
+  # Primary author (lowest sequence) becomes dc:creator; additional authors
+  # become dc:contributor so consumer-facing records distinguish researcher
+  # leadership from co-authors.
+  defp ordered_authors(item) do
+    (item.item_authors || [])
+    |> Enum.sort_by(&{&1.sequence || 0, &1.id})
+    |> Enum.map(&clean_value(&1.author_name))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # Literal "NULL" strings leak from the legacy MSSQL data into record values;
+  # never emit them (same convention as the migration importer). Blank strings
+  # are normalized to nil so empty elements are omitted entirely.
+  defp clean_value(nil), do: nil
+
+  defp clean_value(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> if String.downcase(trimmed) == "null", do: nil, else: trimmed
+    end
+  end
+
+  defp clean_value(other), do: clean_value(to_string(other))
 
   # §2.5/§2.6: when a repository advertises sets, record headers MUST include
   # the item's set memberships (ListIdentifiers / ListRecords / GetRecord).

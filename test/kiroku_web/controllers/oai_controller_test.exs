@@ -508,4 +508,82 @@ defmodule KirokuWeb.OaiControllerTest do
       assert body =~ ~s(code="badResumptionToken")
     end
   end
+
+  describe "oai_dc mapping hygiene" do
+    defp create_authored_item(collection_id) do
+      item =
+        published_item(collection_id, %{
+          "abstract" => "Abstrak.",
+          "journal_name" => "Jurnal Testing",
+          "conference_name" => "Symposium",
+          "publisher" => "Perpustakaan"
+        })
+
+      {:ok, _} =
+        Kiroku.Repository.create_item_author(%{
+          "item_id" => item.id,
+          "author_name" => "Sari Dewi",
+          "sequence" => 1
+        })
+
+      {:ok, _} =
+        Kiroku.Repository.create_item_author(%{
+          "item_id" => item.id,
+          "author_name" => "NULL",
+          "sequence" => 99
+        })
+
+      {:ok, _} =
+        Kiroku.Repository.create_item_author(%{
+          "item_id" => item.id,
+          "author_name" => "Budi Santoso",
+          "sequence" => 2
+        })
+
+      _keywords =
+        Kiroku.Repository.upsert_keywords_for_item(item.id, [
+          %{keyword: "ethnography"},
+          %{keyword: "null"}
+        ])
+
+      item
+    end
+
+    test "primary creator first, additional authors as contributors", %{conn: conn} do
+      {_, collection} = create_collection()
+      _item = create_authored_item(collection.id)
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      creators = Regex.scan(~r/<dc:creator>([^<]+)<\/dc:creator>/, body)
+      contributors = Regex.scan(~r/<dc:contributor>([^<]+)<\/dc:contributor>/, body)
+
+      assert match?([[_full, "Sari Dewi"]], creators),
+             "exactly one dc:creator, the primary author"
+
+      assert match?([[_full, "Budi Santoso"]], contributors),
+             "co-author demoted to dc:contributor"
+    end
+
+    test "literal NULL values are dropped, never emitted as content", %{conn: conn} do
+      {_, collection} = create_collection()
+      create_authored_item(collection.id)
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      refute body =~ ">NULL<"
+      refute body =~ ">null<"
+      assert body =~ "<dc:subject>ethnography</dc:subject>"
+    end
+
+    test "emits dc:source from the containing publication", %{conn: conn} do
+      {_, collection} = create_collection()
+      create_authored_item(collection.id)
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert body =~ "<dc:source>Jurnal Testing</dc:source>"
+      assert body =~ "<dc:source>Symposium</dc:source>"
+    end
+  end
 end

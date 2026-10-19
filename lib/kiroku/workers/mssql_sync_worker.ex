@@ -53,7 +53,8 @@ defmodule Kiroku.Workers.MssqlSyncWorker do
 
       Logger.info(
         "[MssqlSyncWorker] #{view_name} done — processed=#{stats.processed} " <>
-          "inserted=#{stats.inserted} updated=#{stats.updated} failed=#{stats.failed}"
+          "inserted=#{stats.inserted} updated=#{stats.updated} " <>
+          "skipped=#{stats.skipped} failed=#{stats.failed}"
       )
 
       :ok

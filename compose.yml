@@ -31,6 +31,8 @@ services:
     volumes:
       # Persist uploaded files when using STORAGE_ADAPTER=local
       - kiroku_uploads:/app/priv/uploads
+      # Persist SAF exports/imports across container restarts
+      - kiroku_data:/app/data
     healthcheck:
       test: ["CMD-SHELL", "bin/kiroku pid 2>/dev/null || exit 1"]
       interval: 30s
@@ -40,3 +42,4 @@ services:
 
 volumes:
   kiroku_uploads:
+  kiroku_data:

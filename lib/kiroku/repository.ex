@@ -1066,6 +1066,19 @@ defmodule Kiroku.Repository do
   end
 
   @doc """
+  Returns a map of `%{item_type => count}` for all items, regardless of status.
+  Used by the admin items page to show a quick overview of inventory per type.
+  """
+  def count_items_by_type do
+    Repo.all(
+      from i in Item,
+        group_by: i.item_type,
+        select: {i.item_type, count(i.id)}
+    )
+    |> Map.new()
+  end
+
+  @doc """
   Full-text and filtered search over published, discoverable items.
   Accepted params: `:term`, `:department`, `:faculty`, `:year`, `:item_type`,
   `:collection_id`, `:page`, `:per_page`, `:scope`.
@@ -1653,6 +1666,10 @@ defmodule Kiroku.Repository do
 
   # ── Import (mix kiroku.import_from_mssql only) ──────────────────────────────
 
+  def get_item_by_legacy_id(legacy_id) when is_binary(legacy_id) do
+    Repo.get_by(Item, legacy_id: legacy_id)
+  end
+
   @doc """
   Upserts an item from the MSSQL import. Uses legacy_id as the conflict target;
   on conflict it replaces all fields except id and inserted_at.
@@ -1672,7 +1689,7 @@ defmodule Kiroku.Repository do
       %Item{}
       |> Item.import_changeset(attrs)
       |> Repo.insert(
-        on_conflict: {:replace_all_except, [:id, :inserted_at]},
+        on_conflict: {:replace_all_except, [:id, :inserted_at, :handle]},
         conflict_target: :legacy_id,
         returning: true
       )
