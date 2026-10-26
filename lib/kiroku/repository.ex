@@ -963,6 +963,7 @@ defmodule Kiroku.Repository do
 
     base =
       from(i in Item,
+        as: :item,
         where:
           i.collection_id == ^collection_id and
             i.status == :published and

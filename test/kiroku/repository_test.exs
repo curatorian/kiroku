@@ -278,6 +278,41 @@ defmodule Kiroku.RepositoryTest do
 
   # ── Faceted search ──────────────────────────────────────────────────────────
 
+  describe "list_items_for_collection_pagination/2" do
+    test "term search matches author names and keywords via EXISTS subqueries" do
+      c = create_collection()
+
+      item =
+        create_published_item_with(%{
+          collection_id: c.id,
+          title: "Analisis Hukum Pidana",
+          authors: ["Siti Aminah"],
+          keywords: ["pidana"]
+        })
+
+      other =
+        create_published_item_with(%{
+          collection_id: create_collection().id,
+          title: "Analisis Lain",
+          authors: ["Siti Aminah"],
+          keywords: ["pidana"]
+        })
+
+      {items, pagination} =
+        Repository.list_items_for_collection_pagination(c.id, term: "Siti Aminah", scope: :public)
+
+      assert pagination.total_count == 1
+      assert Enum.map(items, & &1.id) == [item.id]
+
+      {items, pagination} =
+        Repository.list_items_for_collection_pagination(c.id, term: "pidana", scope: :public)
+
+      assert pagination.total_count == 1
+      assert Enum.map(items, & &1.id) == [item.id]
+      refute item.id == other.id
+    end
+  end
+
   describe "facets/1" do
     setup do
       c = create_collection()
