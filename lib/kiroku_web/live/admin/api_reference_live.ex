@@ -103,12 +103,14 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
           </div>
           <p class="text-xs" style="color: var(--color-dust);">
             Token types (managed in <.link href={~p"/admin/api-tokens"} class="underline">API Tokens</.link>):
-            <strong>user tokens</strong> inherit the account's access tier;
-            <strong>device tokens</strong> are for kiosks — they report
-            <code>tier: "kiosk"</code> on
-            <code>GET /api/v1/kiosks/status</code> and must be approved by a superadmin.
+            <strong>user tokens</strong>
+            inherit the account's access tier; <strong>device tokens</strong>
+            are for kiosks — they report <code>tier: "kiosk"</code>
+            on <code>GET /api/v1/kiosks/status</code>
+            and must be approved by a superadmin.
             Until approved a device token reads <code>needs_reverify</code>; rotating or
-            deleting it reads as <em>revoked</em> (401).
+            deleting it reads as <em>revoked</em>
+            (401).
           </p>
         </div>
 
@@ -226,7 +228,8 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
                 name: "q",
                 type: "string",
                 required: false,
-                description: "Full-text search across title, abstract, metadata, full text, authors, keywords"
+                description:
+                  "Full-text search across title, abstract, metadata, full text, authors, keywords"
               },
               %{
                 name: "type",
@@ -386,8 +389,18 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
             description:
               "Cover image bytes from the stored THUMBNAIL bitstream (size label is reserved for future variants). Prevents probing the file route for thumbnails.",
             params: [
-              %{name: "item_id", type: "UUID | handle", required: true, description: "Item UUID or handle"},
-              %{name: "size", type: "string", required: true, description: "small | medium | large (reserved)"}
+              %{
+                name: "item_id",
+                type: "UUID | handle",
+                required: true,
+                description: "Item UUID or handle"
+              },
+              %{
+                name: "size",
+                type: "string",
+                required: true,
+                description: "small | medium | large (reserved)"
+              }
             ],
             response: %{status: "200 OK", body: "image/jpeg bytes"}
           })}
@@ -395,7 +408,11 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
 
         <div class="kiroku-card p-6 space-y-4">
           <div class="flex items-center gap-2">
-            <.icon name="hero-device-phone-mobile" class="w-5 h-5" style="color: var(--color-patchouli);" />
+            <.icon
+              name="hero-device-phone-mobile"
+              class="w-5 h-5"
+              style="color: var(--color-patchouli);"
+            />
             <h3 class="font-heading text-lg font-semibold" style="color: var(--color-lilac);">
               Kiosk
             </h3>
@@ -423,7 +440,11 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
 
         <div class="kiroku-card p-6 space-y-4">
           <div class="flex items-center gap-2">
-            <.icon name="hero-exclamation-circle" class="w-5 h-5" style="color: var(--color-patchouli);" />
+            <.icon
+              name="hero-exclamation-circle"
+              class="w-5 h-5"
+              style="color: var(--color-patchouli);"
+            />
             <h3 class="font-heading text-lg font-semibold" style="color: var(--color-lilac);">
               Error Responses
             </h3>
@@ -645,8 +666,7 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
   defp events_json, do: ~s({"accepted":12,"total":12})
 
   defp error_envelope_example,
-    do:
-      ~s(HTTP/1.1 404 Not Found
+    do: ~s(HTTP/1.1 404 Not Found
 Content-Type: application/json; charset=utf-8
 
 {"error":"not_found","message":"Not Found"}
