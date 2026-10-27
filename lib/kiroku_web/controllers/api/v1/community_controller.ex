@@ -9,6 +9,8 @@ defmodule KirokuWeb.Api.V1.CommunityController do
 
   use KirokuWeb, :controller
 
+  import KirokuWeb.Api.ErrorHelpers
+
   alias Kiroku.{Repository, Repo}
   alias Kiroku.Access.Authorization
   alias Kiroku.Repository.Community
@@ -17,16 +19,50 @@ defmodule KirokuWeb.Api.V1.CommunityController do
 
   def index(conn, _params) do
     scope = Authorization.visibility_scope(conn.assigns[:current_user])
-    communities = Repository.list_communities(scope: scope)
-    json(conn, %{data: Enum.map(communities, &community_json/1)})
+    revision = Kiroku.Repository.communities_revision(scope)
+
+    KirokuWeb.Api.ETagHelpers.respond(conn, revision, fn conn ->
+      communities = Kiroku.Repository.list_communities(scope: scope)
+
+      conn
+      |> put_resp_header("x-total-count", Integer.to_string(length(communities)))
+      |> json(%{data: Enum.map(communities, &community_json/1)})
+    end)
+  end
+
+  @doc """
+  GET /api/v1/communities/:id/subcommunities — direct children of a community
+  (accepts UUID or handle).
+  """
+  def index_subcommunities(conn, %{"community_id" => community_id}) do
+    scope = Authorization.visibility_scope(conn.assigns[:current_user])
+
+    case resolve_community(community_id) do
+      nil ->
+        not_found(conn, "Community not found")
+
+      parent ->
+        children =
+          Repository.list_subcommunities(parent.id, scope: scope)
+          |> Enum.filter(&Authorization.can?(conn.assigns[:current_user], :read, &1))
+
+        conn
+        |> put_resp_header("x-total-count", Integer.to_string(length(children)))
+        |> json(%{data: Enum.map(children, &community_json/1)})
+    end
+  end
+
+  defp resolve_community(id_or_handle) do
+    case Ecto.UUID.cast(id_or_handle) do
+      {:ok, uuid} -> Repository.get_community(uuid)
+      :error -> Repository.get_community_by_handle(id_or_handle)
+    end
   end
 
   def show(conn, %{"id" => id}) do
     case Repository.get_community(id) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Community not found"})
+        not_found(conn, "Community not found")
 
       community ->
         if Authorization.can?(conn.assigns[:current_user], :read, community) do
@@ -34,9 +70,7 @@ defmodule KirokuWeb.Api.V1.CommunityController do
           community = Repo.preload(community, :collections)
           json(conn, %{data: community_json(community, include_collections: true, scope: scope)})
         else
-          conn
-          |> put_status(:not_found)
-          |> json(%{error: "Community not found"})
+          not_found(conn, "Community not found")
         end
     end
   end
@@ -53,14 +87,10 @@ defmodule KirokuWeb.Api.V1.CommunityController do
           |> json(%{data: community_json(community)})
 
         {:error, changeset} ->
-          conn
-          |> put_status(:unprocessable_entity)
-          |> json(%{errors: format_errors(changeset)})
+          unprocessable(conn, changeset)
       end
     else
-      conn
-      |> put_status(:forbidden)
-      |> json(%{error: "Forbidden"})
+      forbidden(conn)
     end
   end
 
@@ -69,6 +99,7 @@ defmodule KirokuWeb.Api.V1.CommunityController do
       id: community.id,
       name: community.name,
       handle: community.handle,
+      parent_community_id: community.parent_community_id,
       short_description: community.short_description,
       description: community.description,
       position: community.position,
@@ -97,13 +128,5 @@ defmodule KirokuWeb.Api.V1.CommunityController do
       handle: collection.handle,
       short_description: collection.short_description
     }
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 end

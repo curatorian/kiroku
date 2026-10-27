@@ -94,7 +94,7 @@ defmodule KirokuWeb.Api.V1.WriteApiTest do
         authed_conn(user)
         |> post(~p"/api/v1/items", %{"item" => %{"collection_id" => collection().id}})
 
-      assert %{"errors" => errors} = json_response(conn, 422)
+      assert %{"fields" => errors} = json_response(conn, 422)
       assert errors["title"]
     end
 

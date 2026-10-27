@@ -854,21 +854,30 @@ defmodule Kiroku.Sync.Importer do
         not is_nil(file_col) and file_col != ""
       end)
       |> Enum.map(fn {file_col, bundle, seq, access} ->
+        filename = Path.basename(file_col)
+        url = resolve_legacy_url(build_file_url(link_path, file_col))
+
         %{
           id: Ecto.UUID.generate(),
           item_id: item.id,
-          filename: Path.basename(file_col),
+          filename: filename,
           bundle_name: bundle,
           sequence: seq,
           description: legacy_file_description(bundle, seq),
           storage_type: :url,
-          storage_url: build_file_url(link_path, file_col),
+          storage_url: url,
+          mime_type: Kiroku.BitstreamMetadata.derive_mime(filename),
+          file_size: nil,
           access_level: access,
           embargo_open_date: item.embargo_open_date,
           inserted_at: now,
           updated_at: now
         }
       end)
+      # Populate file_size (and refine mime) by HEAD-probing the legacy file
+      # URL. Failures are tolerated — a dead legacy server must never block
+      # the import, the row keeps its filename-derived mime and nil size.
+      |> fill_probe_metadata()
 
     if bitstream_attrs != [] do
       {count, _} = Repo.insert_all(Content.Bitstream, bitstream_attrs)
@@ -877,6 +886,85 @@ defmodule Kiroku.Sync.Importer do
       0
     end
   end
+
+  defp fill_probe_metadata(attrs) when is_list(attrs) do
+    probe_map =
+      attrs
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {attr, i} ->
+        if abs_url?(attr[:storage_url]), do: [{i, attr[:storage_url]}], else: []
+      end)
+      |> Task.async_stream(fn {i, url} -> {i, head_file_info(url)} end,
+        max_concurrency: 16,
+        timeout: :infinity
+      )
+      |> Enum.reduce(%{}, fn
+        {:ok, {_, {nil, nil}}}, acc -> acc
+        {:ok, {i, info}}, acc -> Map.put(acc, i, info)
+        _, acc -> acc
+      end)
+
+    Enum.map(Enum.with_index(attrs), fn {attr, i} ->
+      case Map.get(probe_map, i) do
+        {size, mime} ->
+          attr
+          |> maybe_put(:file_size, size)
+          |> maybe_put(:mime_type, mime)
+
+        _ ->
+          attr
+      end
+    end)
+  end
+
+  defp maybe_put(map, _k, nil), do: map
+  defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  # HEADs a legacy file URL. Returns {file_size, mime_type} — either may be
+  # nil when the server does not answer.
+  defp head_file_info(url) do
+    case Req.head(url, receive_timeout: 10_000, retry: :transient, redirect: true) do
+      {:ok, resp} ->
+        {content_length(resp), content_type(resp)}
+
+      _ ->
+        {nil, nil}
+    end
+  rescue
+    _ -> {nil, nil}
+  end
+
+  defp content_length(resp) do
+    case Map.get(resp.headers, "content-length", []) do
+      [len | _] ->
+        case Integer.parse(len) do
+          {size, ""} -> size
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp content_type(resp) do
+    case Map.get(resp.headers, "content-type", []) do
+      [ct | _] -> ct |> String.split(";") |> List.first()
+      _ -> nil
+    end
+  end
+
+  defp abs_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when is_binary(scheme) and is_binary(host) ->
+        scheme != "" and host != ""
+
+      _ ->
+        false
+    end
+  end
+
+  defp abs_url?(_), do: false
 
   # ── Mapping helpers ────────────────────────────────────────────────────────
 
@@ -925,6 +1013,26 @@ defmodule Kiroku.Sync.Importer do
     base = String.trim_trailing(base, "/")
     file = String.trim_leading(file_col, "/")
     "#{base}/#{file}"
+  end
+
+  # Legacy LinkPath values are frequently relative paths. When a base has
+  # been configured (setting `legacy_file_base_url` or env LEGACY_FILE_BASE_URL),
+  # relative file paths become absolute URLs so the probe/API redirect work.
+  defp resolve_legacy_url(url) when is_binary(url) do
+    if abs_url?(url) do
+      url
+    else
+      case legacy_file_base_url() do
+        nil -> url
+        base -> build_file_url(base, url)
+      end
+    end
+  end
+
+  defp resolve_legacy_url(url), do: url
+
+  defp legacy_file_base_url do
+    Kiroku.Settings.get("legacy_file_base_url") || System.get_env("LEGACY_FILE_BASE_URL")
   end
 
   defp date_from_datetime(nil), do: nil

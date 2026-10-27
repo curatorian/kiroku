@@ -74,6 +74,39 @@ defmodule Kiroku.Repository do
   end
 
   @doc """
+  Revision tuple `{count, max_updated_at, scope}` for ETag computation over
+  the communities visible to `scope`.
+  """
+  def communities_revision(scope) do
+    levels = Authorization.visible_access_levels(scope)
+
+    {count, max_ts} =
+      from(c in Community,
+        where: c.is_active == true and c.access_level in ^levels,
+        select: {count(c.id), max(c.updated_at)}
+      )
+      |> Repo.one()
+
+    # Revision tuple: {count, max_updated_at, scope}
+    {count, max_ts, scope}
+  end
+
+  @doc "Like `communities_revision/1`, for collections."
+  def collections_revision(scope) do
+    levels = Authorization.visible_access_levels(scope)
+
+    {count, max_ts} =
+      from(c in Collection,
+        where: c.access_level in ^levels,
+        select: {count(c.id), max(c.updated_at)}
+      )
+      |> Repo.one()
+
+    # Revision tuple: {count, max_updated_at, scope}
+    {count, max_ts, scope}
+  end
+
+  @doc """
   Returns top-level (root) communities — those without a parent.
 
   Accepts a `:scope` opt (default `:public`) to restrict by access level.
@@ -1096,6 +1129,14 @@ defmodule Kiroku.Repository do
   Paginated version of `search_items/1`.
   Returns `{items, %Pagination{}}`. Accepts the same params map as `search_items/1`
   (page and per_page are read from the map).
+
+  Additional params (string values, API-oriented):
+    * `:sort` — `relevance` (default, only meaningful with a term) |
+      `published_at` | `title` | `author` | `subject`
+    * `:order` — `asc` | `desc` (default `desc` for `relevance`/`published_at`,
+      `asc` for `title`/`author`/`subject`)
+    * `:starts_with` — alphabetical prefix browse; applies to title unless
+      `:sort` selects `author` or `subject`
   """
   def search_items_pagination(%{} = params) do
     opts = normalize_search_params(params)
@@ -1106,14 +1147,48 @@ defmodule Kiroku.Repository do
 
     items =
       base
-      |> apply_search_ordering(opts.term)
+      |> apply_search_ordering(opts.term, opts)
       |> limit(^opts.per_page)
       |> offset(^Pagination.offset(pagination))
       |> select([i], ^@item_display_fields)
       |> Repo.all()
+      |> attach_collection_briefs()
 
     {items, pagination}
   end
+
+  # List responses can name the owning collection without an N+1 fetch:
+  # one query for all page items, collection briefs reattached client-side.
+  defp attach_collection_briefs(items) when is_list(items) do
+    ids =
+      items
+      |> Enum.map(& &1.collection_id)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    names_by_id =
+      if ids == [] do
+        %{}
+      else
+        from(c in Collection, where: c.id in ^ids, select: {c.id, {c.name, c.handle}})
+        |> Repo.all()
+        |> Map.new()
+      end
+
+    Enum.map(items, fn item ->
+      case Map.get(names_by_id, item.collection_id) do
+        nil ->
+          struct(item, collection: nil)
+
+        {name, handle} ->
+          struct(item,
+            collection: %Collection{id: item.collection_id, name: name, handle: handle}
+          )
+      end
+    end)
+  end
+
+  defp attach_collection_briefs(other), do: other
 
   @doc """
   Computes per-value aggregation counts for the search result set, for
@@ -1168,7 +1243,10 @@ defmodule Kiroku.Repository do
       keyword: Map.get(params, :keyword),
       scope: Map.get(params, :scope, :public),
       page: Map.get(params, :page, 1),
-      per_page: Map.get(params, :per_page, 20)
+      per_page: Map.get(params, :per_page, 20),
+      sort: Map.get(params, :sort),
+      order: Map.get(params, :order),
+      starts_with: Map.get(params, :starts_with)
     }
   end
 
@@ -1185,6 +1263,45 @@ defmodule Kiroku.Repository do
     |> maybe_filter(:collection_id, opts.collection_id)
     |> maybe_author_filter(opts.author)
     |> maybe_keyword_filter(opts.keyword)
+    |> maybe_starts_with_filter(opts.starts_with, opts.sort)
+  end
+
+  # Prefix browse: `starts_with` matches the current sort field — title by
+  # default, author (min item_authors.author_name, falling back to
+  # student_name) when sort=author, subject_classification when sort=subject.
+  defp maybe_starts_with_filter(query, nil, _sort), do: query
+
+  defp maybe_starts_with_filter(query, prefix, "author") do
+    pattern = prefix_pattern(prefix)
+
+    from i in query,
+      where:
+        exists(
+          from a in ItemAuthor,
+            where: a.item_id == parent_as(:item).id,
+            where: ilike(a.author_name, ^pattern)
+        ) or
+          ilike(i.student_name, ^pattern)
+  end
+
+  defp maybe_starts_with_filter(query, prefix, "subject") do
+    pattern = prefix_pattern(prefix)
+
+    from i in query, where: ilike(i.subject_classification, ^pattern)
+  end
+
+  defp maybe_starts_with_filter(query, prefix, _sort) do
+    pattern = prefix_pattern(prefix)
+
+    from i in query, where: ilike(i.title, ^pattern)
+  end
+
+  defp prefix_pattern(prefix) do
+    prefix
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+    |> Kernel.<>("%")
   end
 
   # ── Browse-by-* aggregations ────────────────────────────────────────────────
@@ -1379,6 +1496,60 @@ defmodule Kiroku.Repository do
       desc: fragment("ts_rank(search_vector, plainto_tsquery('indonesian', ?))", ^term)
     )
   end
+
+  # API-aware ordering: explicit `sort` / `order` win; `relevance` (default)
+  # falls back to the behavior above.
+  defp apply_search_ordering(query, term, opts) do
+    sort = normalizable_sort(opts.sort)
+    order = normalize_order(opts.order, sort)
+
+    cond do
+      sort == "relevance" ->
+        apply_search_ordering(query, term)
+
+      sort == "author" ->
+        # Cheapest stable order across the corpus: the item's first listed
+        # author (item_authors are sorted by sequence) or student_name when
+        # the item has no authors.
+        order_by(
+          query,
+          [i],
+          {^order,
+           fragment(
+             "coalesce((select a.author_name from item_authors a where a.item_id = ? order by a.sequence asc, a.author_name asc limit 1), ?)",
+             i.id,
+             i.student_name
+           )}
+        )
+
+      true ->
+        column = sort_column(sort)
+        order_by(query, [i], {^order, field(i, ^column)})
+    end
+  end
+
+  defp normalizable_sort(nil), do: "relevance"
+  defp normalizable_sort(sort), do: sort
+
+  defp order_map, do: %{"asc" => :asc, "desc" => :desc}
+
+  defp normalize_order(order, sort) do
+    explicit = order && order_map()[order]
+
+    explicit ||
+      if sort in ["title", "author", "subject"] do
+        :asc
+      else
+        :desc
+      end
+  end
+
+  defp sort_column("relevance"), do: :published_at
+  defp sort_column("published_at"), do: :published_at
+  defp sort_column("title"), do: :title
+  defp sort_column("author"), do: :student_name
+  defp sort_column("subject"), do: :subject_classification
+  defp sort_column(_), do: :published_at
 
   defp maybe_filter(query, _field, nil), do: query
 

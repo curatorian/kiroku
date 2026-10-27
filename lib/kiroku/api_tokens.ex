@@ -38,15 +38,56 @@ defmodule Kiroku.ApiTokens do
   the hash.
   """
   def create_token(%User{} = user, name) do
+    create_token(user, name, token_type: :user)
+  end
+
+  @doc """
+  Like `create_token/2` but accepts options:
+
+    * `:token_type` — `:user` (default) or `:device` (kiosk devices)
+    * `:approved_at` — pre-approve a device token immediately
+
+  Returns `{:ok, raw_token, api_token}`.
+  """
+  def create_token(%User{} = user, name, opts) when is_list(opts) do
     raw_token = generate_raw_token()
     token_hash = hash_token(raw_token)
 
+    attrs =
+      %{
+        name: name,
+        token_hash: token_hash,
+        user_id: user.id,
+        token_type: Keyword.get(opts, :token_type, :user),
+        approved_at: Keyword.get(opts, :approved_at)
+      }
+
     %ApiToken{}
-    |> ApiToken.changeset(%{name: name, token_hash: token_hash, user_id: user.id})
+    |> ApiToken.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, api_token} -> {:ok, raw_token, api_token}
       error -> error
+    end
+  end
+
+  @doc """
+  Approves a device token (sets `approved_at` to now). Until a device token is
+  approved, GET /api/v1/kiosks/status reports `needs_reverify`.
+  """
+  def approve_token(token_id) do
+    ApiToken
+    |> Repo.get(token_id)
+    |> case do
+      nil ->
+        {:error, :not_found}
+
+      api_token ->
+        api_token
+        |> Ecto.Changeset.change(
+          approved_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+        )
+        |> Repo.update()
     end
   end
 
@@ -98,8 +139,9 @@ defmodule Kiroku.ApiTokens do
   @doc """
   Verifies a raw token string against the stored hashes.
 
-  Returns `{:ok, user}` on success (and updates `last_used_at`), or
-  `{:error, :invalid}` if the token does not match.
+  Returns `{:ok, user, api_token}` on success (and updates `last_used_at`),
+  or `{:error, :invalid}` if the token does not match. The `api_token` record
+  carries `token_type` and `approved_at` (used for kiosk device status).
   """
   def verify_token(nil), do: {:error, :invalid}
 
@@ -118,7 +160,7 @@ defmodule Kiroku.ApiTokens do
       {api_token, user} ->
         update_last_used(api_token)
         # Preload RBAC policies so Authorization.can?/3 has them in memory.
-        {:ok, Repo.preload(user, :rbac_policies)}
+        {:ok, Repo.preload(user, :rbac_policies), api_token}
     end
   end
 

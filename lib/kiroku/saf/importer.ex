@@ -351,6 +351,8 @@ defmodule Kiroku.Saf.Importer do
                     bundle_name: entry.bundle,
                     sequence: entry.sequence,
                     description: entry.description,
+                    mime_type: mime_for(entry.filename),
+                    file_size: byte_size(content),
                     storage_path: key,
                     checksum: checksum,
                     checksum_algorithm: "MD5",
