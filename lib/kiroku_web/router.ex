@@ -31,6 +31,11 @@ defmodule KirokuWeb.Router do
     plug KirokuWeb.Plugs.RequireApiToken
   end
 
+  pipeline :optional_authenticated_api do
+    plug :accepts, ["json"]
+    plug KirokuWeb.Plugs.ApiAuth
+  end
+
   # ── Health check (container liveness/readiness probe) ─────────────────────────
   scope "/", KirokuWeb do
     pipe_through :api
@@ -92,7 +97,6 @@ defmodule KirokuWeb.Router do
     resources "/items", ItemController, only: [:index, :show, :create, :update] do
       get "/bitstreams", ItemController, :bitstreams, as: :bitstreams
       post "/bitstreams", ItemController, :deposit_bitstream, as: :bitstreams
-      get "/bitstreams/:bitstream_id", BitstreamController, :show, as: :bitstream
       get "/thumbnails/:size", BitstreamController, :thumbnail, as: :thumbnail
     end
 
@@ -104,6 +108,13 @@ defmodule KirokuWeb.Router do
     pipe_through :authenticated_api_multipart
 
     post "/items/deposit", ItemController, :deposit
+  end
+
+  # Optional-auth bitstream download (anonymous access allowed for open files).
+  scope "/api/v1", KirokuWeb.Api.V1 do
+    pipe_through :optional_authenticated_api
+
+    get "/items/:item_id/bitstreams/:id", BitstreamController, :show, as: :bitstream
   end
 
   # ── SWORD v2 deposit API ─────────────────────────────────────────────────────
