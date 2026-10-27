@@ -936,7 +936,20 @@ defmodule KirokuWeb.Api.V1.ItemController do
       description: bitstream.description,
       mime_type: bitstream.mime_type,
       file_size: bitstream.file_size,
-      access_level: bitstream.access_level
+      access_level: bitstream.access_level,
+      url: bitstream_url(bitstream)
     }
   end
+
+  defp bitstream_url(%{storage_type: :url, storage_url: url}) when is_binary(url), do: url
+
+  defp bitstream_url(%{storage_type: :local, storage_path: path}) when is_binary(path),
+    do: "/uploads/#{path}"
+
+  defp bitstream_url(%{storage_type: :s3, storage_bucket: bucket, storage_path: path})
+       when is_binary(path) do
+    Uploader.presign_url(bucket, path)
+  end
+
+  defp bitstream_url(_), do: nil
 end

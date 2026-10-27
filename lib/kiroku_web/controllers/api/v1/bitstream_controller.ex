@@ -20,6 +20,14 @@ defmodule KirokuWeb.Api.V1.BitstreamController do
   alias Kiroku.Storage.Uploader
 
   def show(conn, %{"item_id" => item_id, "bitstream_id" => bitstream_id}) do
+    do_show(conn, item_id, bitstream_id)
+  end
+
+  def show(conn, %{"item_id" => item_id, "id" => bitstream_id}) do
+    do_show(conn, item_id, bitstream_id)
+  end
+
+  defp do_show(conn, item_id, bitstream_id) do
     user = conn.assigns[:current_user]
     item = Repository.get_item!(item_id)
     bitstream = Content.get_bitstream!(bitstream_id)

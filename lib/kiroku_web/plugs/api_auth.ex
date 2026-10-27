@@ -5,8 +5,10 @@ defmodule KirokuWeb.Plugs.ApiAuth do
   `conn.assigns[:current_user]` when the token is valid.
 
   Used in the `:authenticated_api` pipeline to gate REST API routes.
-  Requests with no token or an invalid token get `current_user: nil`;
-  the `RequireApiToken` plug handles the 401 response.
+  Requests with no token leave `conn.assigns[:current_user]` untouched (so
+  session/browser users and anonymous access keep working); an invalid token
+  sets `current_user: nil`. The `RequireApiToken` plug handles the 401
+  response for routes that require a token.
   """
 
   import Plug.Conn
@@ -20,7 +22,9 @@ defmodule KirokuWeb.Plugs.ApiAuth do
 
     case raw_token do
       nil ->
-        assign(conn, :current_user, nil)
+        # Leave conn.assigns[:current_user] untouched so session/browser users
+        # (and anonymous access) keep working when no token is supplied.
+        conn
 
       token ->
         case ApiTokens.verify_token(token) do
