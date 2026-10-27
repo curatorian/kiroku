@@ -1,21 +1,19 @@
 defmodule KirokuWeb.FallbackController do
   use Phoenix.Controller, formats: [:json]
 
+  import KirokuWeb.Api.ErrorHelpers
+
   def call(conn, {:error, :not_found}) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{error: "Not found"})
+    not_found(conn, "Not found")
   end
 
   def call(conn, {:error, :unauthorized}) do
-    conn
-    |> put_status(:forbidden)
-    |> json(%{error: "Forbidden"})
+    forbidden(conn, "Forbidden")
   end
 
   def call(conn, {:error, _reason}) do
     conn
     |> put_status(:internal_server_error)
-    |> json(%{error: "Internal server error"})
+    |> json(%{error: "internal_error", message: "Internal server error"})
   end
 end

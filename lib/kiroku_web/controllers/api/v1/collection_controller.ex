@@ -9,6 +9,8 @@ defmodule KirokuWeb.Api.V1.CollectionController do
 
   use KirokuWeb, :controller
 
+  import KirokuWeb.Api.ErrorHelpers
+
   alias Kiroku.{Repository, Repo}
   alias Kiroku.Access.Authorization
   alias Kiroku.Repository.Collection
@@ -19,22 +21,29 @@ defmodule KirokuWeb.Api.V1.CollectionController do
     community_id = params["community_id"]
     scope = Authorization.visibility_scope(conn.assigns[:current_user])
 
-    collections =
-      if community_id do
-        Repository.list_collections_for_community(community_id, scope: scope)
-      else
-        Repository.list_collections(scope: scope)
-      end
+    if community_id do
+      collections = Repository.list_collections_for_community(community_id, scope: scope)
 
-    json(conn, %{data: Enum.map(collections, &collection_json/1)})
+      conn
+      |> put_resp_header("x-total-count", Integer.to_string(length(collections)))
+      |> json(%{data: Enum.map(collections, &collection_json/1)})
+    else
+      revision = Repository.collections_revision(scope)
+
+      KirokuWeb.Api.ETagHelpers.respond(conn, revision, fn conn ->
+        collections = Repository.list_collections(scope: scope)
+
+        conn
+        |> put_resp_header("x-total-count", Integer.to_string(length(collections)))
+        |> json(%{data: Enum.map(collections, &collection_json/1)})
+      end)
+    end
   end
 
   def show(conn, %{"id" => id}) do
     case Repository.get_collection(id) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Collection not found"})
+        not_found(conn, "Collection not found")
 
       collection ->
         if Authorization.can?(conn.assigns[:current_user], :read, collection) do
@@ -46,9 +55,7 @@ defmodule KirokuWeb.Api.V1.CollectionController do
             data: collection_json(collection, item_count: item_count, include_community: true)
           })
         else
-          conn
-          |> put_status(:not_found)
-          |> json(%{error: "Collection not found"})
+          not_found(conn, "Collection not found")
         end
     end
   end
@@ -65,14 +72,10 @@ defmodule KirokuWeb.Api.V1.CollectionController do
           |> json(%{data: collection_json(collection)})
 
         {:error, changeset} ->
-          conn
-          |> put_status(:unprocessable_entity)
-          |> json(%{errors: format_errors(changeset)})
+          unprocessable(conn, changeset)
       end
     else
-      conn
-      |> put_status(:forbidden)
-      |> json(%{error: "Forbidden"})
+      forbidden(conn)
     end
   end
 
@@ -104,13 +107,5 @@ defmodule KirokuWeb.Api.V1.CollectionController do
     else
       base
     end
-  end
-
-  defp format_errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
   end
 end

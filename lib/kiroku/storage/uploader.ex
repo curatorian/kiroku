@@ -76,6 +76,39 @@ defmodule Kiroku.Storage.Uploader do
   def read_bytes(%{storage_type: :url}), do: {:error, :url_not_verifiable}
   def read_bytes(_), do: {:error, :unknown_storage}
 
+  # ── S3 object helpers (used by the API bitstream download route) ─────────
+
+  @doc "HEADs an S3 object, returning its content-length. `{:ok, bytes}` | `{:error, reason}`."
+  def s3_object_size(bucket, key) do
+    ExAws.S3.head_object(bucket, key)
+    |> ExAws.request(ex_aws_config())
+    |> case do
+      {:ok, %{headers: headers}} ->
+        len =
+          headers
+          |> Enum.find(fn {k, _} -> k == "content-length" or k == "Content-Length" end)
+          |> elem(1)
+
+        case Integer.parse(to_string(len)) do
+          {size, ""} -> {:ok, size}
+          _ -> {:error, :head_failed}
+        end
+
+      {:error, reason} ->
+        {:error, {:s3_head_failed, reason}}
+    end
+  end
+
+  @doc "GETs a byte range of an S3 object (`range` e.g. \"bytes=0-1023\")."
+  def s3_get_range(bucket, key, range) do
+    ExAws.S3.get_object(bucket, key, range: range)
+    |> ExAws.request(ex_aws_config())
+    |> case do
+      {:ok, %{body: body}} -> {:ok, body}
+      {:error, reason} -> {:error, {:s3_get_failed, reason}}
+    end
+  end
+
   # ── Presigned download URL ─────────────────────────────────────────────────
 
   @doc """

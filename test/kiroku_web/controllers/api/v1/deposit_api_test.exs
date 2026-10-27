@@ -203,7 +203,7 @@ defmodule KirokuWeb.Api.V1.DepositApiTest do
         |> put_req_header("content-type", "multipart/form-data")
         |> post(~p"/api/v1/items/deposit", body)
 
-      assert %{"errors" => errors} = json_response(conn, 422)
+      assert %{"fields" => errors} = json_response(conn, 422)
       assert errors["title"]
     end
 
@@ -466,7 +466,7 @@ defmodule KirokuWeb.Api.V1.DepositApiTest do
       # but the item creation itself should succeed. The controller returns 500 if
       # download fails, so we test that the endpoint handles it gracefully.
       response = json_response(conn, 500)
-      assert response["error"] == "File upload failed"
+      assert response["error"] == "upload_failed"
     end
 
     test "denies users without :create permission (403)" do

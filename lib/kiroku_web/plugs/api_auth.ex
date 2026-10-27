@@ -24,8 +24,13 @@ defmodule KirokuWeb.Plugs.ApiAuth do
 
       token ->
         case ApiTokens.verify_token(token) do
-          {:ok, user} -> assign(conn, :current_user, user)
-          {:error, _} -> assign(conn, :current_user, nil)
+          {:ok, user, api_token} ->
+            conn
+            |> assign(:current_user, user)
+            |> assign(:api_token, api_token)
+
+          {:error, _} ->
+            assign(conn, :current_user, nil)
         end
     end
   end
@@ -62,7 +67,8 @@ defmodule KirokuWeb.Plugs.RequireApiToken do
       conn
       |> put_status(:unauthorized)
       |> json(%{
-        error:
+        error: "unauthorized",
+        message:
           "Missing or invalid API token. Supply it via the Authorization: Bearer <token> header or the ?token=<token> query parameter."
       })
       |> halt()

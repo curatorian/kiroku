@@ -13,7 +13,7 @@ defmodule KirokuWeb.Api.V1.ItemController do
     POST  /api/v1/items/:id/bitstreams  — deposit a file (multipart upload)
 
   Supports query params for listing:
-    q           — full-text search term
+    q           — full-text search term (AND-token match, relevance-ordered)
     type        — item_type enum value
     faculty     — faculty filter
     department  — department filter
@@ -21,9 +21,16 @@ defmodule KirokuWeb.Api.V1.ItemController do
     collection_id — collection UUID filter
     page        — page number (default 1)
     per_page    — results per page (default 20, max 100)
+    sort        — relevance (default) | published_at | title | author | subject
+    order       — asc | desc (default desc for relevance/published_at, asc otherwise)
+    starts_with — prefix browse on the current sort field (title by default)
+
+  Returns `X-Total-Count` and a `meta` block with grand totals.
   """
 
   use KirokuWeb, :controller
+
+  import KirokuWeb.Api.ErrorHelpers
 
   alias Kiroku.{Repo, Repository, Content}
   alias Kiroku.Repository.Item
@@ -33,7 +40,6 @@ defmodule KirokuWeb.Api.V1.ItemController do
   @valid_bundles ~w(ORIGINAL THUMBNAIL CHAPTER SUPPLEMENTAL ADMINISTRATIVE LICENSE MEDIA SOURCE)a
 
   def index(conn, params) do
-    per_page = min(String.to_integer(params["per_page"] || "20"), 100)
     scope = Authorization.visibility_scope(conn.assigns[:current_user])
 
     search_params = %{
@@ -43,18 +49,30 @@ defmodule KirokuWeb.Api.V1.ItemController do
       department: params["department"],
       year: params["year"] && String.to_integer(params["year"]),
       collection_id: params["collection_id"],
-      page: String.to_integer(params["page"] || "1"),
-      per_page: per_page,
+      page: parse_positive(params["page"], 1),
+      per_page: min(parse_positive(params["per_page"], 20), 100),
+      sort: params["sort"],
+      order: params["order"],
+      starts_with: params["starts_with"],
       scope: scope
     }
 
-    items = Repository.search_items(search_params)
-    json(conn, %{data: Enum.map(items, &item_brief_json/1)})
+    {items, pagination} = Repository.search_items_pagination(search_params)
+
+    conn
+    |> put_resp_header("x-total-count", Integer.to_string(pagination.total_count))
+    |> json(%{
+      data: Enum.map(items, &item_brief_json/1),
+      meta: %{
+        total_count: pagination.total_count,
+        total_pages: pagination.total_pages,
+        page: pagination.page,
+        per_page: pagination.per_page
+      }
+    })
   rescue
     ArgumentError ->
-      conn
-      |> put_status(:bad_request)
-      |> json(%{error: "Invalid query parameter"})
+      bad_request(conn, "Invalid query parameter")
   end
 
   def show(conn, %{"id" => id}) do
@@ -64,27 +82,21 @@ defmodule KirokuWeb.Api.V1.ItemController do
          Authorization.can?(conn.assigns[:current_user], :read, item) do
       json(conn, %{data: item_full_json(item)})
     else
-      conn
-      |> put_status(:not_found)
-      |> json(%{error: "Item not found"})
+      not_found(conn, "Item not found")
     end
   rescue
     Ecto.NoResultsError ->
-      conn
-      |> put_status(:not_found)
-      |> json(%{error: "Item not found"})
+      not_found(conn, "Item not found")
   end
 
   def bitstreams(conn, %{"item_id" => item_id}) do
     item = Repository.get_item!(item_id)
 
     unless item.status == :published and item.discoverable do
-      conn
-      |> put_status(:not_found)
-      |> json(%{error: "Item not found"})
+      not_found(conn, "Item not found")
     else
       current_user = conn.assigns[:current_user]
-      bitstreams = Content.list_bitstreams_for_item(item_id)
+      bitstreams = Content.list_bitstreams_for_item(item.id)
 
       accessible =
         Enum.filter(bitstreams, fn bs ->
@@ -93,6 +105,9 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
       json(conn, %{data: Enum.map(accessible, &bitstream_json/1)})
     end
+  rescue
+    Ecto.NoResultsError ->
+      not_found(conn, "Item not found")
   end
 
   # ── Write endpoints ───────────────────────────────────────────────────────
@@ -409,9 +424,9 @@ defmodule KirokuWeb.Api.V1.ItemController do
         unprocessable(conn, changeset)
 
       {:error, {:upload_error, reason}} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: "File upload failed", detail: inspect(reason)})
+        error(conn, :internal_server_error, "upload_failed", "File upload failed",
+          detail: inspect(reason)
+        )
     end
   end
 
@@ -452,9 +467,9 @@ defmodule KirokuWeb.Api.V1.ItemController do
         unprocessable(conn, changeset)
 
       {:error, {:upload_error, reason}} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: "File upload failed", detail: inspect(reason)})
+        error(conn, :internal_server_error, "upload_failed", "File upload failed",
+          detail: inspect(reason)
+        )
     end
   end
 
@@ -577,7 +592,7 @@ defmodule KirokuWeb.Api.V1.ItemController do
         bundle_name: bundle,
         sequence: seq,
         description: bundle_description(bundle, seq),
-        mime_type: MIME.type(filename),
+        mime_type: MIME.from_path(filename),
         file_size: 0,
         storage_type: :url,
         storage_path: url,
@@ -743,9 +758,9 @@ defmodule KirokuWeb.Api.V1.ItemController do
         end
 
       {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: "Upload failed", detail: inspect(reason)})
+        error(conn, :internal_server_error, "upload_failed", "Upload failed",
+          detail: inspect(reason)
+        )
     end
   end
 
@@ -781,22 +796,13 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
   defp parse_seq(n) when is_integer(n), do: n
 
-  defp forbidden(conn), do: conn |> put_status(:forbidden) |> json(%{error: "Forbidden"})
+  defp parse_positive(nil, default), do: default
 
-  defp not_found(conn, msg), do: conn |> put_status(:not_found) |> json(%{error: msg})
-
-  defp bad_request(conn, msg), do: conn |> put_status(:bad_request) |> json(%{error: msg})
-
-  defp unprocessable(conn, changeset) do
-    conn |> put_status(:unprocessable_entity) |> json(%{errors: error_map(changeset)})
-  end
-
-  defp error_map(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
+  defp parse_positive(str, default) when is_binary(str) do
+    case Integer.parse(str) do
+      {n, ""} when n > 0 -> n
+      _ -> default
+    end
   end
 
   # ── JSON serializers ──────────────────────────────────────────────────────
@@ -813,7 +819,8 @@ defmodule KirokuWeb.Api.V1.ItemController do
       publication_year: item.publication_year,
       published_at: item.published_at,
       language: item.language,
-      access_level: item.access_level
+      access_level: item.access_level,
+      collection: collection_brief(item.collection)
     }
   end
 

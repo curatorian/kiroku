@@ -11,6 +11,7 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
         |> assign(:page_title, "API Tokens")
         |> assign(:tokens, load_tokens(socket))
         |> assign(:new_token_name, "")
+        |> assign(:new_token_type, "user")
         |> assign(:created_token, nil)
         |> assign(:confirm_delete, nil)
         |> assign(:confirm_rotate, nil)
@@ -39,13 +40,14 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
   # ── Events ─────────────────────────────────────────────────────────────────
 
   @impl true
-  def handle_event("save", %{"token" => %{"name" => name}}, socket) do
+  def handle_event("save", %{"token" => %{"name" => name} = params}, socket) do
     name = String.trim(name)
+    token_type = if params["token_type"] == "device", do: :device, else: :user
 
     if name == "" do
       {:noreply, put_flash(socket, :error, "Token name is required.")}
     else
-      case ApiTokens.create_token(socket.assigns.current_user, name) do
+      case ApiTokens.create_token(socket.assigns.current_user, name, token_type: token_type) do
         {:ok, raw_token, api_token} ->
           {:noreply,
            socket
@@ -58,6 +60,27 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
           {:noreply,
            put_flash(socket, :error, "Failed to create token: #{inspect(changeset.errors)}")}
       end
+    end
+  end
+
+  def handle_event(
+        "validate",
+        %{"token" => %{"name" => name, "token_type" => token_type}},
+        socket
+      ) do
+    {:noreply, socket |> assign(:new_token_name, name) |> assign(:new_token_type, token_type)}
+  end
+
+  def handle_event("approve", %{"id" => token_id}, socket) do
+    case ApiTokens.approve_token(token_id) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> assign(:tokens, load_tokens(socket))
+         |> put_flash(:info, "Device token approved.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Token not found.")}
     end
   end
 
@@ -233,18 +256,35 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
               </h2>
             </div>
             <.form
-              for={to_form(%{"name" => @new_token_name}, as: :token)}
+              for={to_form(%{"name" => @new_token_name, "token_type" => @new_token_type}, as: :token)}
               id="token-create-form"
               phx-submit="save"
               phx-change="validate"
             >
               <div class="flex items-end gap-3">
-                <div class="flex-1">
+                <div class="flex-1 space-y-3">
                   <.input
-                    field={to_form(%{"name" => @new_token_name}, as: :token)[:name]}
+                    field={
+                      to_form(%{"name" => @new_token_name, "token_type" => @new_token_type},
+                        as: :token
+                      )[:name]
+                    }
                     type="text"
                     label="Token name"
                     placeholder="e.g. Postman, CI/CD, Data Harvester"
+                  />
+                  <.input
+                    field={
+                      to_form(%{"name" => @new_token_name, "token_type" => @new_token_type},
+                        as: :token
+                      )[:token_type]
+                    }
+                    type="select"
+                    label="Token type"
+                    options={[
+                      {"user", "User token"},
+                      {"device", "Device token (kiosk — needs approval)"}
+                    ]}
                   />
                 </div>
                 <button
@@ -307,6 +347,19 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
                       </span>
                       <span :if={!token.last_used_at}>
                         Never used
+                      </span>
+                      <span :if={token.token_type == :device && is_nil(token.approved_at)}>
+                        <button
+                          phx-click="approve"
+                          phx-value-id={token.id}
+                          class="px-1.5 py-0.5 rounded font-medium transition-colors hover:brightness-110"
+                          style="background: var(--color-ribbon-amber); color: white;"
+                        >
+                          Needs approval — approve?
+                        </button>
+                      </span>
+                      <span :if={token.token_type == :device && !is_nil(token.approved_at)}>
+                        Approved
                       </span>
                     </div>
                   </div>

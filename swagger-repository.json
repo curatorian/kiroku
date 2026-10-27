@@ -39,6 +39,14 @@
       "description": "Item file attachments"
     },
     {
+      "name": "Kiosk",
+      "description": "Kiosk device status"
+    },
+    {
+      "name": "Events",
+      "description": "Kiosk visitor event ingestion"
+    },
+    {
       "name": "SWORD v2",
       "description": "SWORD v2 deposit protocol"
     },
@@ -76,7 +84,7 @@
       "get": {
         "tags": ["Communities"],
         "summary": "List communities",
-        "description": "Returns all active communities visible to the authenticated user.",
+        "description": "Returns all active communities visible to the authenticated user. Serves an ETag; conditional requests (If-None-Match) return 304. The flattened list now carries `parent_community_id` for tree navigation; subcommunities route available at /communities/{id}/subcommunities.",
         "operationId": "listCommunities",
         "security": [{ "bearerAuth": [] }],
         "responses": {
@@ -234,11 +242,56 @@
         }
       }
     },
+    "/api/v1/communities/{id}/subcommunities": {
+      "get": {
+        "tags": ["Communities"],
+        "summary": "List direct subcommunities",
+        "description": "Returns the active, visible direct children of a community (adjacency-list hierarchy via parent_community_id).",
+        "operationId": "listSubcommunities",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CommunityId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of subcommunities (X-Total-Count header included)",
+            "headers": {
+              "X-Total-Count": {
+                "description": "Number of direct subcommunities",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Community"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/v1/collections": {
       "get": {
         "tags": ["Collections"],
         "summary": "List collections",
-        "description": "Returns all active collections. Optionally filter by community_id.",
+        "description": "Returns all active collections. Optionally filter by community_id. Serves ETag + X-Total-Count.",
         "operationId": "listCollections",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
@@ -412,7 +465,7 @@
       "get": {
         "tags": ["Items"],
         "summary": "Search items",
-        "description": "Search and list published items with pagination and filters.",
+        "description": "Search and list published items with pagination, filters, sorting and alphabetical browsing.\n\nSearch semantics: `q` is matched as AND-of-tokens via `plainto_tsquery('indonesian', q)` over the generated `search_vector` (title, abstract, title_alt, abstract_alt, student_name, subject_classification, department, faculty, program_study, extracted PDF text) plus token matches on author names and keywords. With `q` present the default ordering is relevance (ts_rank); without `q`, results are ordered published_at DESC.",
         "operationId": "listItems",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
@@ -483,18 +536,53 @@
           {
             "name": "per_page",
             "in": "query",
-            "description": "Items per page",
+            "description": "Items per page (silently capped at 100)",
             "schema": {
               "type": "integer",
               "default": 20,
               "minimum": 1,
               "maximum": 100
             }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sort field. relevance (default, only meaningful with q), published_at, title, author, subject",
+            "schema": {
+              "type": "string",
+              "enum": ["relevance", "published_at", "title", "author", "subject"]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort direction; default desc for relevance/published_at, asc for title/author/subject",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          },
+          {
+            "name": "starts_with",
+            "in": "query",
+            "description": "Alphabetical prefix browse applied to the current sort field (title by default; author with sort=author; subject with sort=subject). Case-insensitive.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "A"
           }
         ],
         "responses": {
           "200": {
-            "description": "Search results",
+            "description": "Search results. The `X-Total-Count` header mirrors meta.total_count.",
+            "headers": {
+              "X-Total-Count": {
+                "description": "Grand total of matching published items",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -505,6 +593,9 @@
                       "items": {
                         "$ref": "#/components/schemas/ItemBrief"
                       }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PaginationMeta"
                     }
                   }
                 },
@@ -521,9 +612,20 @@
                       "publication_year": 2024,
                       "published_at": "2024-06-15T10:00:00Z",
                       "language": "id",
-                      "access_level": "open"
+                      "access_level": "open",
+                      "collection": {
+                        "id": "880e8400-e29b-41d4-a716-446655440004",
+                        "name": "Skripsi Teknik Informatika",
+                        "handle": "skripsi-ti"
+                      }
                     }
-                  ]
+                  ],
+                  "meta": {
+                    "total_count": 2507,
+                    "page": 1,
+                    "per_page": 20,
+                    "total_pages": 126
+                  }
                 }
               }
             }
@@ -1125,6 +1227,215 @@
         }
       }
     },
+    "/api/v1/items/{item_id}/bitstreams/{bitstream_id}": {
+      "get": {
+        "tags": ["Bitstreams"],
+        "summary": "Download a bitstream",
+        "description": "Streams the file bytes. Supports random access: requests with a `Range: bytes=a-b` header return 206 + Content-Range; responses always carry Accept-Ranges: bytes and an ETag. Item may be addressed by UUID or handle. Access is enforced per file (bundle/embargo/access_level): denied files get a 403 in the error envelope.",
+        "operationId": "downloadBitstream",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "description": "Item UUID or handle",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bitstream_id",
+            "in": "path",
+            "required": true,
+            "description": "Bitstream UUID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "description": "RFC 9110 single byte range, e.g. bytes=0- at reader open or bytes=1048576- for random-access pages",
+            "schema": {
+              "type": "string"
+            },
+            "example": "bytes=0-1023"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full file body (no Range header)",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial content",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "416": {
+            "$ref": "#/components/responses/RangeNotSatisfiable"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}/thumbnails/{size}": {
+      "get": {
+        "tags": ["Bitstreams"],
+        "summary": "Item cover thumbnail",
+        "description": "Serves the stored THUMBNAIL bitstream bytes (always publicly accessible per bundle rules). `size` is reserved for future variants — the stored thumbnail is served regardless.",
+        "operationId": "itemThumbnail",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ItemIdPath"
+          },
+          {
+            "name": "size",
+            "in": "path",
+            "required": true,
+            "description": "Requested size label (reserved)",
+            "schema": {
+              "type": "string",
+              "enum": ["small", "medium", "large"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/kiosks/status": {
+      "get": {
+        "tags": ["Kiosk"],
+        "summary": "Kiosk status",
+        "description": "Source of truth for kiosk device state. A deleted/rotated device token yields 401 (kiosk maps to revoked). Device tokens without approval read state needs_reverify. Policies/announcement/contact are admin-editable.",
+        "operationId": "kioskStatus",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskStatus"
+                },
+                "example": {
+                  "state": "active",
+                  "tier": "kiosk",
+                  "server_time": "2026-10-27T09:00:00Z",
+                  "announcement": null,
+                  "contact": "perpustakaan@example.ac.id",
+                  "policies": {
+                    "allow_save": true,
+                    "allow_print": true,
+                    "allow_copy": false,
+                    "watermark": false,
+                    "idle_seconds": 600,
+                    "reader_idle_seconds": 900,
+                    "page_size_default": 20
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Report visitor events batch",
+        "description": "Accepts up to 500 visitor events per request. Idempotent per (sessionId, type, timestamp) — a replayed buffer is not double-counted; `accepted` reports newly inserted rows.",
+        "operationId": "createEvents",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventBatchRequest"
+              },
+              "example": {
+                "events": [
+                  {
+                    "sessionId": "0f3a...",
+                    "type": "page_view",
+                    "timestamp": "2026-10-27T09:01:23Z",
+                    "payload": {
+                      "item_id": "4ab428f2-..."
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Batch accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/sword-v2/service-document": {
       "get": {
         "tags": ["SWORD v2"],
@@ -1467,7 +1778,8 @@
               "$ref": "#/components/schemas/ErrorResponse"
             },
             "example": {
-              "error": "Missing 'item' parameter"
+              "error": "bad_request",
+              "message": "Missing 'item' parameter"
             }
           }
         }
@@ -1480,7 +1792,8 @@
               "$ref": "#/components/schemas/ErrorResponse"
             },
             "example": {
-              "error": "Missing or invalid API token. Supply it via the Authorization: Bearer <token> header or the ?token=<token> query parameter."
+              "error": "unauthorized",
+              "message": "Missing or invalid API token. Supply it via the Authorization: Bearer <token> header or the ?token=<token> query parameter."
             }
           }
         }
@@ -1493,7 +1806,8 @@
               "$ref": "#/components/schemas/ErrorResponse"
             },
             "example": {
-              "error": "Forbidden"
+              "error": "forbidden",
+              "message": "Forbidden"
             }
           }
         }
@@ -1506,7 +1820,22 @@
               "$ref": "#/components/schemas/ErrorResponse"
             },
             "example": {
-              "error": "Community not found"
+              "error": "not_found",
+              "message": "Community not found"
+            }
+          }
+        }
+      },
+      "RangeNotSatisfiable": {
+        "description": "Requested Range header is not satisfiable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "range_not_satisfiable",
+              "message": "Requested range not satisfiable"
             }
           }
         }
@@ -1519,7 +1848,9 @@
               "$ref": "#/components/schemas/ValidationErrorResponse"
             },
             "example": {
-              "errors": {
+              "error": "validation_error",
+              "message": "Validation failed",
+              "fields": {
                 "title": ["can't be blank"],
                 "collection_id": ["can't be blank"]
               }
@@ -1540,17 +1871,32 @@
       },
       "ErrorResponse": {
         "type": "object",
+        "description": "Uniform error envelope for all non-2xx responses: machinery-parsable code + human message.",
         "properties": {
           "error": {
             "type": "string",
-            "description": "Error message"
+            "description": "Machine code, e.g. not_found, forbidden, validation_error, unauthorized",
+            "example": "not_found"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable message",
+            "example": "Not found"
           }
         }
       },
       "ValidationErrorResponse": {
         "type": "object",
+        "description": "Validation failure envelope.",
         "properties": {
-          "errors": {
+          "error": {
+            "type": "string",
+            "example": "validation_error"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fields": {
             "type": "object",
             "additionalProperties": {
               "type": "array",
@@ -1577,6 +1923,12 @@
           "handle": {
             "type": "string",
             "example": "ft"
+          },
+          "parent_community_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Direct parent community (adjacency-list hierarchy); null for roots"
           },
           "short_description": {
             "type": "string",
@@ -1755,6 +2107,115 @@
             "type": "string",
             "enum": ["open", "internal", "restricted", "closed"],
             "example": "open"
+          },
+          "collection": {
+            "$ref": "#/components/schemas/CollectionBrief"
+          }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "total_count": {
+            "type": "integer",
+            "description": "Grand total of matching items across all pages",
+            "example": 2507
+          },
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "example": 20
+          },
+          "total_pages": {
+            "type": "integer",
+            "example": 126
+          }
+        }
+      },
+      "KioskStatus": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": ["active", "needs_reverify", "maintenance"],
+            "description": "active = normal; needs_reverify = device token not yet approved; maintenance = maintenance flag on. A deleted/rotated token yields 401 (read as revoked)."
+          },
+          "tier": {
+            "type": "string",
+            "enum": ["kiosk", "public"]
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "announcement": {
+            "type": "string",
+            "nullable": true
+          },
+          "contact": {
+            "type": "string",
+            "nullable": true
+          },
+          "policies": {
+            "type": "object",
+            "properties": {
+              "allow_save": {
+                "type": "boolean"
+              },
+              "allow_print": {
+                "type": "boolean"
+              },
+              "allow_copy": {
+                "type": "boolean"
+              },
+              "watermark": {
+                "type": "boolean"
+              },
+              "idle_seconds": {
+                "type": "integer"
+              },
+              "reader_idle_seconds": {
+                "type": "integer"
+              },
+              "page_size_default": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "EventBatchRequest": {
+        "type": "object",
+        "required": ["events"],
+        "properties": {
+          "events": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "required": ["sessionId", "type", "timestamp"],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "description": "Kiosk-generated session identifier"
+                },
+                "type": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
           }
         }
       },

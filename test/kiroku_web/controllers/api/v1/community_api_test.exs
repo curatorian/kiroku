@@ -152,7 +152,7 @@ defmodule KirokuWeb.Api.V1.CommunityApiTest do
         authed_conn(user)
         |> post(~p"/api/v1/communities", %{"community" => %{}})
 
-      assert %{"errors" => _errors} = json_response(conn, 422)
+      assert %{"fields" => _errors} = json_response(conn, 422)
       assert _errors["name"]
     end
 
@@ -169,7 +169,7 @@ defmodule KirokuWeb.Api.V1.CommunityApiTest do
           }
         })
 
-      assert %{"errors" => _errors} = json_response(conn, 422)
+      assert %{"fields" => _errors} = json_response(conn, 422)
     end
   end
 end

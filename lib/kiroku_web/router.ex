@@ -87,10 +87,17 @@ defmodule KirokuWeb.Router do
     resources "/communities", CommunityController, only: [:index, :show, :create]
     resources "/collections", CollectionController, only: [:index, :show, :create]
 
+    get "/communities/:community_id/subcommunities", CommunityController, :index_subcommunities
+
     resources "/items", ItemController, only: [:index, :show, :create, :update] do
       get "/bitstreams", ItemController, :bitstreams, as: :bitstreams
       post "/bitstreams", ItemController, :deposit_bitstream, as: :bitstreams
+      get "/bitstreams/:bitstream_id", BitstreamController, :show, as: :bitstream
+      get "/thumbnails/:size", BitstreamController, :thumbnail, as: :thumbnail
     end
+
+    get "/kiosks/status", KioskController, :status
+    post "/events", KioskEventController, :create
   end
 
   scope "/api/v1", KirokuWeb.Api.V1 do
@@ -215,6 +222,17 @@ defmodule KirokuWeb.Router do
     end
   end
 
+  # Kiosk fleet settings — superadmin only. Kept outside the KirokuWeb.Admin
+  # scope like the API token management to avoid aliasing.
+  scope "/admin", KirokuWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin_kiosk,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      live "/kiosk", Admin.KioskSettingsLive, :index
+    end
+  end
+
   # API Token management — superadmin only. Kept outside the KirokuWeb.Admin
   # scope to avoid aliasing to KirokuWeb.Admin.*.
   scope "/admin", KirokuWeb do
@@ -257,6 +275,16 @@ defmodule KirokuWeb.Router do
     pipe_through :api
 
     get "/oai", OaiController, :index
+  end
+
+  # Catch-all for unmatched /api/v1 paths — must stay the LAST /api/v1 scope so
+  # it never shadows real routes. This guarantees the kiosk contract that every
+  # 404 under /api/v1 is framework JSON in the uniform error envelope (and not
+  # a proxy-level text/html 404).
+  scope "/api/v1", KirokuWeb.Api, as: :api_v1 do
+    pipe_through :api
+
+    match :*, "/*unmatched_api_v1_path", NotFoundController, :not_found
   end
 
   # ── Dev tools ─────────────────────────────────────────────────────────────────
