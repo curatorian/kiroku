@@ -227,6 +227,13 @@ defmodule KirokuWeb.Layouts do
               match="API Tokens"
             />
             <.admin_nav_item
+              icon="hero-cpu-chip"
+              label="Kiosk"
+              href={~p"/admin/kiosk"}
+              current_path={@page_title}
+              match="Kiosk Settings"
+            />
+            <.admin_nav_item
               icon="hero-book-open"
               label="API Reference"
               href={~p"/admin/api-reference"}

@@ -282,8 +282,8 @@ defmodule KirokuWeb.Admin.ApiTokenLive do
                     type="select"
                     label="Token type"
                     options={[
-                      {"user", "User token"},
-                      {"device", "Device token (kiosk — needs approval)"}
+                      {"User token", "user"},
+                      {"Device token (kiosk — needs approval)", "device"}
                     ]}
                   />
                 </div>
