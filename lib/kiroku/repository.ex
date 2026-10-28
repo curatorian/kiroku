@@ -202,9 +202,22 @@ defmodule Kiroku.Repository do
   end
 
   @doc """
-  Hierarchical item count for a single community (subtree total), visible to
-  `scope` (default `:public`).
+  Returns a map of `%{collection_id => item_count}` for all collections visible
+  to `scope` (default `:public`), counting published items visible to `scope`.
   """
+  def collection_item_counts(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    Repo.all(
+      from i in Item,
+        where: i.status == :published and i.access_level in ^levels,
+        group_by: i.collection_id,
+        select: {i.collection_id, count(i.id)}
+    )
+    |> Map.new()
+  end
+
   def count_items_for_community(community_id, opts \\ []) do
     scope = Keyword.get(opts, :scope, :public)
     community_item_counts(scope: scope) |> Map.get(community_id, 0)
@@ -214,12 +227,28 @@ defmodule Kiroku.Repository do
   def collections_revision(scope) do
     levels = Authorization.visible_access_levels(scope)
 
-    {count, max_ts} =
+    {count, collection_ts} =
       from(c in Collection,
         where: c.access_level in ^levels,
         select: {count(c.id), max(c.updated_at)}
       )
       |> Repo.one()
+
+    item_ts =
+      Repo.one(
+        from(i in Item,
+          where: i.access_level in ^levels,
+          select: max(i.updated_at)
+        )
+      )
+
+    max_ts =
+      [collection_ts, item_ts]
+      |> Enum.reject(&is_nil/1)
+      |> case do
+        [] -> nil
+        vals -> Enum.max_by(vals, &timestamp_to_unix/1)
+      end
 
     # Revision tuple: {count, max_updated_at, scope}
     {count, max_ts, scope}

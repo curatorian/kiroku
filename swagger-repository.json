@@ -2026,7 +2026,12 @@
           "inserted_at": {
             "type": "string",
             "format": "date-time",
-            "example": "2024-01-15T08:30:00Z"
+            "example": "2024-01-15T09:00:00Z"
+          },
+          "item_count": {
+            "type": "integer",
+            "example": 142,
+            "description": "Number of published items in this collection"
           }
         }
       },
