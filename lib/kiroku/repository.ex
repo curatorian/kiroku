@@ -108,11 +108,21 @@ defmodule Kiroku.Repository do
       |> Enum.reject(&is_nil/1)
       |> case do
         [] -> nil
-        vals -> Enum.max(vals, fn a, b -> DateTime.compare(a, b) == :gt end)
+        vals -> Enum.max_by(vals, &timestamp_to_unix/1)
       end
 
     # Revision tuple: {count, max_updated_at, scope}
     {count, max_ts, scope}
+  end
+
+  defp timestamp_to_unix(%DateTime{} = dt), do: dt |> DateTime.to_naive() |> naive_to_unix()
+  defp timestamp_to_unix(%NaiveDateTime{} = ndt), do: naive_to_unix(ndt)
+  defp timestamp_to_unix(_other), do: 0
+
+  defp naive_to_unix(ndt) do
+    ndt
+    |> NaiveDateTime.to_erl()
+    |> :calendar.datetime_to_gregorian_seconds()
   end
 
   @doc """
