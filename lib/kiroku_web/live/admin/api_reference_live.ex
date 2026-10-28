@@ -610,7 +610,7 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
 
   defp collections_list_json,
     do:
-      ~s({"data":[{"id":"e5f6g7h8-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses","community_id":"a1b2c3d4-...","position":1,"inserted_at":"2024-01-15T09:00:00Z"}]})
+      ~s({"data":[{"id":"e5f6g7h8-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses","community_id":"a1b2c3d4-...","position":1,"inserted_at":"2024-01-15T09:00:00Z","item_count":0}]})
 
   defp collections_show_json,
     do:

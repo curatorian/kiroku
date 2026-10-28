@@ -23,19 +23,25 @@ defmodule KirokuWeb.Api.V1.CollectionController do
 
     if community_id do
       collections = Repository.list_collections_for_community(community_id, scope: scope)
+      counts = Repository.collection_item_counts(scope: scope)
 
       conn
       |> put_resp_header("x-total-count", Integer.to_string(length(collections)))
-      |> json(%{data: Enum.map(collections, &collection_json/1)})
+      |> json(%{
+        data: Enum.map(collections, &collection_json(&1, item_count: Map.get(counts, &1.id, 0)))
+      })
     else
       revision = Repository.collections_revision(scope)
 
       KirokuWeb.Api.ETagHelpers.respond(conn, revision, fn conn ->
         collections = Repository.list_collections(scope: scope)
+        counts = Repository.collection_item_counts(scope: scope)
 
         conn
         |> put_resp_header("x-total-count", Integer.to_string(length(collections)))
-        |> json(%{data: Enum.map(collections, &collection_json/1)})
+        |> json(%{
+          data: Enum.map(collections, &collection_json(&1, item_count: Map.get(counts, &1.id, 0)))
+        })
       end)
     end
   end
