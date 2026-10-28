@@ -24,9 +24,13 @@ defmodule KirokuWeb.Api.V1.CommunityController do
     KirokuWeb.Api.ETagHelpers.respond(conn, revision, fn conn ->
       communities = Kiroku.Repository.list_communities(scope: scope)
 
+      counts = Kiroku.Repository.community_item_counts(scope: scope)
+
       conn
       |> put_resp_header("x-total-count", Integer.to_string(length(communities)))
-      |> json(%{data: Enum.map(communities, &community_json/1)})
+      |> json(%{
+        data: Enum.map(communities, &community_json(&1, item_count: Map.get(counts, &1.id, 0)))
+      })
     end)
   end
 
@@ -46,9 +50,13 @@ defmodule KirokuWeb.Api.V1.CommunityController do
           Repository.list_subcommunities(parent.id, scope: scope)
           |> Enum.filter(&Authorization.can?(conn.assigns[:current_user], :read, &1))
 
+        counts = Repository.community_item_counts(scope: scope)
+
         conn
         |> put_resp_header("x-total-count", Integer.to_string(length(children)))
-        |> json(%{data: Enum.map(children, &community_json/1)})
+        |> json(%{
+          data: Enum.map(children, &community_json(&1, item_count: Map.get(counts, &1.id, 0)))
+        })
     end
   end
 
@@ -68,7 +76,16 @@ defmodule KirokuWeb.Api.V1.CommunityController do
         if Authorization.can?(conn.assigns[:current_user], :read, community) do
           scope = Authorization.visibility_scope(conn.assigns[:current_user])
           community = Repo.preload(community, :collections)
-          json(conn, %{data: community_json(community, include_collections: true, scope: scope)})
+          item_count = Repository.count_items_for_community(community.id, scope: scope)
+
+          json(conn, %{
+            data:
+              community_json(community,
+                include_collections: true,
+                scope: scope,
+                item_count: item_count
+              )
+          })
         else
           not_found(conn, "Community not found")
         end
@@ -103,7 +120,8 @@ defmodule KirokuWeb.Api.V1.CommunityController do
       short_description: community.short_description,
       description: community.description,
       position: community.position,
-      inserted_at: community.inserted_at
+      inserted_at: community.inserted_at,
+      item_count: Keyword.get(opts, :item_count, 0)
     }
 
     if Keyword.get(opts, :include_collections) && Ecto.assoc_loaded?(community.collections) do

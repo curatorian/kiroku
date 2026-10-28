@@ -80,15 +80,124 @@ defmodule Kiroku.Repository do
   def communities_revision(scope) do
     levels = Authorization.visible_access_levels(scope)
 
-    {count, max_ts} =
+    {count, community_ts} =
       from(c in Community,
         where: c.is_active == true and c.access_level in ^levels,
         select: {count(c.id), max(c.updated_at)}
       )
       |> Repo.one()
 
+    collection_ts =
+      Repo.one(
+        from(c in Collection,
+          where: c.access_level in ^levels,
+          select: max(c.updated_at)
+        )
+      )
+
+    item_ts =
+      Repo.one(
+        from(i in Item,
+          where: i.access_level in ^levels,
+          select: max(i.updated_at)
+        )
+      )
+
+    max_ts =
+      [community_ts, collection_ts, item_ts]
+      |> Enum.reject(&is_nil/1)
+      |> case do
+        [] -> nil
+        vals -> Enum.max(vals, fn a, b -> DateTime.compare(a, b) == :gt end)
+      end
+
     # Revision tuple: {count, max_updated_at, scope}
     {count, max_ts, scope}
+  end
+
+  @doc """
+  Returns a map of `%{community_id => hierarchical_item_count}` for every
+  community visible to `scope` (default `:public`).
+
+  The count for a community is the number of published items visible to
+  `scope` that live in collections belonging to that community *or any of its
+  descendant communities* (i.e. the subtree total). Restricted/inactive
+  communities and their items are excluded according to `scope`.
+  """
+  def community_item_counts(opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    levels = Authorization.visible_access_levels(scope)
+
+    visible =
+      Repo.all(
+        from c in Community,
+          where: c.is_active == true and c.access_level in ^levels,
+          select: {c.id, c.parent_community_id}
+      )
+
+    visible_ids = MapSet.new(visible, fn {id, _} -> id end)
+
+    direct =
+      Repo.all(
+        from i in Item,
+          join: c in Collection,
+          on: i.collection_id == c.id,
+          where:
+            i.status == :published and i.access_level in ^levels and
+              c.is_active == true and c.access_level in ^levels and
+              c.community_id in ^MapSet.to_list(visible_ids),
+          group_by: c.community_id,
+          select: {c.community_id, count(i.id)}
+      )
+      |> Map.new()
+
+    children_map =
+      Enum.reduce(visible, %{}, fn {id, parent_id}, acc ->
+        if is_binary(parent_id) and MapSet.member?(visible_ids, parent_id) do
+          Map.update(acc, parent_id, [id], &[id | &1])
+        else
+          acc
+        end
+      end)
+
+    all_ids = Enum.map(visible, fn {id, _} -> id end)
+
+    # Post-order traversal so children are summed before parents.
+    {result, _} =
+      Enum.reduce(all_ids, {%{}, %{}}, fn id, {acc, memo} ->
+        {count, memo} = hierarchical_count(id, children_map, direct, memo)
+        {Map.put(acc, id, count), memo}
+      end)
+
+    result
+  end
+
+  defp hierarchical_count(id, children_map, direct, memo) do
+    case Map.get(memo, id) do
+      nil ->
+        child_sum =
+          children_map
+          |> Map.get(id, [])
+          |> Enum.reduce(0, fn child_id, sum ->
+            {c, _} = hierarchical_count(child_id, children_map, direct, memo)
+            sum + c
+          end)
+
+        total = Map.get(direct, id, 0) + child_sum
+        {total, Map.put(memo, id, total)}
+
+      cached ->
+        {cached, memo}
+    end
+  end
+
+  @doc """
+  Hierarchical item count for a single community (subtree total), visible to
+  `scope` (default `:public`).
+  """
+  def count_items_for_community(community_id, opts \\ []) do
+    scope = Keyword.get(opts, :scope, :public)
+    community_item_counts(scope: scope) |> Map.get(community_id, 0)
   end
 
   @doc "Like `communities_revision/1`, for collections."

@@ -602,11 +602,11 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
 
   defp communities_list_json,
     do:
-      ~s({"data":[{"id":"a1b2c3d4-...","name":"Fakultas Teknik","handle":"ft","parent_community_id":null,"short_description":"Faculty of Engineering","description":"...","position":1,"inserted_at":"2024-01-15T08:30:00Z"}]})
+      ~s({"data":[{"id":"a1b2c3d4-...","name":"Fakultas Teknik","handle":"ft","parent_community_id":null,"short_description":"Faculty of Engineering","description":"...","position":1,"inserted_at":"2024-01-15T08:30:00Z","item_count":0}]})
 
   defp communities_show_json,
     do:
-      ~s({"data":{"id":"a1b2c3d4-...","name":"Fakultas Teknik","handle":"ft","short_description":"Faculty of Engineering","description":"...","position":1,"inserted_at":"2024-01-15T08:30:00Z","collections":[{"id":"e5f6g7h8-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses"}]}})
+      ~s({"data":{"id":"a1b2c3d4-...","name":"Fakultas Teknik","handle":"ft","short_description":"Faculty of Engineering","description":"...","position":1,"inserted_at":"2024-01-15T08:30:00Z","item_count":0,"collections":[{"id":"e5f6g7h8-...","name":"Skripsi","handle":"ft-skripsi","short_description":"Undergraduate theses"}]}})
 
   defp collections_list_json,
     do:
