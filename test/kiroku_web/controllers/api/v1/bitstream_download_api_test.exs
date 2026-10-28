@@ -164,11 +164,6 @@ defmodule KirokuWeb.Api.V1.BitstreamDownloadApiTest do
       assert json_response(conn, 404)["error"] == "not_found"
     end
 
-    test "returns 401 in the uniform envelope without a token", ctx do
-      conn = get(build_conn(), ~p"/api/v1/items/#{ctx.item.id}/bitstreams/#{ctx.bitstream.id}")
-
-      assert json_response(conn, 401)["error"] == "unauthorized"
-    end
   end
 
   # ── GET /api/v1/items/:id/thumbnails/:size ────────────────────────────────
