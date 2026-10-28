@@ -574,7 +574,12 @@ defmodule Kiroku.Repository do
   end
 
   def list_items(%{} = filters) do
-    query = from i in Item, order_by: [desc: i.inserted_at]
+    query =
+      from i in Item,
+        order_by: [
+          desc: i.inserted_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ]
 
     query =
       case Map.get(filters, :status) do
@@ -664,7 +669,10 @@ defmodule Kiroku.Repository do
     query =
       from i in Item,
         select: ^@item_display_fields,
-        order_by: [desc: i.inserted_at]
+        order_by: [
+          desc: i.inserted_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ]
 
     query =
       case Map.get(filters, :status) do
@@ -789,7 +797,10 @@ defmodule Kiroku.Repository do
     Repo.all(
       from i in Item,
         where: i.status == :submitted,
-        order_by: [asc: i.inserted_at],
+        order_by: [
+          asc: i.inserted_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ],
         limit: ^limit,
         select: ^@item_display_fields,
         preload: :submitter
@@ -811,7 +822,10 @@ defmodule Kiroku.Repository do
         where:
           i.status == :published and
             i.access_level in ^levels,
-        order_by: [desc: i.published_at],
+        order_by: [
+          desc: i.published_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ],
         limit: ^limit,
         select: ^@item_display_fields
     )
@@ -847,7 +861,11 @@ defmodule Kiroku.Repository do
 
     items =
       base
-      |> order_by([i], asc: i.updated_at, asc: i.id)
+      |> order_by([i],
+        asc: i.updated_at,
+        asc: i.id,
+        desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+      )
       |> limit(^limit)
       |> offset(^offset)
       |> preload([:item_authors, :item_keywords, :collection])
@@ -899,7 +917,10 @@ defmodule Kiroku.Repository do
           i.status == :published and
             i.discoverable == true and
             i.access_level in ^levels,
-        order_by: [desc: i.published_at],
+        order_by: [
+          desc: i.published_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ],
         limit: ^per_page,
         offset: ^offset,
         select: ^@item_display_fields
@@ -938,7 +959,10 @@ defmodule Kiroku.Repository do
             i.status == :published and
               i.discoverable == true and
               i.access_level in ^levels,
-          order_by: [desc: i.published_at],
+          order_by: [
+            desc: i.published_at,
+            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          ],
           limit: ^per_page,
           offset: ^Pagination.offset(pagination),
           select: ^@item_display_fields
@@ -961,7 +985,10 @@ defmodule Kiroku.Repository do
             i.status == :published and
             i.discoverable == true and
             i.access_level in ^levels,
-        order_by: [desc: i.published_at],
+        order_by: [
+          desc: i.published_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ],
         limit: ^per_page,
         offset: ^offset,
         select: ^@item_display_fields
@@ -1005,7 +1032,7 @@ defmodule Kiroku.Repository do
       |> visibility_filter(scope)
       |> maybe_full_text_filter(term)
       |> maybe_filter(:item_type, item_type)
-      |> maybe_filter(:publication_year, year)
+      |> maybe_publication_year_filter(year)
       |> maybe_filter(:faculty, faculty)
       |> maybe_filter(:department, department)
       |> maybe_filter(:degree_level, degree_level)
@@ -1046,7 +1073,10 @@ defmodule Kiroku.Repository do
     Repo.all(
       from i in Item,
         where: i.submitter_id == ^user_id,
-        order_by: [desc: i.inserted_at],
+        order_by: [
+          desc: i.inserted_at,
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ],
         select: ^@item_display_fields
     )
   end
@@ -1072,7 +1102,10 @@ defmodule Kiroku.Repository do
       Repo.all(
         from i in Item,
           where: i.submitter_id == ^user_id,
-          order_by: [desc: i.inserted_at],
+          order_by: [
+            desc: i.inserted_at,
+            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          ],
           limit: ^per_page,
           offset: ^Pagination.offset(pagination),
           select: ^@item_display_fields
@@ -1258,7 +1291,7 @@ defmodule Kiroku.Repository do
     |> maybe_full_text_filter(opts.term)
     |> maybe_filter(:department, opts.department)
     |> maybe_filter(:faculty, opts.faculty)
-    |> maybe_filter(:publication_year, opts.year)
+    |> maybe_publication_year_filter(opts.year)
     |> maybe_filter(:item_type, opts.item_type)
     |> maybe_filter(:collection_id, opts.collection_id)
     |> maybe_author_filter(opts.author)
@@ -1375,7 +1408,10 @@ defmodule Kiroku.Repository do
 
     items =
       base
-      |> order_by([i], asc: i.title)
+      |> order_by([i],
+        asc: i.title,
+        desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+      )
       |> limit(^per_page)
       |> offset(^Pagination.offset(pagination))
       |> select([i], ^@item_display_fields)
@@ -1489,11 +1525,17 @@ defmodule Kiroku.Repository do
 
   # When a search term is present, rank by relevance (ts_rank over the indexed
   # search_vector); otherwise fall back to newest-first ordering.
-  defp apply_search_ordering(query, nil), do: order_by(query, [i], desc: i.published_at)
+  defp apply_search_ordering(query, nil) do
+    order_by(query, [i],
+      desc: i.published_at,
+      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+    )
+  end
 
   defp apply_search_ordering(query, term) do
-    order_by(query,
-      desc: fragment("ts_rank(search_vector, plainto_tsquery('indonesian', ?))", ^term)
+    order_by(query, [i],
+      desc: fragment("ts_rank(search_vector, plainto_tsquery('indonesian', ?))", ^term),
+      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
     )
   end
 
@@ -1514,17 +1556,24 @@ defmodule Kiroku.Repository do
         order_by(
           query,
           [i],
-          {^order,
-           fragment(
-             "coalesce((select a.author_name from item_authors a where a.item_id = ? order by a.sequence asc, a.author_name asc limit 1), ?)",
-             i.id,
-             i.student_name
-           )}
+          [
+            {^order,
+             fragment(
+               "coalesce((select a.author_name from item_authors a where a.item_id = ? order by a.sequence asc, a.author_name asc limit 1), ?)",
+               i.id,
+               i.student_name
+             )},
+            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          ]
         )
 
       true ->
         column = sort_column(sort)
-        order_by(query, [i], {^order, field(i, ^column)})
+
+        order_by(query, [i], [
+          {^order, field(i, ^column)},
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        ])
     end
   end
 
@@ -1555,6 +1604,19 @@ defmodule Kiroku.Repository do
 
   defp maybe_filter(query, field, value) do
     from i in query, where: field(i, ^field) == ^value
+  end
+
+  # Year filter with fallback to published_at's year, so items whose
+  # publication_year column is NULL but which have a published_at still
+  # match a ?year=YYYY filter.
+  defp maybe_publication_year_filter(query, nil), do: query
+
+  defp maybe_publication_year_filter(query, year) do
+    from i in query,
+      where:
+        i.publication_year == ^year or
+          (is_nil(i.publication_year) and not is_nil(i.published_at) and
+             fragment("EXTRACT(YEAR FROM ?)", i.published_at) == ^year)
   end
 
   # Restricts an item query to the access levels the given visibility scope may
