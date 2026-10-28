@@ -816,13 +816,17 @@ defmodule KirokuWeb.Api.V1.ItemController do
       student_name: item.student_name,
       department: item.department,
       faculty: item.faculty,
-      publication_year: item.publication_year,
+      publication_year: item.publication_year || publication_year_from_published_at(item.published_at),
       published_at: item.published_at,
       language: item.language,
       access_level: item.access_level,
       collection: collection_brief(item.collection)
     }
   end
+
+  defp publication_year_from_published_at(%NaiveDateTime{year: year}), do: year
+  defp publication_year_from_published_at(%DateTime{year: year}), do: year
+  defp publication_year_from_published_at(_), do: nil
 
   defp item_full_json(item) do
     base = item_brief_json(item)
