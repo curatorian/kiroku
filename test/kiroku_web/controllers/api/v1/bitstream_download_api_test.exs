@@ -163,7 +163,6 @@ defmodule KirokuWeb.Api.V1.BitstreamDownloadApiTest do
 
       assert json_response(conn, 404)["error"] == "not_found"
     end
-
   end
 
   # ── GET /api/v1/items/:id/thumbnails/:size ────────────────────────────────

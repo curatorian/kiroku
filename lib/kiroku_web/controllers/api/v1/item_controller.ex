@@ -816,7 +816,8 @@ defmodule KirokuWeb.Api.V1.ItemController do
       student_name: item.student_name,
       department: item.department,
       faculty: item.faculty,
-      publication_year: item.publication_year || publication_year_from_published_at(item.published_at),
+      publication_year:
+        item.publication_year || publication_year_from_published_at(item.published_at),
       published_at: item.published_at,
       language: item.language,
       access_level: item.access_level,
