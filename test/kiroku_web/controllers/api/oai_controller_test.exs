@@ -1,4 +1,4 @@
-defmodule KirokuWeb.OaiControllerTest do
+defmodule KirokuWeb.Api.OaiControllerTest do
   use KirokuWeb.ConnCase, async: true
 
   alias Kiroku.Repository
@@ -37,9 +37,10 @@ defmodule KirokuWeb.OaiControllerTest do
     item
   end
 
+  # The machine endpoint serves OAI-PMH XML at /api/oai.
   defp oai(conn, params) do
     qs = Enum.map_join(params, "&", fn {k, v} -> "#{k}=#{v}" end)
-    get(conn, "/oai?#{qs}")
+    get(conn, "/api/oai?#{qs}")
   end
 
   defp extract_token(xml) do
@@ -328,13 +329,23 @@ defmodule KirokuWeb.OaiControllerTest do
 
     test "badVerb / badArgument echo the bare base URL without attributes", %{conn: conn} do
       bad_verb = response(oai(conn, %{"verb" => "Frobnicate"}), 200)
-      assert bad_verb =~ "<request>http://localhost:4000/oai</request>"
+      assert bad_verb =~ "<request>http://localhost:4000/api/oai</request>"
       refute bad_verb =~ ~r/<request [^>]/
 
       bad_arg = response(oai(conn, %{"verb" => "Identify", "from" => "2024-01-01"}), 200)
       assert bad_arg =~ ~s(code="badArgument")
-      assert bad_arg =~ "<request>http://localhost:4000/oai</request>"
+      assert bad_arg =~ "<request>http://localhost:4000/api/oai</request>"
       refute bad_arg =~ ~r/<request [^>]/
+    end
+
+    test "the request element names the machine endpoint", %{conn: conn} do
+      # §3.2: <request> must carry the base URL of the request that produced
+      # the response — that is /api/oai, not the /oai UI page.
+      body = response(oai(conn, %{"verb" => "Identify"}), 200)
+
+      assert body =~ "<request verb=\"Identify\">http://localhost:4000/api/oai</request>"
+      assert body =~ "<baseURL>http://localhost:4000/api/oai</baseURL>"
+      refute body =~ "localhost:4000/oai"
     end
 
     test "illegal arguments yield badArgument", %{conn: conn} do
@@ -584,6 +595,272 @@ defmodule KirokuWeb.OaiControllerTest do
 
       assert body =~ "<dc:source>Jurnal Testing</dc:source>"
       assert body =~ "<dc:source>Symposium</dc:source>"
+    end
+  end
+
+  describe "XML 1.0 character sanitization" do
+    # Control characters are illegal in XML 1.0 and make the whole document
+    # unparseable ("PCDATA invalid Char value N"). Legacy MSSQL imports carry
+    # such bytes into item metadata.
+    # Validation mirrors what a harvester does with the served bytes.
+    # :xmerl_scan.file/1 honours the document's `encoding="UTF-8"` declaration
+    # (:xmerl_scan.string/1 is Latin-1 byte-oriented and would wrongly reject
+    # multi-byte characters such as U+201C). The scanner *raises* on a malformed
+    # document — e.g. {:wfc_Legal_Character, 3} — so catch the exit.
+    defp assert_well_formed_xml(xml) do
+      path =
+        Path.join(System.tmp_dir!(), "oai-#{System.unique_integer([:positive])}.xml")
+
+      File.write!(path, xml)
+
+      try do
+        # On success the scanner returns the parsed document (a tuple) directly.
+        _doc = :xmerl_scan.file(String.to_charlist(path))
+        :ok
+      catch
+        kind, reason ->
+          flunk("response is not well-formed XML (#{kind}): #{inspect(reason)}")
+      after
+        File.rm(path)
+      end
+    end
+
+    test "control characters in metadata do not break the document", %{conn: conn} do
+      {_, collection} = create_collection()
+
+      # NUL (0x00) cannot even be stored in PostgreSQL's UTF8 encoding, but the
+      # remaining C0 controls can — ETX (0x03) is the one reported in the
+      # "PCDATA invalid Char value 3" failure.
+      published_item(collection.id, %{
+        "title" => "Title#{<<3>>}WithETX",
+        "abstract" => "Abstract#{<<11>>}with#{<<31>>}control chars"
+      })
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert_well_formed_xml(body)
+
+      refute body =~ <<3>>
+      refute body =~ <<11>>
+      refute body =~ <<31>>
+
+      assert body =~ "<dc:title>TitleWithETX</dc:title>"
+      assert body =~ "<dc:description>Abstractwithcontrol chars</dc:description>"
+    end
+
+    test "control characters in author names and keywords are stripped", %{conn: conn} do
+      {_, collection} = create_collection()
+      item = published_item(collection.id)
+
+      {:ok, _} =
+        Kiroku.Repository.create_item_author(%{
+          "item_id" => item.id,
+          "author_name" => "Sari#{<<3>>}Dewi",
+          "sequence" => 1
+        })
+
+      _keywords =
+        Kiroku.Repository.upsert_keywords_for_item(item.id, [
+          %{keyword: "ethno#{<<11>>}graphy"}
+        ])
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert_well_formed_xml(body)
+
+      assert body =~ "<dc:creator>SariDewi</dc:creator>"
+      assert body =~ "<dc:subject>ethnography</dc:subject>"
+    end
+
+    test "tab, newline and carriage return are preserved", %{conn: conn} do
+      {_, collection} = create_collection()
+      published_item(collection.id, %{"title" => "Line one\nLine two\r\tEnd"})
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert_well_formed_xml(body)
+      assert body =~ "Line one\nLine two\r\tEnd"
+    end
+
+    test "legal multi-byte characters are preserved verbatim", %{conn: conn} do
+      {_, collection} = create_collection()
+
+      published_item(collection.id, %{
+        "title" => ~s(Smart “quotes” and en–dash),
+        "abstract" => "Emoji \u{1F600} and éüñ"
+      })
+
+      body = response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert_well_formed_xml(body)
+
+      assert body =~ "Smart “quotes” and en–dash"
+      assert body =~ "Emoji \u{1F600} and éüñ"
+    end
+
+    test "control characters in GetRecord and ListIdentifiers responses are stripped", %{
+      conn: conn
+    } do
+      {_, collection} = create_collection()
+      item = published_item(collection.id, %{"title" => "Broken#{<<3>>}Title"})
+
+      single =
+        response(
+          oai(conn, %{
+            "verb" => "GetRecord",
+            "metadataPrefix" => "oai_dc",
+            "identifier" => "oai:kiroku.ac.id:#{item.id}"
+          }),
+          200
+        )
+
+      identifiers =
+        response(oai(conn, %{"verb" => "ListIdentifiers", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert_well_formed_xml(single)
+      assert_well_formed_xml(identifiers)
+
+      refute single =~ <<3>>
+      assert single =~ "<dc:title>BrokenTitle</dc:title>"
+    end
+  end
+
+  describe "HTTP method support (§3.1.1)" do
+    test "supports GET", %{conn: conn} do
+      body = response(oai(conn, %{"verb" => "Identify"}), 200)
+
+      assert body =~ "<Identify>"
+    end
+
+    test "supports POST with form-encoded arguments", %{conn: conn} do
+      # §3.1.1: "Repositories must support both the GET and POST methods."
+      conn =
+        conn
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> post("/api/oai", %{"verb" => "Identify"})
+
+      body = response(conn, 200)
+
+      assert body =~ "<Identify>"
+      assert body =~ "<request verb=\"Identify\">"
+    end
+
+    test "POST returns XML, never HTML", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> post("/api/oai", %{"verb" => "Identify"})
+
+      body = response(conn, 200)
+
+      refute body =~ "<html"
+      assert get_resp_header(conn, "content-type") == ["text/xml; charset=utf-8"]
+    end
+  end
+
+  describe "repeated arguments (§3.6)" do
+    test "a repeated verb is badArgument", %{conn: conn} do
+      # §3.6: badVerb covers "the verb argument is repeated"; badArgument covers
+      # "a repeated argument". Plug keeps only the last value, so the repetition
+      # has to be detected on the raw query string.
+      body = response(get(conn, "/api/oai?verb=Identify&verb=ListSets"), 200)
+
+      assert body =~ ~s(code="badArgument")
+      refute body =~ "<ListSets>"
+    end
+
+    test "a repeated set argument is badArgument", %{conn: conn} do
+      body =
+        response(
+          get(conn, "/api/oai?verb=ListRecords&metadataPrefix=oai_dc&set=a&set=b"),
+          200
+        )
+
+      assert body =~ ~s(code="badArgument")
+    end
+
+    test "a repeated argument is still rejected on the legacy /oai path", %{conn: conn} do
+      body = response(get(conn, "/oai?verb=Identify&verb=ListSets"), 200)
+
+      assert body =~ ~s(code="badArgument")
+    end
+  end
+
+  describe "resumptionToken scoping (§3.5, §3.6)" do
+    test "a token from a different verb is badResumptionToken", %{conn: conn} do
+      {_, collection} = create_collection()
+      for _ <- 1..5, do: published_item(collection.id)
+
+      first =
+        response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      token = extract_token(first)
+
+      # The token belongs to ListRecords; ListSets must reject it rather than
+      # silently serve a different list.
+      body = response(oai(conn, %{"verb" => "ListSets", "resumptionToken" => token}), 200)
+
+      assert body =~ ~s(code="badResumptionToken")
+      refute body =~ "<ListSets>"
+    end
+
+    test "a token from ListIdentifiers is rejected by ListRecords", %{conn: conn} do
+      {_, collection} = create_collection()
+      for _ <- 1..5, do: published_item(collection.id)
+
+      first =
+        response(oai(conn, %{"verb" => "ListIdentifiers", "metadataPrefix" => "oai_dc"}), 200)
+
+      token = extract_token(first)
+
+      body =
+        response(
+          oai(conn, %{"verb" => "ListRecords", "resumptionToken" => token}),
+          200
+        )
+
+      assert body =~ ~s(code="badResumptionToken")
+      refute body =~ "<record>"
+    end
+
+    test "a token works for its own verb", %{conn: conn} do
+      {_, collection} = create_collection()
+      for _ <- 1..5, do: published_item(collection.id)
+
+      first =
+        response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      token = extract_token(first)
+
+      body =
+        response(oai(conn, %{"verb" => "ListRecords", "resumptionToken" => token}), 200)
+
+      assert body =~ "<ListRecords>"
+      assert body =~ "<record>"
+    end
+  end
+
+  describe "dc:date mapping" do
+    test "carries the publication year, not the modification time", %{conn: conn} do
+      {_, collection} = create_collection()
+      published_item(collection.id, %{"publication_year" => 2015})
+
+      body =
+        response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      assert body =~ "<dc:date>2015</dc:date>"
+    end
+
+    test "is omitted when no publication date is known", %{conn: conn} do
+      {_, collection} = create_collection()
+      published_item(collection.id)
+
+      body =
+        response(oai(conn, %{"verb" => "ListRecords", "metadataPrefix" => "oai_dc"}), 200)
+
+      # The record's modification time belongs in the header's datestamp, not in
+      # dc:date — harvesters read dc:date as the publication date.
+      refute body =~ "<dc:date>"
     end
   end
 end

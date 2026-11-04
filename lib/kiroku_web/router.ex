@@ -13,10 +13,33 @@ defmodule KirokuWeb.Router do
     plug :fetch_current_user
     plug KirokuWeb.Plugs.Locale
     plug KirokuWeb.Plugs.SetupGuard
+    plug KirokuWeb.Plugs.OaiRepeatedArguments
+    plug KirokuWeb.Plugs.OaiRedirect
   end
 
   pipeline :api do
     plug :accepts, ["json"]
+  end
+
+  # OAI-PMH responses are XML, not JSON. Harvesters commonly send an explicit
+  # `Accept: text/xml` header, so the `:api` pipeline (json only) would answer
+  # them with 406 Not Acceptable.
+  #
+  # `application/x-www-form-urlencoded` is accepted because §3.1.1.2 allows
+  # POST requests to carry the OAI-PMH arguments in a form-encoded body, and
+  # some harvesters send that as their Accept header too.
+  pipeline :oai_api do
+    plug :accepts, [
+      "xml",
+      "text/xml",
+      "application/xml",
+      "application/x-www-form-urlencoded",
+      "json"
+    ]
+
+    # §3.6: a repeated argument is an error. Plug's parser keeps only the last
+    # value, so the repetition must be detected on the raw query string.
+    plug KirokuWeb.Plugs.OaiRepeatedArguments
   end
 
   pipeline :authenticated_api do
@@ -66,15 +89,17 @@ defmodule KirokuWeb.Router do
     # Citation download — /citation/:id/format/:format
     get "/citation/:id/format/:format", CitationController, :show
 
-    # OAI-PMH endpoint
-    get "/oai", OaiController, :index
-
     # Bitstream file access
     get "/items/:item_id/bitstreams/:id", BitstreamController, :show
 
     # Public repository browsing (LiveView, optional auth)
     live_session :public,
       on_mount: [{KirokuWeb.UserAuth, :mount_current_user}] do
+      # OAI-PMH — the human-readable page. The machine (XML) endpoint lives at
+      # /api/oai; the OaiRedirect plug sends legacy /oai?verb=... requests there
+      # so existing harvester configurations keep working.
+      live "/oai", OaiLive, :index
+
       live "/browse", BrowseLive, :index
       live "/search", SearchLive, :index
       live "/communities", CommunityLive.Index, :index
@@ -281,11 +306,19 @@ defmodule KirokuWeb.Router do
   end
 
   # ── OAI-PMH API ───────────────────────────────────────────────────────────────
+  #
+  # The machine-facing endpoint. It always answers with OAI-PMH XML, never HTML.
+  # The human-readable counterpart is the LiveView at /oai.
 
   scope "/api", KirokuWeb.Api, as: :api do
-    pipe_through :api
+    pipe_through :oai_api
 
+    # §3.1.1: "OAI-PMH requests must be submitted using either the HTTP GET or
+    # POST methods. ... Repositories must support both the GET and POST
+    # methods." POST bodies are application/x-www-form-urlencoded, so Phoenix
+    # merges them into `params` exactly like the query string.
     get "/oai", OaiController, :index
+    post "/oai", OaiController, :index
   end
 
   # Catch-all for unmatched /api/v1 paths — must stay the LAST /api/v1 scope so

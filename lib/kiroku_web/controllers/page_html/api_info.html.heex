@@ -360,6 +360,15 @@
         and harvesting services like Google Scholar, BASE, and CORE.
         It requires no authentication.
       </p>
+      <p class="font-body text-sm leading-relaxed" style="color: var(--color-wisteria);">
+        The machine endpoint lives at
+        <code class="font-mono text-xs" style="color: var(--color-lavender);">/api/oai</code>
+        and always answers with OAI-PMH 2.0 XML.
+        A human-readable page that renders the same data is available at <code
+          class="font-mono text-xs"
+          style="color: var(--color-lavender);"
+        >/oai</code>.
+      </p>
       <div class="space-y-3">
         <h3
           class="text-sm font-ui font-semibold uppercase tracking-wider"
@@ -414,7 +423,7 @@
         phx-no-curly-interpolation
         class="text-xs font-mono p-3 rounded-lg overflow-x-auto"
         style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.12);"
-      ><code>https://kiroku.yourdomain.ac.id/oai?verb=Identify</code></pre>
+      ><code>https://kiroku.yourdomain.ac.id/api/oai?verb=Identify</code></pre>
     </div>
 
     <%!-- Request Access --%>

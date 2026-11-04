@@ -81,13 +81,96 @@ defmodule Kiroku.Oai.Builder do
 
   # ── Public verb handlers ─────────────────────────────────────────────────
 
+  @doc """
+  Renders the OAI-PMH XML response for the given request parameters.
+
+  This is the single entry point used by the machine endpoint at `/api/oai`.
+  The verb is read from the `verb` parameter; an unknown or missing verb yields
+  a `badVerb` error document.
+
+  The `<request>` and `<baseURL>` elements must name the endpoint that served
+  the request (§3.2), so the controller sets the endpoint path first — see
+  `put_endpoint/1`.
+  """
+  @spec raw_xml(map()) :: String.t()
+  def raw_xml(params) do
+    case Map.get(params, "verb") do
+      "Identify" -> identify(params)
+      "ListMetadataFormats" -> list_metadata_formats(params)
+      "ListSets" -> list_sets(params)
+      "ListIdentifiers" -> list_identifiers(params)
+      "ListRecords" -> list_records(params)
+      "GetRecord" -> get_record(params)
+      _ -> error("badVerb", "Illegal OAI verb", params)
+    end
+  end
+
+  @doc """
+  Sets the endpoint path reported in `<request>` and `<baseURL>`.
+
+  OAI-PMH §3.2 requires the `<request>` element to carry the base URL of the
+  request that produced the response. The machine endpoint lives at `/api/oai`,
+  so it declares that path; the human page at `/oai` declares its own.
+
+  The value is stored in the process dictionary and read by `endpoint/0`. It
+  defaults to `/oai` so callers that do not set it still produce a valid
+  document.
+  """
+  @spec put_endpoint(String.t()) :: :ok
+  def put_endpoint(path) when is_binary(path) do
+    Process.put(:kiroku_oai_endpoint, path)
+    :ok
+  end
+
+  @doc """
+  The endpoint path reported in `<request>` and `<baseURL>`.
+  """
+  @spec endpoint() :: String.t()
+  def endpoint, do: Process.get(:kiroku_oai_endpoint, "/oai")
+
+  @doc """
+  The earliest datestamp this repository guarantees (§4.2).
+
+  A repository must not use datestamps lower than the one advertised by
+  Identify. We compute the actual earliest `updated_at` among served items and
+  take the *earlier* of it and the configured default — so the advertised
+  value is always a true lower bound of the datestamps we hand out. The
+  default only applies when the table is empty.
+
+  §4.2: "earliestDatestamp: a UTCdatetime that is the guaranteed lower limit
+  of all datestamps that are supported by the repository."
+  """
+  @spec earliest_datestamp() :: String.t()
+  def earliest_datestamp do
+    guaranteed = ~N[2020-01-01 00:00:00]
+
+    actual =
+      Repo.one(
+        from(i in Kiroku.Repository.Item,
+          where: i.status == :published and i.discoverable == true and i.access_level == :open,
+          select: min(i.updated_at)
+        )
+      )
+
+    earliest =
+      case actual do
+        %NaiveDateTime{} = ndt ->
+          if NaiveDateTime.compare(ndt, guaranteed) == :lt, do: ndt, else: guaranteed
+
+        _ ->
+          guaranteed
+      end
+
+    NaiveDateTime.to_iso8601(earliest) <> "Z"
+  end
+
   def identify(params) do
     case validate_args("Identify", params) do
       :ok ->
         wrap_envelope("Identify", request_echo("Identify", params), """
         <Identify>
           <repositoryName>#{xml_escape(repo_name())}</repositoryName>
-          <baseURL>#{xml_escape(base_url())}/oai</baseURL>
+          <baseURL>#{xml_escape(base_url())}#{endpoint()}</baseURL>
           <protocolVersion>2.0</protocolVersion>
           <adminEmail>#{xml_escape(admin_email())}</adminEmail>
           <earliestDatestamp>#{earliest_datestamp()}</earliestDatestamp>
@@ -166,11 +249,17 @@ defmodule Kiroku.Oai.Builder do
   end
 
   defp do_list_sets(%{"resumptionToken" => token}) do
-    # ListSets is served complete in one response (no server-side pagination);
-    # a structurally valid token is idempotently honoured as a no-op (§3.5.1).
+    # ListSets is served complete in one response (no server-side pagination),
+    # so a token minted by a *ListSets* request is idempotently honoured as a
+    # no-op. A token from any other verb is an invalid token value (§3.6) and
+    # must be rejected rather than silently serving a different list.
     case decode_token(token) do
-      {:ok, _state} ->
+      {:ok, %{verb: "ListSets"}} ->
         set_listing()
+
+      {:ok, _other_verb} ->
+        {:error, "badResumptionToken",
+         "The value of the resumptionToken argument is invalid or expired."}
 
       :error ->
         {:error, "badResumptionToken",
@@ -265,7 +354,7 @@ defmodule Kiroku.Oai.Builder do
         c when c in ["badArgument", "badVerb"] ->
           # §3.2: badVerb / badArgument must return the base URL only — no
           # attributes on the request element.
-          "<request>#{xml_escape(base_url())}/oai</request>"
+          "<request>#{xml_escape(base_url())}#{endpoint()}</request>"
 
         _ ->
           request_echo(Map.get(params, "verb"), params)
@@ -297,10 +386,26 @@ defmodule Kiroku.Oai.Builder do
   defp render_list(verb, params, inner_fn) do
     case validate_list_args(verb, params) do
       :ok ->
-        case oai_query(params) do
+        case oai_query(verb, params) do
           {:ok, %{items: [], total: 0}} ->
-            # Per OAI-PMH §3.2: a fresh request matching no records must error.
-            oai_error("noRecordsMatch", "No records match the supplied criteria.", params)
+            if is_token_request?(params) do
+              # §3.5: a token request must return the next portion of the
+              # complete list. An empty page means the token no longer points
+              # at live records (they were withdrawn, or the token expired) —
+              # that is an invalid token, not an empty match. `noRecordsMatch`
+              # describes the *criteria* matching nothing, which cannot happen
+              # for a token request because the token is exclusive and carries
+              # its own criteria.
+              oai_error(
+                "badResumptionToken",
+                "The value of the resumptionToken argument is invalid or expired.",
+                params
+              )
+            else
+              # §3.6: noRecordsMatch — the combination of from/until/set/
+              # metadataPrefix yields an empty list.
+              oai_error("noRecordsMatch", "No records match the supplied criteria.", params)
+            end
 
           {:ok, %{items: items, total: total, offset: offset, next_token: next_token}} ->
             inner = inner_fn.(items)
@@ -323,8 +428,8 @@ defmodule Kiroku.Oai.Builder do
 
   defp is_token_request?(_), do: false
 
-  defp oai_query(params) do
-    case parse_query(params) do
+  defp oai_query(verb, params) do
+    case parse_query(verb, params) do
       {:ok, state} ->
         {items, total} =
           Repository.oai_items(
@@ -361,10 +466,19 @@ defmodule Kiroku.Oai.Builder do
   # A token request carries the original params in the token; per spec the
   # harvester sends only resumptionToken in that case (already enforced as an
   # exclusive argument). A fresh request must supply a valid metadataPrefix.
-  defp parse_query(%{"resumptionToken" => token}) when is_binary(token) and token != "" do
+  defp parse_query(verb, %{"resumptionToken" => token}) when is_binary(token) and token != "" do
     case decode_token(token) do
       {:ok, state} ->
-        {:ok, state}
+        # §3.5: the token is the flow control token returned by a previous
+        # request for *this* list. A token minted by a different verb is an
+        # invalid token value (§3.6 badResumptionToken) — accepting it would
+        # serve the wrong list (e.g. headers where records are expected).
+        if state.verb == verb do
+          {:ok, state}
+        else
+          {:error, "badResumptionToken",
+           "The value of the resumptionToken argument is invalid or expired."}
+        end
 
       :error ->
         {:error, "badResumptionToken",
@@ -372,7 +486,7 @@ defmodule Kiroku.Oai.Builder do
     end
   end
 
-  defp parse_query(%{"metadataPrefix" => "oai_dc"} = params) do
+  defp parse_query(_verb, %{"metadataPrefix" => "oai_dc"} = params) do
     with :ok <- validate_dates(params),
          :ok <- validate_set(params["set"]) do
       {:ok, from_dt, _from_granularity} = parse_date_bound(params["from"])
@@ -385,16 +499,17 @@ defmodule Kiroku.Oai.Builder do
          until: expand_day_until(until_dt, until_granularity),
          set: params["set"],
          prefix: "oai_dc",
+         verb: params["verb"],
          token: nil
        }}
     end
   end
 
-  defp parse_query(%{"metadataPrefix" => _other}) do
+  defp parse_query(_verb, %{"metadataPrefix" => _other}) do
     {:error, "cannotDisseminateFormat", "Unsupported metadata format"}
   end
 
-  defp parse_query(_params) do
+  defp parse_query(_verb, _params) do
     {:error, "badArgument", "Missing required argument: metadataPrefix"}
   end
 
@@ -597,7 +712,8 @@ defmodule Kiroku.Oai.Builder do
       "f" => state.from && NaiveDateTime.to_iso8601(state.from),
       "u" => state.until && NaiveDateTime.to_iso8601(state.until),
       "s" => state.set,
-      "p" => state.prefix
+      "p" => state.prefix,
+      "v" => state.verb
     }
     |> Jason.encode!()
     |> Base.url_encode64()
@@ -613,6 +729,7 @@ defmodule Kiroku.Oai.Builder do
          until: token_date(m["u"]),
          set: m["s"],
          prefix: m["p"] || "oai_dc",
+         verb: m["v"],
          token: token
        }}
     else
@@ -658,135 +775,113 @@ defmodule Kiroku.Oai.Builder do
       end)
 
     case attrs ++ args do
-      [] -> "<request>#{xml_escape(base_url())}/oai</request>"
-      all -> "<request #{Enum.join(all, " ")}>#{xml_escape(base_url())}/oai</request>"
+      [] -> "<request>#{xml_escape(base_url())}#{endpoint()}</request>"
+      all -> "<request #{Enum.join(all, " ")}>#{xml_escape(base_url())}#{endpoint()}</request>"
     end
   end
 
   # ── Record / header rendering ──────────────────────────────────────────────
 
   defp item_header_xml(item) do
+    record = Kiroku.Oai.Record.for_item(item)
+
     """
     <header>
-      <identifier>#{xml_escape(oai_identifier(item))}</identifier>
-      <datestamp>#{datestamp(item.updated_at)}</datestamp>
-      #{setspecs_xml(item)}
+      <identifier>#{xml_escape(record.identifier)}</identifier>
+      <datestamp>#{record.datestamp}</datestamp>
+      #{setspecs_xml(record.set_specs)}
     </header>
     """
   end
 
   defp item_to_oai_dc(item) do
-    {primary, extras} =
-      case ordered_authors(item) do
-        [first | rest] -> {first, rest}
-        [] -> {nil, []}
-      end
+    record = Kiroku.Oai.Record.for_item(item)
 
-    keywords =
-      (item.item_keywords || []) |> Enum.map(&clean_value(&1.keyword)) |> Enum.reject(&is_nil/1)
-
-    creators = if primary, do: "<dc:creator>#{xml_escape(primary)}</dc:creator>", else: ""
+    creators =
+      Enum.map_join(record.creators, "\n", fn name ->
+        "<dc:creator>#{xml_escape(name)}</dc:creator>"
+      end)
 
     contributors =
-      extras
-      |> Enum.map_join("\n", fn name ->
+      Enum.map_join(record.contributors, "\n", fn name ->
         "<dc:contributor>#{xml_escape(name)}</dc:contributor>"
       end)
 
     subjects =
-      keywords
-      |> Enum.map_join("\n", fn k ->
+      Enum.map_join(record.subjects, "\n", fn k ->
         "<dc:subject>#{xml_escape(k)}</dc:subject>"
       end)
 
     sources =
-      [item.journal_name, item.conference_name]
-      |> Enum.map(&clean_value/1)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-      |> Enum.map_join("\n", fn source ->
+      Enum.map_join(record.sources, "\n", fn source ->
         "<dc:source>#{xml_escape(source)}</dc:source>"
       end)
 
-    publisher = clean_value(item.publisher)
-    institution = clean_value(item.institution)
-    doi = clean_value(item.doi)
-    description = clean_value(item.abstract)
-    date = dc_date(item)
+    descriptions =
+      Enum.map_join(record.descriptions, "\n", fn description ->
+        "<dc:description>#{xml_escape(description)}</dc:description>"
+      end)
+
+    publishers =
+      Enum.map_join(record.publishers, "\n", fn publisher ->
+        "<dc:publisher>#{xml_escape(publisher)}</dc:publisher>"
+      end)
+
+    identifiers =
+      Enum.map_join(record.identifiers, "\n", fn identifier ->
+        "<dc:identifier>#{xml_escape(identifier)}</dc:identifier>"
+      end)
+
+    types =
+      Enum.map_join(record.types, "\n", fn type ->
+        "<dc:type>#{xml_escape(type)}</dc:type>"
+      end)
+
+    languages =
+      Enum.map_join(record.languages, "\n", fn language ->
+        "<dc:language>#{xml_escape(language)}</dc:language>"
+      end)
+
+    dates =
+      Enum.map_join(record.dates, "\n", fn date ->
+        "<dc:date>#{xml_escape(date)}</dc:date>"
+      end)
 
     """
     <record>
       <header>
-        <identifier>#{xml_escape(oai_identifier(item))}</identifier>
-        <datestamp>#{datestamp(item.updated_at)}</datestamp>
-        #{setspecs_xml(item)}
+        <identifier>#{xml_escape(record.identifier)}</identifier>
+        <datestamp>#{record.datestamp}</datestamp>
+        #{setspecs_xml(record.set_specs)}
       </header>
       <metadata>
         <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/"
                    xmlns:dc="http://purl.org/dc/elements/1.1/"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
-          <dc:title>#{xml_escape(clean_value(item.title) || "")}</dc:title>
+          <dc:title>#{xml_escape(record.title)}</dc:title>
           #{creators}
           #{contributors}
           #{subjects}
           #{sources}
-          #{if description, do: "<dc:description>#{xml_escape(description)}</dc:description>"}
-          #{if doi, do: "<dc:identifier>#{xml_escape(doi)}</dc:identifier>"}
-          <dc:identifier>#{xml_escape(base_url())}/items/#{item.handle || item.id}</dc:identifier>
-          <dc:type>#{xml_escape(item.item_type)}</dc:type>
-          <dc:language>#{xml_escape(item.language || "id")}</dc:language>
-          #{if date != "", do: "<dc:date>#{date}</dc:date>", else: ""}
-          #{if publisher, do: "<dc:publisher>#{xml_escape(publisher)}</dc:publisher>"}
-          #{if institution, do: "<dc:publisher>#{xml_escape(institution)}</dc:publisher>"}
-          <dc:rights>#{xml_escape(rights_statement(item))}</dc:rights>
+          #{descriptions}
+          #{identifiers}
+          #{types}
+          #{languages}
+          #{dates}
+          #{publishers}
+          <dc:rights>#{xml_escape(record.rights)}</dc:rights>
         </oai_dc:dc>
       </metadata>
     </record>
     """
   end
 
-  # Primary author (lowest sequence) becomes dc:creator; additional authors
-  # become dc:contributor so consumer-facing records distinguish researcher
-  # leadership from co-authors.
-  defp ordered_authors(item) do
-    (item.item_authors || [])
-    |> Enum.sort_by(&{&1.sequence || 0, &1.id})
-    |> Enum.map(&clean_value(&1.author_name))
-    |> Enum.reject(&is_nil/1)
-  end
-
-  # Literal "NULL" strings leak from the legacy MSSQL data into record values;
-  # never emit them (same convention as the migration importer). Blank strings
-  # are normalized to nil so empty elements are omitted entirely.
-  defp clean_value(nil), do: nil
-
-  defp clean_value(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      trimmed -> if String.downcase(trimmed) == "null", do: nil, else: trimmed
-    end
-  end
-
-  defp clean_value(other), do: clean_value(to_string(other))
-
   # §2.5/§2.6: when a repository advertises sets, record headers MUST include
   # the item's set memberships (ListIdentifiers / ListRecords / GetRecord).
-  defp setspecs_xml(item) do
-    case item.collection do
-      %Kiroku.Repository.Collection{} = collection ->
-        specs =
-          ["col_#{collection.id}"] ++
-            if collection.community_id, do: ["com_#{collection.community_id}"], else: []
-
-        Enum.map_join(specs, "\n", fn spec -> "<setSpec>#{spec}</setSpec>" end)
-
-      _ ->
-        ""
-    end
+  defp setspecs_xml(set_specs) do
+    Enum.map_join(set_specs, "\n", fn spec -> "<setSpec>#{spec}</setSpec>" end)
   end
-
-  defp oai_identifier(item), do: "#{repo_identifier()}:#{item.id}"
 
   # Strips the configured OAI prefix ("oai:host:uuid" → "uuid").
   defp strip_oai_prefix(identifier) do
@@ -797,19 +892,6 @@ defmodule Kiroku.Oai.Builder do
       _ -> identifier
     end
   end
-
-  defp dc_date(%{date_issued: %Date{} = d}), do: Date.to_iso8601(d)
-
-  defp dc_date(%{publication_year: y}) when is_integer(y), do: to_string(y)
-
-  defp dc_date(%{updated_at: %NaiveDateTime{} = ndt}), do: NaiveDateTime.to_iso8601(ndt) <> "Z"
-
-  defp dc_date(_), do: ""
-
-  defp rights_statement(%{access_level: :open}), do: "open"
-  defp rights_statement(%{access_level: :internal}), do: "internal"
-  defp rights_statement(%{access_level: :restricted}), do: "restricted"
-  defp rights_statement(_), do: "metadata only"
 
   # ── XML helpers ────────────────────────────────────────────────────────────
 
@@ -830,6 +912,7 @@ defmodule Kiroku.Oai.Builder do
 
   defp xml_escape(s) when is_binary(s) do
     s
+    |> strip_invalid_xml_chars()
     |> String.replace("&", "&amp;")
     |> String.replace("<", "&lt;")
     |> String.replace(">", "&gt;")
@@ -838,41 +921,29 @@ defmodule Kiroku.Oai.Builder do
 
   defp xml_escape(other), do: xml_escape(to_string(other))
 
-  defp datestamp(nil), do: "1970-01-01T00:00:00Z"
-  defp datestamp(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
-  defp datestamp(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt) <> "Z"
-  defp datestamp(%Date{} = d), do: Date.to_iso8601(d) <> "T00:00:00Z"
+  # XML 1.0 (Fifth Edition §2.2) permits only these characters:
+  #
+  #   #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+  #
+  # Everything else is forbidden — most notably the C0 control characters
+  # #x0-#x8, #xB, #xC, #xE-#x1F, plus #xFFFE and #xFFFF. Legacy MSSQL
+  # imports carry such bytes into item metadata, and a single stray control
+  # character (e.g. ETX / #x3) makes the whole document fail to parse for
+  # OAI-PMH harvesters, so they are dropped before escaping.
+  #
+  # Surrogate code points (#xD800-#xDFFF) are invalid in XML too, but they
+  # cannot occur here: Elixir binaries are always valid UTF-8, and UTF-8
+  # cannot encode surrogates.
+  defp strip_invalid_xml_chars(binary) when is_binary(binary) do
+    binary
+    |> String.replace(~r/[\x00-\x08\x0B\x0C\x0E-\x1F]/u, "")
+    |> String.replace("\uFFFE", "")
+    |> String.replace("\uFFFF", "")
+  end
 
   defp utc_now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
   defp base_url, do: KirokuWeb.Endpoint.url()
-
-  # Guaranteed lower bound of served datestamps (§4.2: "A repository must not
-  # use datestamps lower than the one specified"). Rather than hardcode 2020 we
-  # compute the actual earliest updated_at among served items and take the
-  # earlier of the two; the default acts as a floor if the table is empty.
-  defp earliest_datestamp do
-    guaranteed = ~N[2020-01-01 00:00:00]
-
-    actual =
-      Repo.one(
-        from(i in Kiroku.Repository.Item,
-          where: i.status == :published and i.discoverable == true and i.access_level == :open,
-          select: min(i.updated_at)
-        )
-      )
-
-    earliest =
-      case actual do
-        %NaiveDateTime{} = ndt ->
-          if NaiveDateTime.compare(ndt, guaranteed) == :lt, do: ndt, else: guaranteed
-
-        _ ->
-          guaranteed
-      end
-
-    NaiveDateTime.to_iso8601(earliest) <> "Z"
-  end
 
   # Read at runtime so the identifier can be customized from the settings page
   # (DB setting → env var → compile-time config → default).

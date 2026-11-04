@@ -650,7 +650,7 @@ defmodule KirokuWeb.Layouts do
                 </li>
                 <li>
                   <.link
-                    navigate={~p"/oai?verb=Identify"}
+                    navigate={~p"/oai"}
                     class="transition-colors hover:text-patchouli"
                     style="color: var(--color-wisteria);"
                   >
