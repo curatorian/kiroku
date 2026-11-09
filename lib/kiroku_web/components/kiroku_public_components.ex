@@ -95,15 +95,15 @@ defmodule KirokuWeb.KirokuPublicComponents do
         <% end %>
 
         <%!-- Academic information --%>
-        <div class="flex flex-wrap gap-2 text-xs" style="color: var(--color-quill);">
+        <div class="flex flex-col gap-2 text-xs" style="color: var(--color-quill);">
           <%= if @item.program_study do %>
             <span class="px-2 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
-              {@item.program_study}
+              Program Study: {@item.program_study}
             </span>
           <% end %>
           <%= if @item.faculty do %>
             <span class="px-2 py-0.5 rounded" style="background: rgba(155,126,200,0.06);">
-              {@item.faculty}
+              Faculty: {@item.faculty}
             </span>
           <% end %>
         </div>
