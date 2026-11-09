@@ -187,6 +187,22 @@ defmodule Kiroku.RepositoryTest do
       )
     end
 
+    defp add_bitstream(item) do
+      {:ok, _bitstream} =
+        Kiroku.Content.create_bitstream(%{
+          item_id: item.id,
+          filename: "file.pdf",
+          bundle_name: :ORIGINAL,
+          sequence: 1,
+          storage_type: :local,
+          storage_path: "test/#{Ecto.UUID.generate()}.pdf",
+          mime_type: "application/pdf",
+          access_level: :open
+        })
+
+      item
+    end
+
     test "public scope only sees :open items" do
       published_item(%{"title" => "Open One"})
       published_item(%{"title" => "Internal One", "access_level" => "internal"})
@@ -264,7 +280,7 @@ defmodule Kiroku.RepositoryTest do
              ]
     end
 
-    test "browse without a term still orders newest-first" do
+    test "file-less items fall back to newest-first among themselves" do
       published_item(%{"title" => "Alpha", "published_at" => ~N[2020-01-01 00:00:00]})
       published_item(%{"title" => "Beta", "published_at" => ~N[2024-01-01 00:00:00]})
 
@@ -273,6 +289,27 @@ defmodule Kiroku.RepositoryTest do
 
       assert Enum.find_index(titles, &(&1 == "Beta")) <
                Enum.find_index(titles, &(&1 == "Alpha"))
+    end
+
+    test "items with bitstreams rank before file-less items regardless of date" do
+      # Regression for the re-published-without-files case: the older item
+      # carries a file, the newer one does not — files-first is the primary key.
+      published_item(%{"title" => "Alpha", "published_at" => ~N[2020-01-01 00:00:00]})
+      |> add_bitstream()
+
+      published_item(%{"title" => "Beta", "published_at" => ~N[2024-01-01 00:00:00]})
+
+      # Homepage path.
+      assert Enum.map(Repository.list_published_items(scope: :public), & &1.title) == [
+               "Alpha",
+               "Beta"
+             ]
+
+      # Search page path (no term → same ordering branch).
+      assert Enum.map(Repository.search_items(%{scope: :public}), & &1.title) == [
+               "Alpha",
+               "Beta"
+             ]
     end
   end
 

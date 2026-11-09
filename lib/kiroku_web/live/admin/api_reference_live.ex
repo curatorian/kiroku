@@ -222,7 +222,7 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
             method: "GET",
             path: "/items",
             description:
-              "Search and list published items. Returns X-Total-Count and a meta block {total_count, total_pages, page, per_page}. Search semantics: q is AND-of-tokens matches over title/abstract/metadata/extracted text plus author names and keywords (plainto_tsquery('indonesian')); default order is relevance with q, else published_at desc.",
+              "Search and list published items. Returns X-Total-Count and a meta block {total_count, total_pages, page, per_page}. Search semantics: q is AND-of-tokens matches over title/abstract/metadata/extracted text plus author names and keywords (plainto_tsquery('indonesian')); default order is relevance with q, else items with bitstreams first then published_at desc.",
             params: [
               %{
                 name: "q",

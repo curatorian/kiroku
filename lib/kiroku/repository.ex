@@ -971,8 +971,8 @@ defmodule Kiroku.Repository do
           i.status == :published and
             i.access_level in ^levels,
         order_by: [
-          desc: i.published_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc: i.published_at
         ],
         limit: ^limit,
         select: ^@item_display_fields
@@ -1066,8 +1066,8 @@ defmodule Kiroku.Repository do
             i.discoverable == true and
             i.access_level in ^levels,
         order_by: [
-          desc: i.published_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc: i.published_at
         ],
         limit: ^per_page,
         offset: ^offset,
@@ -1108,8 +1108,8 @@ defmodule Kiroku.Repository do
               i.discoverable == true and
               i.access_level in ^levels,
           order_by: [
-            desc: i.published_at,
-            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+            desc: i.published_at
           ],
           limit: ^per_page,
           offset: ^Pagination.offset(pagination),
@@ -1134,8 +1134,8 @@ defmodule Kiroku.Repository do
             i.discoverable == true and
             i.access_level in ^levels,
         order_by: [
-          desc: i.published_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc: i.published_at
         ],
         limit: ^per_page,
         offset: ^offset,
@@ -1672,11 +1672,12 @@ defmodule Kiroku.Repository do
   end
 
   # When a search term is present, rank by relevance (ts_rank over the indexed
-  # search_vector); otherwise fall back to newest-first ordering.
+  # search_vector); otherwise items with bitstreams come first, newest first
+  # within each group (file-less items can lag behind after a re-publish).
   defp apply_search_ordering(query, nil) do
     order_by(query, [i],
-      desc: i.published_at,
-      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+      desc: i.published_at
     )
   end
 
