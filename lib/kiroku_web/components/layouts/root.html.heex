@@ -1,9 +1,19 @@
 <!DOCTYPE html>
-<html lang="id" data-theme="kiroku-dark">
+<html lang={assigns[:locale] || "id"} data-theme="kiroku-dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <meta
+      name="description"
+      content={assigns[:meta_description] || Kiroku.Settings.brand_settings().description}
+    />
+    <%= if canonical_url = assigns[:canonical_url] do %>
+      <link rel="canonical" href={canonical_url} />
+    <% end %>
+    <%= if robots_meta = assigns[:robots_meta] do %>
+      <meta name="robots" content={robots_meta} />
+    <% end %>
     <link rel="icon" href={Kiroku.Settings.brand_logo_url() || ~p"/kiroku.ico"} />
     <link rel="apple-touch-icon" href={Kiroku.Settings.brand_logo_url() || ~p"/kiroku.ico"} />
     <.live_title default="Kiroku" suffix=" · Institutional Repository">

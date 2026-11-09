@@ -18,6 +18,7 @@ defmodule KirokuWeb.Api.V1.BitstreamController do
   alias Kiroku.{Analytics, Content, Repository}
   alias Kiroku.Content.Bitstream
   alias Kiroku.Storage.Uploader
+  alias KirokuWeb.ContentDisposition
 
   def show(conn, %{"item_id" => item_id, "bitstream_id" => bitstream_id}) do
     do_show(conn, item_id, bitstream_id)
@@ -211,7 +212,10 @@ defmodule KirokuWeb.Api.V1.BitstreamController do
     conn
     |> put_resp_content_type(bitstream.mime_type || "application/octet-stream", nil)
     |> put_resp_header("accept-ranges", "bytes")
-    |> put_resp_header("content-disposition", ~s(inline; filename="#{bitstream.filename}"))
+    |> put_resp_header(
+      "content-disposition",
+      ContentDisposition.header("inline", bitstream.filename)
+    )
     |> put_resp_header("etag", etag_for(bitstream))
     |> put_resp_header("content-length", Integer.to_string(total))
   end

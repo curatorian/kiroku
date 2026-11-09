@@ -726,7 +726,11 @@ defmodule Kiroku.Repository do
       from i in Item,
         order_by: [
           desc: i.inserted_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            )
         ]
 
     query =
@@ -819,7 +823,11 @@ defmodule Kiroku.Repository do
         select: ^@item_display_fields,
         order_by: [
           desc: i.inserted_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            )
         ]
 
     query =
@@ -947,7 +955,11 @@ defmodule Kiroku.Repository do
         where: i.status == :submitted,
         order_by: [
           asc: i.inserted_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            )
         ],
         limit: ^limit,
         select: ^@item_display_fields,
@@ -968,10 +980,14 @@ defmodule Kiroku.Repository do
     Repo.all(
       from i in Item,
         where:
-          i.status == :published and
+          i.status == :published and i.discoverable == true and
             i.access_level in ^levels,
         order_by: [
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            ),
           desc: i.published_at
         ],
         limit: ^limit,
@@ -1012,7 +1028,11 @@ defmodule Kiroku.Repository do
       |> order_by([i],
         asc: i.updated_at,
         asc: i.id,
-        desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        desc:
+          fragment(
+            "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+            i.id
+          )
       )
       |> limit(^limit)
       |> offset(^offset)
@@ -1066,7 +1086,11 @@ defmodule Kiroku.Repository do
             i.discoverable == true and
             i.access_level in ^levels,
         order_by: [
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            ),
           desc: i.published_at
         ],
         limit: ^per_page,
@@ -1108,7 +1132,11 @@ defmodule Kiroku.Repository do
               i.discoverable == true and
               i.access_level in ^levels,
           order_by: [
-            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+            desc:
+              fragment(
+                "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+                i.id
+              ),
             desc: i.published_at
           ],
           limit: ^per_page,
@@ -1134,7 +1162,11 @@ defmodule Kiroku.Repository do
             i.discoverable == true and
             i.access_level in ^levels,
         order_by: [
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            ),
           desc: i.published_at
         ],
         limit: ^per_page,
@@ -1210,6 +1242,7 @@ defmodule Kiroku.Repository do
           i.collection_id == ^collection_id and
             i.status == :published and
             i.discoverable == true and
+            i.access_level in ^Authorization.visible_access_levels(:public) and
             not is_nil(field(i, ^field)),
         select: field(i, ^field),
         distinct: true,
@@ -1223,7 +1256,11 @@ defmodule Kiroku.Repository do
         where: i.submitter_id == ^user_id,
         order_by: [
           desc: i.inserted_at,
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            )
         ],
         select: ^@item_display_fields
     )
@@ -1252,7 +1289,11 @@ defmodule Kiroku.Repository do
           where: i.submitter_id == ^user_id,
           order_by: [
             desc: i.inserted_at,
-            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+            desc:
+              fragment(
+                "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+                i.id
+              )
           ],
           limit: ^per_page,
           offset: ^Pagination.offset(pagination),
@@ -1275,7 +1316,7 @@ defmodule Kiroku.Repository do
       from i in Item,
         where:
           i.collection_id == ^collection_id and i.status == :published and
-            i.access_level in ^levels,
+            i.discoverable == true and i.access_level in ^levels,
         select: count(i.id)
     )
   end
@@ -1558,7 +1599,11 @@ defmodule Kiroku.Repository do
       base
       |> order_by([i],
         asc: i.title,
-        desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+        desc:
+          fragment(
+            "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+            i.id
+          )
       )
       |> limit(^per_page)
       |> offset(^Pagination.offset(pagination))
@@ -1676,7 +1721,11 @@ defmodule Kiroku.Repository do
   # within each group (file-less items can lag behind after a re-publish).
   defp apply_search_ordering(query, nil) do
     order_by(query, [i],
-      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id),
+      desc:
+        fragment(
+          "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+          i.id
+        ),
       desc: i.published_at
     )
   end
@@ -1684,7 +1733,11 @@ defmodule Kiroku.Repository do
   defp apply_search_ordering(query, term) do
     order_by(query, [i],
       desc: fragment("ts_rank(search_vector, plainto_tsquery('indonesian', ?))", ^term),
-      desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+      desc:
+        fragment(
+          "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+          i.id
+        )
     )
   end
 
@@ -1712,7 +1765,11 @@ defmodule Kiroku.Repository do
                i.id,
                i.student_name
              )},
-            desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+            desc:
+              fragment(
+                "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+                i.id
+              )
           ]
         )
 
@@ -1721,7 +1778,11 @@ defmodule Kiroku.Repository do
 
         order_by(query, [i], [
           {^order, field(i, ^column)},
-          desc: fragment("EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ?)", i.id)
+          desc:
+            fragment(
+              "EXISTS (SELECT 1 FROM bitstreams b WHERE b.item_id = ? AND b.bundle_name NOT IN ('THUMBNAIL', 'LICENSE', 'ADMINISTRATIVE'))",
+              i.id
+            )
         ])
     end
   end

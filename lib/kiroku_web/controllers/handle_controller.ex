@@ -17,13 +17,20 @@ defmodule KirokuWeb.HandleController do
 
     cond do
       item = Repository.get_item_by_handle(handle) ->
-        redirect(conn, to: ~p"/items/#{item.handle}")
+        # Permanent redirect: legacy DSpace URLs transfer their SEO history.
+        conn
+        |> put_status(:moved_permanently)
+        |> redirect(to: ~p"/items/#{item.handle}")
 
       community = Repo.get_by(Community, handle: handle) ->
-        redirect(conn, to: ~p"/communities/#{community.handle}")
+        conn
+        |> put_status(:moved_permanently)
+        |> redirect(to: ~p"/communities/#{community.handle}")
 
       collection = Repo.get_by(Collection, handle: handle) ->
-        redirect(conn, to: ~p"/collections/#{collection.handle}")
+        conn
+        |> put_status(:moved_permanently)
+        |> redirect(to: ~p"/collections/#{collection.handle}")
 
       true ->
         conn

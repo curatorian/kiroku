@@ -25,6 +25,8 @@ defmodule KirokuWeb.SeoController do
     Disallow: /admin/
     Disallow: /my/
     Disallow: /api/
+    # Longest-match wins: keep the OAI-PMH endpoint crawlable despite /api/
+    Allow: /api/oai
 
     Sitemap: #{base}/sitemap.xml
     """

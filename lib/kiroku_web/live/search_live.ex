@@ -7,12 +7,16 @@ defmodule KirokuWeb.SearchLive do
   alias Kiroku.Repository
   alias Kiroku.Access.Authorization
   alias Kiroku.Pagination
+  alias KirokuWeb.SEO
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, "Search — Kiroku")
+     # Query + facet permutations are tool state, not content — keep every
+     # /search variant out of the index.
+     |> SEO.put_page_seo(path: ~p"/search", robots: "noindex, follow")
      |> assign(:items, [])
      |> assign(:facets, empty_facets())
      |> assign(:pagination, Pagination.build(0, 1, 20))

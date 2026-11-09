@@ -465,7 +465,7 @@
       "get": {
         "tags": ["Items"],
         "summary": "Search items",
-        "description": "Search and list published items with pagination, filters, sorting and alphabetical browsing.\n\nSearch semantics: `q` is matched as AND-of-tokens via `plainto_tsquery('indonesian', q)` over the generated `search_vector` (title, abstract, title_alt, abstract_alt, student_name, subject_classification, department, faculty, program_study, extracted PDF text) plus token matches on author names and keywords. With `q` present the default ordering is relevance (ts_rank); without `q`, items that have at least one bitstream are listed first (newest first), followed by file-less items (also newest first). The same group-by-files ordering applies to every `sort` value as its final tiebreaker.",
+        "description": "Search and list published items with pagination, filters, sorting and alphabetical browsing.\n\nSearch semantics: `q` is matched as AND-of-tokens via `plainto_tsquery('indonesian', q)` over the generated `search_vector` (title, abstract, title_alt, abstract_alt, student_name, subject_classification, department, faculty, program_study, extracted PDF text) plus token matches on author names and keywords. With `q` present the default ordering is relevance (ts_rank); without `q`, items that have at least one content bitstream (ORIGINAL / CHAPTER / SUPPLEMENTAL / MEDIA / SOURCE — i.e. any non-thumbnail, non-admin file, so chapter-split full texts count) are listed first (newest first), followed by file-less items (also newest first). The same group-by-files ordering applies to every `sort` value as its final tiebreaker.",
         "operationId": "listItems",
         "security": [{ "bearerAuth": [] }],
         "parameters": [

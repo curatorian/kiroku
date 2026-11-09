@@ -6,49 +6,139 @@ defmodule KirokuWeb.ItemLive.Show do
 
   import KirokuWeb.SEO, only: [item_meta: 1]
 
+  alias KirokuWeb.SEO
+
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
-    case Repository.get_item_with_preloads(handle) do
-      nil ->
-        {:ok,
-         socket
-         |> assign(:page_title, "Item not found — Kiroku")
-         |> assign(:not_found, true)
-         |> assign(:requested_handle, handle)}
+    item =
+      Repository.get_item_with_preloads(handle) ||
+        raise Ecto.NoResultsError, queryable: Kiroku.Repository.Item
 
-      item ->
-        current_user = socket.assigns[:current_user]
+    current_user = socket.assigns[:current_user]
 
-        unless Authorization.can?(current_user, :read, item) do
-          {:ok, push_navigate(socket, to: ~p"/")}
+    if Authorization.can?(current_user, :read, item) do
+      # Record the view only on the connected (websocket) mount — otherwise
+      # the disconnected SSR render would double-count every visit.
+      if connected?(socket) do
+        Analytics.record_view(item.id, current_user, view_meta(socket))
+      end
+
+      ancestor_chain =
+        if item.collection_id && item.collection do
+          Repository.community_ancestor_chain(item.collection.community_id)
         else
-          # Record the view only on the connected (websocket) mount — otherwise
-          # the disconnected SSR render would double-count every visit.
-          if connected?(socket) do
-            Analytics.record_view(item.id, current_user, view_meta(socket))
-          end
-
-          ancestor_chain =
-            if item.collection_id && item.collection do
-              Repository.community_ancestor_chain(item.collection.community_id)
-            else
-              []
-            end
-
-          {:ok,
-           socket
-           |> assign(:page_title, "#{item.title} — Kiroku")
-           |> assign(:item, item)
-           |> assign(:bitstreams, item.bitstreams)
-           |> assign(:ancestor_chain, ancestor_chain)
-           |> assign(:view_count, Analytics.count_views(item.id))
-           |> assign(:download_count, Analytics.count_downloads_for_item(item.id))
-           |> assign(:citation_formats, ~w(apa mla chicago ieee bibtex ris))
-           |> assign(:active_citation_tab, "apa")
-           |> assign(:citations, generate_citations(item))
-           |> assign(:not_found, false)}
+          []
         end
+
+      {:ok,
+       socket
+       |> SEO.put_page_seo(
+         path: ~p"/items/#{item.handle}",
+         description: SEO.page_description(item)
+       )
+       |> assign(:page_title, "#{item.title} — Kiroku")
+       |> assign(:tombstone, nil)
+       |> assign(:item, item)
+       |> assign(:bitstreams, item.bitstreams)
+       |> assign(:ancestor_chain, ancestor_chain)
+       |> assign(:breadcrumb, breadcrumb_entries(ancestor_chain, item))
+       |> assign(:view_count, Analytics.count_views(item.id))
+       |> assign(:download_count, Analytics.count_downloads_for_item(item.id))
+       |> assign(:citation_formats, ~w(apa mla chicago ieee bibtex ris))
+       |> assign(:active_citation_tab, "apa")
+       |> assign(:citations, generate_citations(item))}
+    else
+      # Non-public items (restricted, withdrawn, still in review) render a
+      # tombstone notice — the handle stays stable but no metadata is exposed,
+      # and `noindex, follow` keeps it out of search indexes.
+      kind = tombstone_kind(item)
+
+      {:ok,
+       socket
+       |> assign(:page_title, tombstone_page_title(kind))
+       |> assign(:robots_meta, "noindex, follow")
+       |> assign(:tombstone, kind)
+       |> assign(:tombstone_handle, handle)
+       |> assign(:contact_email, Kiroku.Settings.brand_settings().contact_email)}
     end
+  end
+
+  defp tombstone_kind(%{status: :withdrawn}), do: :withdrawn
+  defp tombstone_kind(%{status: :embargoed}), do: :embargoed
+
+  defp tombstone_kind(%{status: s}) when s in [:draft, :submitted, :under_review],
+    do: :unpublished
+
+  defp tombstone_kind(_), do: :restricted
+
+  # Breadcrumb trail for the BreadcrumbList JSON-LD (root first):
+  # Communities > ancestors… > collection > item.
+  defp breadcrumb_entries(ancestor_chain, item) do
+    root = [%{name: "Communities", url: SEO.canonical_url(~p"/communities")}]
+
+    ancestors =
+      Enum.map(ancestor_chain, fn community ->
+        %{name: community.name, url: SEO.canonical_url(~p"/communities/#{community.handle}")}
+      end)
+
+    collection =
+      if item.collection do
+        [
+          %{
+            name: item.collection.name,
+            url: SEO.canonical_url(~p"/collections/#{item.collection.handle}")
+          }
+        ]
+      else
+        []
+      end
+
+    root ++
+      ancestors ++
+      collection ++
+      [%{name: item.title, url: SEO.canonical_url(~p"/items/#{item.handle}")}]
+  end
+
+  defp tombstone_page_title(:withdrawn), do: "Item withdrawn — Kiroku"
+  defp tombstone_page_title(:embargoed), do: "Item under embargo — Kiroku"
+  defp tombstone_page_title(:unpublished), do: "Item not yet published — Kiroku"
+  defp tombstone_page_title(:restricted), do: "Item restricted — Kiroku"
+
+  defp tombstone_heading(:withdrawn), do: "Item withdrawn"
+  defp tombstone_heading(:embargoed), do: "Item under embargo"
+  defp tombstone_heading(:unpublished), do: "Item not yet published"
+  defp tombstone_heading(:restricted), do: "Item restricted"
+
+  defp tombstone_message(:withdrawn) do
+    "This item has been withdrawn from the repository and is no longer available."
+  end
+
+  defp tombstone_message(:embargoed) do
+    "This item is temporarily unavailable while under embargo."
+  end
+
+  defp tombstone_message(:unpublished) do
+    "This item has not been published yet — it may still be in review."
+  end
+
+  defp tombstone_message(:restricted) do
+    "Access to this item is restricted and it cannot be shown publicly."
+  end
+
+  defp tombstone_detail(:withdrawn) do
+    "If you believe this is a mistake, please contact the repository administrator."
+  end
+
+  defp tombstone_detail(:embargoed) do
+    "Access will open automatically once the embargo period ends."
+  end
+
+  defp tombstone_detail(:unpublished) do
+    "Please check back later, or search the repository for related works."
+  end
+
+  defp tombstone_detail(:restricted) do
+    "If you believe you should have access, please contact the repository administrator."
   end
 
   @impl true
@@ -89,19 +179,16 @@ defmodule KirokuWeb.ItemLive.Show do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_user}>
-      <%!-- Structured-data + social meta tags for search engines & Scholar --%>
-      <%= if not @not_found do %>
-        <.item_meta item={@item} bitstreams={@bitstreams} />
-      <% end %>
-      <%= if @not_found do %>
-        <div class="max-w-2xl mx-auto py-16 px-4">
+      <%= if @tombstone do %>
+        <%!-- Tombstone: non-public item — no metadata, noindex via root head --%>
+        <div class="max-w-2xl mx-auto py-16 px-4" id="item-tombstone">
           <div class="kiroku-card-raised p-10 text-center">
             <div
               class="w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-5"
               style="background: rgba(123,79,166,0.12);"
             >
               <.icon
-                name="hero-magnifying-glass"
+                name="hero-lock-closed"
                 class="w-8 h-8 text-[var(--color-patchouli)]"
               />
             </div>
@@ -109,15 +196,27 @@ defmodule KirokuWeb.ItemLive.Show do
               class="font-heading text-2xl font-semibold mb-2"
               style="color: var(--color-lilac);"
             >
-              Item not found
+              {tombstone_heading(@tombstone)}
             </h1>
             <p class="text-sm leading-relaxed" style="color: var(--color-wisteria);">
-              We couldn't find an item with the handle:
+              {tombstone_message(@tombstone)}
             </p>
-            <p class="kiroku-handle text-sm mt-1 mb-5">{@requested_handle}</p>
+            <p class="kiroku-handle text-sm mt-1 mb-5">{@tombstone_handle}</p>
             <p class="text-xs mb-6" style="color: var(--color-quill);">
-              It may have been moved, withdrawn, or the link may be incorrect.
+              {tombstone_detail(@tombstone)}
             </p>
+            <%= if @contact_email do %>
+              <p class="text-xs mb-6" style="color: var(--color-quill);">
+                Contact:
+                <a
+                  href={"mailto:#{@contact_email}"}
+                  class="underline"
+                  style="color: var(--color-patchouli);"
+                >
+                  {@contact_email}
+                </a>
+              </p>
+            <% end %>
             <div class="flex flex-wrap gap-3 justify-center">
               <.link
                 navigate={~p"/search"}
@@ -137,6 +236,8 @@ defmodule KirokuWeb.ItemLive.Show do
           </div>
         </div>
       <% else %>
+        <%!-- Structured-data + social meta tags for search engines & Scholar --%>
+        <.item_meta item={@item} bitstreams={@bitstreams} breadcrumb={@breadcrumb} />
         <div class="max-w-5xl mx-auto space-y-6">
           <%!-- Breadcrumb (full hierarchy via recursive CTE) --%>
           <nav class="flex items-center gap-1.5 text-xs flex-wrap" style="color: var(--color-quill);">

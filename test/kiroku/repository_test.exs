@@ -187,18 +187,23 @@ defmodule Kiroku.RepositoryTest do
       )
     end
 
-    defp add_bitstream(item) do
+    defp add_bitstream(item, opts \\ %{}) do
       {:ok, _bitstream} =
-        Kiroku.Content.create_bitstream(%{
-          item_id: item.id,
-          filename: "file.pdf",
-          bundle_name: :ORIGINAL,
-          sequence: 1,
-          storage_type: :local,
-          storage_path: "test/#{Ecto.UUID.generate()}.pdf",
-          mime_type: "application/pdf",
-          access_level: :open
-        })
+        Kiroku.Content.create_bitstream(
+          Map.merge(
+            %{
+              item_id: item.id,
+              filename: "file.pdf",
+              bundle_name: :ORIGINAL,
+              sequence: 1,
+              storage_type: :local,
+              storage_path: "test/#{Ecto.UUID.generate()}.pdf",
+              mime_type: "application/pdf",
+              access_level: :open
+            },
+            opts
+          )
+        )
 
       item
     end
@@ -310,6 +315,78 @@ defmodule Kiroku.RepositoryTest do
                "Alpha",
                "Beta"
              ]
+    end
+
+    test "thumbnail-only items rank as file-less" do
+      # Cover thumbnails are not files a visitor can read — only content
+      # bundles (ORIGINAL/CHAPTER/SUPPLEMENTAL) make an item "has files".
+      published_item(%{"title" => "Thumb Only", "published_at" => ~N[2024-01-01 00:00:00]})
+      |> add_bitstream(%{bundle_name: :THUMBNAIL})
+
+      published_item(%{"title" => "Has Fulltext", "published_at" => ~N[2020-01-01 00:00:00]})
+      |> add_bitstream()
+
+      assert Enum.map(Repository.list_published_items(scope: :public), & &1.title) == [
+               "Has Fulltext",
+               "Thumb Only"
+             ]
+    end
+
+    test "chapter-split items rank as having files (no ORIGINAL required)" do
+      # Most records split the full text per chapter (FileBab1..6 → CHAPTER
+      # bundle) and never get a single merged ORIGINAL file.
+      published_item(%{"title" => "Chapters Only", "published_at" => ~N[2024-01-01 00:00:00]})
+      |> add_bitstream(%{bundle_name: :CHAPTER, filename: "bab1.pdf"})
+      |> add_bitstream(%{bundle_name: :CHAPTER, filename: "bab2.pdf", sequence: 2})
+
+      published_item(%{"title" => "Truly File-less", "published_at" => ~N[2020-01-01 00:00:00]})
+
+      assert Enum.map(Repository.list_published_items(scope: :public), & &1.title) == [
+               "Chapters Only",
+               "Truly File-less"
+             ]
+    end
+
+    test "admin-scan-only items rank as file-less" do
+      # FilePengesahan / FileSurat map to ADMINISTRATIVE — staff-only material,
+      # not public content.
+      published_item(%{"title" => "Admin Only", "published_at" => ~N[2024-01-01 00:00:00]})
+      |> add_bitstream(%{bundle_name: :ADMINISTRATIVE, access_level: :restricted})
+
+      published_item(%{"title" => "Has Content", "published_at" => ~N[2020-01-01 00:00:00]})
+      |> add_bitstream()
+
+      assert Enum.map(Repository.list_published_items(scope: :public), & &1.title) == [
+               "Has Content",
+               "Admin Only"
+             ]
+    end
+  end
+
+  # ── Year facet ──────────────────────────────────────────────────────────────
+
+  describe "facets/1 years" do
+    test "years come from the publication_year column, not the modification time" do
+      create_item(%{
+        "status" => "published",
+        "discoverable" => true,
+        "title" => "Explicit Year",
+        "publication_year" => 2019,
+        "published_at" => ~N[2024-01-01 00:00:00]
+      })
+
+      create_item(%{
+        "status" => "published",
+        "discoverable" => true,
+        "title" => "No Year",
+        "published_at" => ~N[2024-06-01 00:00:00]
+      })
+
+      years =
+        Repository.facets(%{scope: :public}).years
+        |> Enum.map(& &1.value)
+
+      assert years == [2019]
     end
   end
 

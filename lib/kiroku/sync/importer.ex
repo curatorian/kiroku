@@ -783,6 +783,7 @@ defmodule Kiroku.Sync.Importer do
       degree_level: map_degree(field(r, :Jenjang)),
       item_type: item_type,
       date_submitted: date_from_datetime(field(r, :Tgl_Upload)),
+      publication_year: year_from_datetime(field(r, :Tgl_Upload)),
       subject_classification: to_string(field(r, :TagPustaka)),
       status: status,
       discoverable: status == :published,
@@ -1037,6 +1038,9 @@ defmodule Kiroku.Sync.Importer do
 
   defp date_from_datetime(nil), do: nil
   defp date_from_datetime(dt), do: DateTime.to_date(dt)
+
+  defp year_from_datetime(nil), do: nil
+  defp year_from_datetime(%DateTime{} = dt), do: dt.year
 
   defp legacy_file_description(:THUMBNAIL, _), do: "Cover image"
   defp legacy_file_description(:ORIGINAL, 1), do: "Abstract"

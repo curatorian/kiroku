@@ -6,6 +6,7 @@ defmodule KirokuWeb.BrowseLive do
 
   alias Kiroku.Repository
   alias Kiroku.Access.Authorization
+  alias KirokuWeb.SEO
 
   @moduledoc """
   Repository browse page.
@@ -27,6 +28,7 @@ defmodule KirokuWeb.BrowseLive do
     {:ok,
      socket
      |> assign(:page_title, "Browse — Kiroku")
+     |> SEO.put_page_seo(path: ~p"/browse", description: Kiroku.Settings.brand_settings().tagline)
      |> assign(:mode, :structure)}
   end
 

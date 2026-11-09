@@ -49,10 +49,11 @@ Covers the 2026-10 kiosk feedback (blockers 1–4, new endpoints, contract consi
 - `GET /api/v1/items` briefs include the owning collection
   (`collection: {id, name, handle}`).
 - `GET /api/v1/items` (and the app's homepage / search / collection listings)
-  rank items that have at least one bitstream before file-less items;
-  `published_at DESC` (or the requested `sort` column / relevance rank) orders
-  within each group. File-less items no longer float to the top when an old
-  item is re-published without files.
+  rank items that have at least one content file (ORIGINAL / CHAPTER /
+  SUPPLEMENTAL — chapter-split full texts count; thumbnails and admin scans
+  don't) before file-less items; `published_at DESC` (or the requested `sort`
+  column / relevance rank) orders within each group. File-less items no longer
+  float to the top when an old item is re-published without files.
 - `GET /api/v1/items/{id}` accepts handles (already did) — the bitstreams
   route now accepts them too.
 - `GET /api/v1/communities` and `GET /api/v1/collections` serve `ETag` +

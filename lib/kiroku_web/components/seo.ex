@@ -13,11 +13,64 @@ defmodule KirokuWeb.SEO do
   alias Kiroku.Content
   alias KirokuWeb.Endpoint
 
+  # ── Page-level SEO (root layout <head>) ─────────────────────────────────────
+
+  # Params that never belong in a canonical URL: locale variants are duplicate
+  # content and pagination canonicalizes to the first page.
+  @canonical_ignored_params ~w(locale page)
+
+  @doc """
+  Assigns page-level SEO attrs consumed by the root layout `<head>`:
+  a canonical URL, a meta description, and an optional robots directive
+  (e.g. `"noindex, follow"`).
+
+  Works on both a LiveView socket and a `Plug.Conn`. The canonical URL is
+  built from `:path` plus `:params` with `locale`/`page` stripped, so every
+  locale, filter, and pagination variant canonicalizes to a single URL.
+  """
+  def put_page_seo(%Plug.Conn{} = conn, opts) do
+    conn
+    |> Plug.Conn.assign(:canonical_url, canonical_url(opts[:path], opts[:params]))
+    |> Plug.Conn.assign(:meta_description, opts[:description])
+    |> Plug.Conn.assign(:robots_meta, opts[:robots])
+  end
+
+  def put_page_seo(socket, opts) do
+    socket
+    |> Phoenix.Component.assign(:canonical_url, canonical_url(opts[:path], opts[:params]))
+    |> Phoenix.Component.assign(:meta_description, opts[:description])
+    |> Phoenix.Component.assign(:robots_meta, opts[:robots])
+  end
+
+  @doc "Builds an absolute canonical URL, stripping `locale`/`page` params."
+  def canonical_url(path, params \\ %{}) do
+    query =
+      (params || %{})
+      |> Map.drop(@canonical_ignored_params)
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+      |> Enum.sort()
+      |> URI.encode_query()
+
+    base = Endpoint.url() <> to_string(path)
+
+    if query == "", do: base, else: base <> "?" <> query
+  end
+
+  @doc "Best-effort meta description for an item (abstract excerpt, else short description)."
+  def page_description(%{abstract: abstract}) when is_binary(abstract) and abstract != "",
+    do: String.slice(abstract, 0, 300)
+
+  def page_description(%{short_description: s}) when is_binary(s), do: s
+  def page_description(_), do: nil
+
+  # ── Item page structured data & social tags ─────────────────────────────────
+
   @thesis_types ~w(skripsi tesis disertasi tugas_akhir)a
   @article_types ~w(jurnal_nasional jurnal_internasional prosiding)a
 
   attr :item, :map, required: true
   attr :bitstreams, :list, default: []
+  attr :breadcrumb, :list, default: []
 
   def item_meta(assigns) do
     assigns =
@@ -28,8 +81,9 @@ defmodule KirokuWeb.SEO do
       |> assign(:keywords, keyword_list(assigns.item))
       |> assign(:pdf_url, fulltext_pdf_url(assigns.bitstreams, assigns.item))
       |> assign(:json_ld, build_json_ld(assigns.item))
-      |> assign(:description, item_description(assigns.item))
+      |> assign(:description, page_description(assigns.item))
       |> assign(:site_name, Kiroku.Settings.brand_settings().name)
+      |> assign(:thumbnail_url, thumbnail_url(assigns.bitstreams, assigns.item))
 
     ~H"""
     <%!-- Google Scholar citation_* tags (one citation_author per author) --%>
@@ -51,15 +105,25 @@ defmodule KirokuWeb.SEO do
     <meta property="og:url" content={@url} />
     <meta property="og:site_name" content={@site_name} />
     <meta property="og:locale" content={locale_for(@item.language)} />
+    <meta :if={@thumbnail_url} property="og:image" content={@thumbnail_url} />
 
     <%!-- Twitter Card --%>
-    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:card"
+      content={if(@thumbnail_url, do: "summary_large_image", else: "summary")}
+    />
     <meta name="twitter:title" content={@item.title} />
     <meta name="twitter:description" content={@description} />
+    <meta :if={@thumbnail_url} name="twitter:image" content={@thumbnail_url} />
 
     <%!-- Schema.org JSON-LD --%>
     <script type="application/ld+json">
       <%= Phoenix.HTML.raw(@json_ld) %>
+    </script>
+
+    <%!-- BreadcrumbList JSON-LD --%>
+    <script :if={@breadcrumb != []} type="application/ld+json">
+      <%= Phoenix.HTML.raw(breadcrumb_json_ld(@breadcrumb)) %>
     </script>
     """
   end
@@ -68,6 +132,33 @@ defmodule KirokuWeb.SEO do
 
   defp item_url(%{handle: handle}) do
     Endpoint.url() <> ~p"/items/#{handle}"
+  end
+
+  defp thumbnail_url(bitstreams, item) do
+    case Enum.find(bitstreams || [], &(&1.bundle_name == :THUMBNAIL)) do
+      nil -> nil
+      bs -> Endpoint.url() <> ~p"/items/#{item.handle}/bitstreams/#{bs.id}"
+    end
+  end
+
+  # Builds schema.org BreadcrumbList JSON-LD from ordered
+  # `%{name: _, url: _}` entries (root first).
+  defp breadcrumb_json_ld(entries) do
+    %{
+      "@context" => "https://schema.org",
+      "@type" => "BreadcrumbList",
+      itemListElement:
+        Enum.with_index(entries, 1)
+        |> Enum.map(fn {entry, position} ->
+          %{
+            "@type" => "ListItem",
+            position: position,
+            name: entry.name,
+            item: entry.url
+          }
+        end)
+    }
+    |> Jason.encode!(pretty: true)
   end
 
   defp author_names(%{item_authors: authors}) when is_list(authors) and authors != [] do
@@ -89,12 +180,6 @@ defmodule KirokuWeb.SEO do
     do: Enum.map(keywords, & &1.keyword)
 
   defp keyword_list(_), do: []
-
-  defp item_description(%{abstract: abstract}) when is_binary(abstract) and abstract != "",
-    do: String.slice(abstract, 0, 300)
-
-  defp item_description(%{short_description: s}) when is_binary(s), do: s
-  defp item_description(_), do: ""
 
   defp locale_for(:en), do: "en_US"
   defp locale_for(_), do: "id_ID"

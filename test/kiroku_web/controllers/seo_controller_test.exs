@@ -56,6 +56,7 @@ defmodule KirokuWeb.SeoControllerTest do
       assert conn |> get_resp_header("content-type") |> hd() =~ "text/plain"
       assert body =~ "User-agent: *"
       assert body =~ "Allow: /"
+      assert body =~ "Allow: /api/oai"
       assert body =~ "Sitemap: http://localhost:4000/sitemap.xml"
     end
   end

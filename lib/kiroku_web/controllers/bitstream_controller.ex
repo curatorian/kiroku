@@ -2,13 +2,15 @@ defmodule KirokuWeb.BitstreamController do
   use KirokuWeb, :controller
 
   alias Kiroku.{Analytics, Content, Repository}
+  alias Kiroku.Access.Authorization
   alias Kiroku.Content.Bitstream
   alias Kiroku.Storage.Uploader
+  alias KirokuWeb.ContentDisposition
 
   @doc """
-  Serves a bitstream file. Enforces access control based on the bitstream's
-  bundle, item embargo status, and the requesting user's role. Records a
-  download event (non-bot) for analytics.
+  Serves a bitstream file. Enforces access control based on the item's
+  visibility, the bitstream's bundle, embargo status, and the requesting
+  user's role. Records a download event (non-bot) for analytics.
   """
   def show(conn, %{"item_id" => item_id, "id" => bitstream_id}) do
     item = Repository.get_item!(item_id)
@@ -16,7 +18,8 @@ defmodule KirokuWeb.BitstreamController do
 
     user = conn.assigns[:current_user]
 
-    if bitstream.item_id == item.id and Content.accessible?(bitstream, user, item) do
+    if bitstream.item_id == item.id and Authorization.can?(user, :read, item) and
+         Content.accessible?(bitstream, user, item) do
       record_download(conn, bitstream, item)
       serve_bitstream(conn, bitstream)
     else
@@ -58,11 +61,15 @@ defmodule KirokuWeb.BitstreamController do
   defp serve_bitstream(conn, %Bitstream{storage_type: :local} = bitstream) do
     path = Path.join("priv/uploads", bitstream.storage_path)
 
+    # Thumbnails render inline in <img> tags and social scrapers (og:image)
+    # require inline serving; everything else downloads as a file.
+    disposition = if bitstream.bundle_name == :THUMBNAIL, do: "inline", else: "attachment"
+
     conn
     |> put_resp_content_type(bitstream.mime_type || "application/octet-stream")
     |> put_resp_header(
       "content-disposition",
-      ~s(attachment; filename="#{bitstream.filename}")
+      ContentDisposition.header(disposition, bitstream.filename)
     )
     |> send_file(200, path)
   end

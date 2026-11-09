@@ -3,6 +3,7 @@ defmodule KirokuWeb.CommunityLive.Show do
 
   alias Kiroku.Repository
   alias Kiroku.Access.Authorization
+  alias KirokuWeb.SEO
 
   @impl true
   def mount(%{"handle" => handle}, _session, socket) do
@@ -16,6 +17,7 @@ defmodule KirokuWeb.CommunityLive.Show do
       {:ok,
        socket
        |> assign(:page_title, "#{community.name} — Kiroku")
+       |> SEO.put_page_seo(path: ~p"/communities/#{community.handle}")
        |> assign(:community, community)
        |> assign(:collections, collections)
        |> assign(:ancestor_chain, ancestor_chain)}

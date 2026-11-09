@@ -7,6 +7,7 @@ defmodule KirokuWeb.CollectionLive.Show do
   alias Kiroku.Repository
   alias Kiroku.Access.Authorization
   alias Kiroku.Pagination
+  alias KirokuWeb.SEO
 
   @per_page 20
 
@@ -33,6 +34,7 @@ defmodule KirokuWeb.CollectionLive.Show do
       {:ok,
        socket
        |> assign(:page_title, "#{collection.name} — Kiroku")
+       |> SEO.put_page_seo(path: ~p"/collections/#{collection.handle}")
        |> assign(:collection, collection)
        |> assign(:item_count, item_count)
        |> assign(:ancestor_chain, ancestor_chain)

@@ -25,7 +25,10 @@ defmodule KirokuWeb.Plugs.Locale do
       |> then(&if &1 in @supported, do: &1, else: @default)
 
     Gettext.put_locale(KirokuWeb.Gettext, locale)
-    put_session(conn, :locale, locale)
+
+    conn
+    |> assign(:locale, locale)
+    |> put_session(:locale, locale)
   end
 
   # ── LiveView on_mount ─────────────────────────────────────────────────────────
