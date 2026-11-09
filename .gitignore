@@ -49,12 +49,15 @@ npm-debug.log
 # Sample Data
 sample_data_each_views.txt
 
-# Curatorian Project
-voile/
-kiroku/
-pustaka/
-curatorian/
-atrium/
+# Curatorian Project — sibling checkouts at the REPO ROOT only.
+# Root-anchored (/) so patterns like /kiroku/ never swallow lib/kiroku/ or
+# test/kiroku/ source files (this previously hid lib/kiroku/oai/record.ex
+# from every commit — the OAI-PMH module "went missing" twice because of it).
+/voile/
+/kiroku/
+/pustaka/
+/curatorian/
+/atrium/
 
 # Command Code
 .commandcode

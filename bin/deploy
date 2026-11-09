@@ -55,9 +55,30 @@ info "Pulling latest code…"
 git pull --ff-only
 ok "Code up to date."
 
+# Preflight: container image builds need several GB of scratch space
+# (/var/tmp for blob staging). A full disk aborts the build midway.
+free_kb=$(df -Pk /var/tmp | awk 'NR==2 {print $4}')
+if [[ "$free_kb" -lt 2097152 ]]; then
+  fail "Less than 2 GB free on /var/tmp ($(df -h /var/tmp | awk 'NR==2 {print $4}')). \
+Clean up first: podman system df && podman image prune -a -f"
+fi
+
 info "Rebuilding image…"
-$COMPOSE build $NO_CACHE
-ok "Image built."
+image_id_before=$(podman inspect -f '{{.Id}}' kiroku:latest 2>/dev/null || echo "none")
+
+# podman-compose 1.0.6 can exit 0 even when the inner podman build fails, so a
+# plain `|| fail` is not enough — verify the image actually changed afterwards.
+if ! $COMPOSE build $NO_CACHE; then
+  fail "Image build failed — keeping the current container untouched. \
+Check disk space (podman system df) and build output above."
+fi
+
+image_id_after=$(podman inspect -f '{{.Id}}' kiroku:latest 2>/dev/null || echo "none")
+if [[ "$image_id_before" == "$image_id_after" ]]; then
+  fail "Image was not rebuilt — the build failed silently \
+(likely disk space: podman system df). Keeping the current container untouched."
+fi
+ok "Image built ($image_id_after)."
 
 info "Restarting container…"
 # podman-compose 1.0.6 doesn't auto-recreate containers when the image
