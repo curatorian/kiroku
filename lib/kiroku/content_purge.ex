@@ -17,7 +17,8 @@ defmodule Kiroku.ContentPurge do
     * Bitstreams matching the time window but attached to *non-matching* items
       are reported for manual review, never auto-deleted.
     * Orphaned storage objects (files with no DB row — e.g. left behind by
-      earlier app-level deletes) are listed with `--orphans`, never deleted.
+      earlier app-level deletes) are listed with `--orphans`, never deleted
+      unless you explicitly pass `--orphan-execute` after reviewing the list.
 
   Usage (dev):
 
@@ -25,6 +26,7 @@ defmodule Kiroku.ContentPurge do
       mix kiroku.purge_content --title-prefix tmp_ --since 2026-11-10T00:00:00
       mix kiroku.purge_content --item-ids <uuid1>,<uuid2> --title-prefix "" --execute
       mix kiroku.purge_content --orphans
+      mix kiroku.purge_content --orphans --orphan-execute
 
   Usage in a prod release (dry run first!):
 
@@ -70,7 +72,7 @@ defmodule Kiroku.ContentPurge do
   # ── Options ─────────────────────────────────────────────────────────────────
 
   def parse_args!(argv) do
-    defaults = [title_prefix: "arx_", execute: false, orphans: false]
+    defaults = [title_prefix: "arx_", execute: false, orphans: false, orphan_execute: false]
 
     {parsed, _rest, _invalid} =
       OptionParser.parse(argv,
@@ -80,7 +82,8 @@ defmodule Kiroku.ContentPurge do
           until: :string,
           item_ids: :string,
           execute: :boolean,
-          orphans: :boolean
+          orphans: :boolean,
+          orphan_execute: :boolean
         ]
       )
 
@@ -144,7 +147,7 @@ defmodule Kiroku.ContentPurge do
 
     orphans =
       if opts[:orphans] do
-        print_orphans()
+        print_orphans(opts)
       else
         []
       end
@@ -303,7 +306,7 @@ defmodule Kiroku.ContentPurge do
 
   # ── Orphan scan ─────────────────────────────────────────────────────────────
 
-  defp print_orphans do
+  defp print_orphans(opts) do
     known = MapSet.new(Repo.all(from b in Bitstream, select: b.storage_path))
 
     orphans =
@@ -319,11 +322,64 @@ defmodule Kiroku.ContentPurge do
 
     Enum.each(orphans, fn key -> IO.puts("  #{key}") end)
 
-    if orphans != [] do
-      IO.puts("  (not deleted automatically — remove with mc rm / File.rm after review)")
+    cond do
+      orphans == [] ->
+        :ok
+
+      opts[:orphan_execute] ->
+        IO.puts("\nORPHAN EXECUTE MODE — deleting every orphaned object listed above.")
+        Enum.each(orphans, &delete_orphan/1)
+
+      true ->
+        IO.puts(
+          "  (not deleted automatically — review first, then re-run with --orphan-execute,\n" <>
+            "   or remove with mc rm / File.rm)"
+        )
     end
 
     orphans
+  end
+
+  defp delete_orphan("items/" <> _rest = key) do
+    result =
+      case Settings.storage_adapter() do
+        :s3 -> delete_s3_object(Settings.storage_bucket(), key)
+        _ -> delete_local_object(key)
+      end
+
+    IO.puts("  orphan  #{result_label(result)}")
+    result
+  end
+
+  defp delete_orphan(key) do
+    IO.puts("  orphan  skipped (unexpected key: #{key})")
+    {:skipped, :unexpected_key}
+  end
+
+  defp delete_s3_object(bucket, key) do
+    bucket
+    |> ExAws.S3.delete_object(key)
+    |> ExAws.request(Uploader.s3_config())
+    |> case do
+      {:ok, _} -> {:deleted, "s3://#{bucket}/#{key}"}
+      {:error, reason} -> {:error, "s3://#{bucket}/#{key}", reason}
+    end
+  end
+
+  defp delete_local_object(key) do
+    full = Path.join(@upload_root, key)
+
+    cond do
+      String.contains?(key, "..") ->
+        {:skipped, :unsafe_path}
+
+      not File.exists?(full) ->
+        {:skipped, :not_found}
+
+      true ->
+        File.rm!(full)
+        {:deleted, key}
+    end
   end
 
   defp s3_orphans(nil, _known), do: []

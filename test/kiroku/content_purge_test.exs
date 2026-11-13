@@ -145,6 +145,22 @@ defmodule Kiroku.ContentPurgeTest do
       summary = ContentPurge.run(["--title-prefix", "arx_", "--orphans"])
 
       assert stray in summary.orphans
+      # List-only by default.
+      assert File.exists?(stray_path)
+    end
+
+    test "--orphan-execute deletes the reported objects" do
+      stray = "items/orphan-#{System.unique_integer([:positive])}.pdf"
+      stray_path = Path.join(Uploader.local_upload_dir(), stray)
+      File.mkdir_p!(Path.dirname(stray_path))
+      File.write!(stray_path, "orphaned")
+
+      on_exit(fn -> File.rm(stray_path) end)
+
+      summary = ContentPurge.run(["--title-prefix", "arx_", "--orphans", "--orphan-execute"])
+
+      assert stray in summary.orphans
+      refute File.exists?(stray_path)
     end
   end
 end
