@@ -155,7 +155,7 @@ defmodule KirokuWeb.ItemLive.Show do
     bitstream = Enum.find(socket.assigns.bitstreams, &(&1.id == id))
 
     may_read =
-      bitstream != nil and bitstream.mime_type == "application/pdf" and
+      bitstream != nil and pdf_bitstream?(bitstream) and
         Authorization.can?(user, :read, item) and
         Content.accessible?(bitstream, user, item)
 
@@ -174,6 +174,16 @@ defmodule KirokuWeb.ItemLive.Show do
   def handle_event("close_reader", _params, socket) do
     {:noreply, assign(socket, :reader, nil)}
   end
+
+  # A file is reader-eligible when the mime says PDF *or* the filename ends in
+  # .pdf — MSSQL-imported rows often have nil/generic mime types, and the
+  # extension is a reliable fallback.
+  defp pdf_bitstream?(%Content.Bitstream{mime_type: "application/pdf"}), do: true
+
+  defp pdf_bitstream?(%Content.Bitstream{filename: filename}) when is_binary(filename),
+    do: String.ends_with?(String.downcase(filename), ".pdf")
+
+  defp pdf_bitstream?(_), do: false
 
   defp generate_citations(item) do
     preloads = %{authors: item.item_authors, keywords: item.item_keywords}
@@ -677,7 +687,7 @@ defmodule KirokuWeb.ItemLive.Show do
                         <% can_access = Content.accessible?(bs, @current_user, @item) %>
                         <% locked = Content.bitstream_locked?(bs) %>
                         <%= if can_access do %>
-                          <%= if bs.mime_type == "application/pdf" do %>
+                          <%= if pdf_bitstream?(bs) do %>
                             <%!-- PDFs open in the in-page reader — the direct
                             file URL is never rendered as a link, and the
                             original filename (often containing student

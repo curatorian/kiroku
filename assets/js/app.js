@@ -52,9 +52,12 @@ const PdfReader = {
     // The bitstream route is keyed on the item's ID (not its handle).
     // NOTE: no Accept header — the :browser pipeline only accepts html, and
     // a custom Accept would make the accepts plug answer 406.
+    // ?reader=1 → the controller relays the bytes through the app. Required
+    // for :s3/:url files whose direct serving redirects cross-origin — a
+    // same-origin fetch cannot follow those redirects (CORS).
     const { itemId, bitstreamId } = this.el.dataset;
 
-    fetch(`/items/${itemId}/bitstreams/${bitstreamId}`)
+    fetch(`/items/${itemId}/bitstreams/${bitstreamId}?reader=1`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.blob();
