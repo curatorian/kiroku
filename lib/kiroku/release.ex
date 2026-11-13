@@ -74,17 +74,10 @@ defmodule Kiroku.Release do
       bin/kiroku eval "Kiroku.Release.import_from_mssql([\"--check-connection\"])"
   """
   def import_from_mssql(args \\ []) do
-    load_app()
+    start_app_without_web()
 
-    # `bin/kiroku eval` does NOT start the application or its dependencies
-    # (unlike Mix's `@requirements ["app.start"]`). We must start the full app
-    # so Kiroku.Repo (Postgres) and :db_connection / :tds are running before
+    # Repo (Postgres) and :db_connection / :tds are running before
     # LegacyRepo.start_link() is called inside Importer.run_import/1.
-    #
-    # This is safe in a `podman compose run --rm` container because it gets
-    # its own network namespace (no port conflict with the running app).
-    Application.ensure_all_started(:kiroku)
-
     Kiroku.Sync.Importer.run_import(args)
   end
 
@@ -105,10 +98,22 @@ defmodule Kiroku.Release do
       bin/kiroku eval 'Kiroku.Release.purge_content(["--title-prefix", "tmp_", "--orphans"])'
   """
   def purge_content(args \\ []) do
-    load_app()
-    Application.ensure_all_started(:kiroku)
+    start_app_without_web()
 
     Kiroku.ContentPurge.run(args)
+  end
+
+  # `bin/kiroku eval` boots a second BEAM inside the running container. The
+  # web endpoint must not bind port 4000 there — the live server owns it — so
+  # force `server: false` before the application starts. Everything else
+  # (Repo, Oban, storage) starts normally so eval code can do real work.
+  defp start_app_without_web do
+    load_app()
+
+    endpoint_env = Application.get_env(@app, KirokuWeb.Endpoint, [])
+    Application.put_env(@app, KirokuWeb.Endpoint, Keyword.put(endpoint_env, :server, false))
+
+    Application.ensure_all_started(@app)
   end
 
   defp repos, do: Application.fetch_env!(@app, :ecto_repos)
