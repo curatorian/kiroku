@@ -7,6 +7,8 @@ defmodule KirokuWeb.BitstreamController do
   alias Kiroku.Storage.Uploader
   alias KirokuWeb.ContentDisposition
 
+  require Logger
+
   @doc """
   Serves a bitstream file. Enforces access control based on the item's
   visibility, the bitstream's bundle, embargo status, and the requesting
@@ -61,20 +63,34 @@ defmodule KirokuWeb.BitstreamController do
   defp serve_bitstream(conn, %Bitstream{storage_type: :local} = bitstream) do
     path = Path.join("priv/uploads", bitstream.storage_path)
 
-    # Thumbnails render inline in <img> tags and social scrapers (og:image)
-    # require inline serving; everything else downloads as a file.
-    disposition = if bitstream.bundle_name == :THUMBNAIL, do: "inline", else: "attachment"
+    # A DB row can outlive its file (restored DB, pruned volume, cross-env
+    # data) — answer 404 instead of crashing Bandit in send_file.
+    if File.exists?(path) do
+      # Thumbnails render inline in <img> tags and social scrapers (og:image)
+      # require inline serving; everything else downloads as a file.
+      disposition = if bitstream.bundle_name == :THUMBNAIL, do: "inline", else: "attachment"
 
-    conn
-    |> put_resp_content_type(bitstream.mime_type || "application/octet-stream")
-    |> put_resp_header(
-      "content-disposition",
-      ContentDisposition.header(disposition, bitstream.filename)
-    )
-    |> send_file(200, path)
+      conn
+      |> put_resp_content_type(bitstream.mime_type || "application/octet-stream")
+      |> put_resp_header(
+        "content-disposition",
+        ContentDisposition.header(disposition, bitstream.filename)
+      )
+      |> send_file(200, path)
+    else
+      Logger.error("Local file missing bitstream=#{bitstream.id} path=#{path}")
+      not_found(conn)
+    end
   end
 
   defp serve_bitstream(conn, %Bitstream{storage_type: :url, storage_url: url}) do
     redirect(conn, external: url)
+  end
+
+  defp not_found(conn) do
+    conn
+    |> put_status(:not_found)
+    |> put_view(KirokuWeb.ErrorHTML)
+    |> render(:"404")
   end
 end

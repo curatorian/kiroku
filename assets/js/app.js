@@ -28,10 +28,65 @@ import topbar from "../vendor/topbar";
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
+
+// ── PDF reader (modal) ───────────────────────────────────────────────────────
+// Fetches the bitstream bytes (same-origin; the server enforces access
+// control) and renders them in an <embed> via a blob URL, so the direct file
+// URL is never rendered as a link or opened in a new tab. The blob URL is
+// revoked when the modal closes.
+const PdfReader = {
+  mounted() {
+    this.load();
+  },
+  updated() {
+    if (this.el.dataset.bitstreamId !== this.loadedId) {
+      this.load();
+    }
+  },
+  destroyed() {
+    this.revoke();
+  },
+  load() {
+    this.loadedId = this.el.dataset.bitstreamId;
+    this.revoke();
+    // The bitstream route is keyed on the item's ID (not its handle).
+    // NOTE: no Accept header — the :browser pipeline only accepts html, and
+    // a custom Accept would make the accepts plug answer 406.
+    const { itemId, bitstreamId } = this.el.dataset;
+
+    fetch(`/items/${itemId}/bitstreams/${bitstreamId}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!this.el.isConnected) return; // modal was closed mid-fetch
+        this.objectUrl = URL.createObjectURL(blob);
+        const frame = document.createElement("embed");
+        frame.src = this.objectUrl;
+        frame.type = "application/pdf";
+        frame.setAttribute("class", "w-full h-full");
+        this.el.replaceChildren(frame);
+      })
+      .catch(() => {
+        if (this.el.isConnected) {
+          this.el.innerHTML =
+            "<p class='p-6 text-sm text-center' style='color: var(--color-quill);'>Gagal memuat dokumen.</p>";
+        }
+      });
+  },
+  revoke() {
+    if (this.objectUrl) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
+    }
+  },
+};
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
-  hooks: { ...colocatedHooks },
+  hooks: { PdfReader, ...colocatedHooks },
 });
 
 // Show progress bar on live navigation and form submits

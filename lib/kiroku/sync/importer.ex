@@ -793,34 +793,54 @@ defmodule Kiroku.Sync.Importer do
       institution: institution_name(),
       collection_id: collection_id
     }
-    |> truncate_for_storage()
+    |> normalize_for_storage()
   end
 
-  # Caps every varchar field to 255 characters so legacy records with
-  # oversized values still insert cleanly. `:title` and `:abstract` are `text`
-  # columns (unlimited) and are left intact.
-  defp truncate_for_storage(attrs) do
+  @doc """
+  Normalizes legacy MSSQL values for Postgres:
+
+    * strips NUL bytes (0x00) from every string — Postgres rejects them in
+      text columns (`ERROR 22021 invalid byte sequence for encoding "UTF8"`),
+      and legacy nvarchar data is full of them;
+    * caps every varchar field to 255 characters so legacy records with
+      oversized values still insert cleanly. `:title` and `:abstract` are
+      `text` columns (unlimited) and are only NUL-stripped.
+  """
+  def normalize_for_storage(attrs) do
     legacy_id = attrs[:legacy_id]
 
     Map.new(attrs, fn
-      {key, value} when key in [:title, :abstract] ->
-        {key, value}
+      {key, value} when is_binary(value) ->
+        value = strip_nul(value)
 
-      {key, value} when is_binary(value) and byte_size(value) > 255 ->
-        len = String.length(value)
+        cond do
+          key in [:title, :abstract] ->
+            {key, value}
 
-        if len > 255 do
-          Logger.warning("[Importer] truncated :#{key} from #{len} to 255 chars for #{legacy_id}")
+          byte_size(value) > 255 ->
+            len = String.length(value)
 
-          {key, String.slice(value, 0, 255)}
-        else
-          {key, value}
+            if len > 255 do
+              Logger.warning(
+                "[Importer] truncated :#{key} from #{len} to 255 chars for #{legacy_id}"
+              )
+
+              {key, String.slice(value, 0, 255)}
+            else
+              {key, value}
+            end
+
+          true ->
+            {key, value}
         end
 
       {key, value} ->
         {key, value}
     end)
   end
+
+  defp strip_nul(value) when is_binary(value), do: String.replace(value, "\0", "")
+  defp strip_nul(value), do: value
 
   defp create_bitstreams_for_record(item, r) do
     link_path = field(r, :LinkPath)
@@ -855,6 +875,8 @@ defmodule Kiroku.Sync.Importer do
         not is_nil(file_col) and file_col != ""
       end)
       |> Enum.map(fn {file_col, bundle, seq, access} ->
+        file_col = strip_nul(file_col)
+        link_path = strip_nul(link_path)
         filename = Path.basename(file_col)
         url = resolve_legacy_url(build_file_url(link_path, file_col))
 

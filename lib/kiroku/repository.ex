@@ -682,8 +682,11 @@ defmodule Kiroku.Repository do
   def get_item_with_preloads!(id_or_handle) do
     item =
       case Ecto.UUID.cast(id_or_handle) do
-        {:ok, _} -> Repo.get!(Item, id_or_handle)
-        :error -> find_by_handle!(id_or_handle)
+        # Round-trip check: a formatted UUID casts to itself. A 16-byte binary
+        # handle would also "cast" (Ecto reinterprets the raw bytes as a UUID),
+        # producing a different string — those must go through handle lookup.
+        {:ok, ^id_or_handle} -> Repo.get!(Item, id_or_handle)
+        _ -> find_by_handle!(id_or_handle)
       end
 
     Repo.preload(item, @item_preloads)
@@ -692,8 +695,8 @@ defmodule Kiroku.Repository do
   def get_item_with_preloads(id_or_handle) do
     item =
       case Ecto.UUID.cast(id_or_handle) do
-        {:ok, _} -> Repo.get(Item, id_or_handle)
-        :error -> find_by_handle(id_or_handle)
+        {:ok, ^id_or_handle} -> Repo.get(Item, id_or_handle)
+        _ -> find_by_handle(id_or_handle)
       end
 
     if item, do: Repo.preload(item, @item_preloads)

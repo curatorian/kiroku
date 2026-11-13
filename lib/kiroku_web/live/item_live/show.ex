@@ -46,7 +46,8 @@ defmodule KirokuWeb.ItemLive.Show do
        |> assign(:download_count, Analytics.count_downloads_for_item(item.id))
        |> assign(:citation_formats, ~w(apa mla chicago ieee bibtex ris))
        |> assign(:active_citation_tab, "apa")
-       |> assign(:citations, generate_citations(item))}
+       |> assign(:citations, generate_citations(item))
+       |> assign(:reader, nil)}
     else
       # Non-public items (restricted, withdrawn, still in review) render a
       # tombstone notice — the handle stays stable but no metadata is exposed,
@@ -59,6 +60,7 @@ defmodule KirokuWeb.ItemLive.Show do
        |> assign(:robots_meta, "noindex, follow")
        |> assign(:tombstone, kind)
        |> assign(:tombstone_handle, handle)
+       |> assign(:reader, nil)
        |> assign(:contact_email, Kiroku.Settings.brand_settings().contact_email)}
     end
   end
@@ -144,6 +146,33 @@ defmodule KirokuWeb.ItemLive.Show do
   @impl true
   def handle_event("select-citation-tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, :active_citation_tab, tab)}
+  end
+
+  @impl true
+  def handle_event("read_file", %{"id" => id}, socket) do
+    user = socket.assigns.current_user
+    item = socket.assigns.item
+    bitstream = Enum.find(socket.assigns.bitstreams, &(&1.id == id))
+
+    may_read =
+      bitstream != nil and bitstream.mime_type == "application/pdf" and
+        Authorization.can?(user, :read, item) and
+        Content.accessible?(bitstream, user, item)
+
+    if may_read do
+      {:noreply,
+       assign(socket, :reader, %{
+         id: bitstream.id,
+         label: bitstream.description || "Document"
+       })}
+    else
+      {:noreply, put_flash(socket, :error, "This file cannot be opened in the reader.")}
+    end
+  end
+
+  @impl true
+  def handle_event("close_reader", _params, socket) do
+    {:noreply, assign(socket, :reader, nil)}
   end
 
   defp generate_citations(item) do
@@ -648,30 +677,55 @@ defmodule KirokuWeb.ItemLive.Show do
                         <% can_access = Content.accessible?(bs, @current_user, @item) %>
                         <% locked = Content.bitstream_locked?(bs) %>
                         <%= if can_access do %>
-                          <a
-                            href={~p"/items/#{@item.handle}/bitstreams/#{bs.id}"}
-                            target="_blank"
-                            rel="noopener"
-                            class="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all hover:scale-[1.02]"
-                            style="background: rgba(123,79,166,0.06); border: 1px solid rgba(123,79,166,0.12);"
-                          >
-                            <.icon
-                              name="hero-document-text"
-                              class="w-4 h-4 shrink-0 text-[var(--color-patchouli)]"
-                            />
-                            <div class="min-w-0 flex-1">
-                              <p
-                                class="text-xs font-medium truncate"
-                                style="color: var(--color-wisteria);"
-                              >
-                                {bs.description || bs.filename}
-                              </p>
-                              <p class="text-[10px] truncate" style="color: var(--color-quill);">
-                                {bs.filename}
-                              </p>
-                            </div>
-                            <.icon name="hero-arrow-down-tray w-4 h-4 shrink-0 text-[var(--color-quill)] group-hover:text-[var(--color-patchouli)] transition-colors" />
-                          </a>
+                          <%= if bs.mime_type == "application/pdf" do %>
+                            <%!-- PDFs open in the in-page reader — the direct
+                            file URL is never rendered as a link, and the
+                            original filename (often containing student
+                            identifiers) is not displayed. --%>
+                            <button
+                              type="button"
+                              phx-click="read_file"
+                              phx-value-id={bs.id}
+                              class="group w-full text-left flex items-center gap-2.5 p-2.5 rounded-lg transition-all hover:scale-[1.02] cursor-pointer"
+                              style="background: rgba(123,79,166,0.06); border: 1px solid rgba(123,79,166,0.12);"
+                            >
+                              <.icon
+                                name="hero-book-open"
+                                class="w-4 h-4 shrink-0 text-[var(--color-patchouli)]"
+                              />
+                              <div class="min-w-0 flex-1">
+                                <p
+                                  class="text-xs font-medium truncate"
+                                  style="color: var(--color-wisteria);"
+                                >
+                                  {bs.description || "Document"}
+                                </p>
+                              </div>
+                              <.icon name="hero-book-open w-4 h-4 shrink-0 text-[var(--color-quill)] group-hover:text-[var(--color-patchouli)] transition-colors" />
+                            </button>
+                          <% else %>
+                            <a
+                              href={~p"/items/#{@item.handle}/bitstreams/#{bs.id}"}
+                              target="_blank"
+                              rel="noopener"
+                              class="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all hover:scale-[1.02]"
+                              style="background: rgba(123,79,166,0.06); border: 1px solid rgba(123,79,166,0.12);"
+                            >
+                              <.icon
+                                name="hero-document-text"
+                                class="w-4 h-4 shrink-0 text-[var(--color-patchouli)]"
+                              />
+                              <div class="min-w-0 flex-1">
+                                <p
+                                  class="text-xs font-medium truncate"
+                                  style="color: var(--color-wisteria);"
+                                >
+                                  {bs.description || "Document"}
+                                </p>
+                              </div>
+                              <.icon name="hero-arrow-down-tray w-4 h-4 shrink-0 text-[var(--color-quill)] group-hover:text-[var(--color-patchouli)] transition-colors" />
+                            </a>
+                          <% end %>
                         <% else %>
                           <div
                             class="flex items-center gap-2.5 p-2.5 rounded-lg opacity-70"
@@ -717,6 +771,60 @@ defmodule KirokuWeb.ItemLive.Show do
                   <% end %>
                 </div>
               <% end %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+
+      <%!-- PDF reader modal --%>
+      <%= if @reader do %>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={@reader.label}
+        >
+          <div
+            class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            phx-click="close_reader"
+            aria-hidden="true"
+          >
+          </div>
+
+          <div class="relative w-full max-w-5xl h-[85vh] kiroku-card flex flex-col overflow-hidden">
+            <div
+              class="flex items-center gap-3 px-4 py-3 border-b shrink-0"
+              style="border-color: rgba(123,79,166,0.15);"
+            >
+              <.icon
+                name="hero-book-open"
+                class="w-5 h-5 shrink-0"
+                style="color: var(--color-patchouli);"
+              />
+              <p class="text-sm font-medium truncate flex-1" style="color: var(--color-lilac);">
+                {@reader.label}
+              </p>
+              <button
+                type="button"
+                id="close-pdf-reader"
+                phx-click="close_reader"
+                class="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                style="color: var(--color-quill);"
+                aria-label="Close reader"
+              >
+                <.icon name="hero-x-mark" class="w-5 h-5" />
+              </button>
+            </div>
+
+            <div
+              id="pdf-reader"
+              phx-update="ignore"
+              phx-hook="PdfReader"
+              data-item-id={@item.id}
+              data-bitstream-id={@reader.id}
+              class="flex-1 min-h-0"
+              style="background: var(--color-void);"
+            >
             </div>
           </div>
         </div>

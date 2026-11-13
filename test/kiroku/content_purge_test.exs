@@ -1,5 +1,10 @@
 defmodule Kiroku.ContentPurgeTest do
-  use Kiroku.DataCase, async: true
+  # Not async: the orphan scan/execute walks the SHARED priv/uploads tree and
+  # deletes files it sees as unreferenced — running that concurrently with
+  # other async tests (whose sandboxed DB rows are invisible here) would
+  # delete their fixture files mid-request. ExUnit guarantees non-async tests
+  # never run concurrently with any other test.
+  use Kiroku.DataCase, async: false
 
   alias Kiroku.{ContentPurge, Repository, Repo, Storage.Uploader}
   alias Kiroku.Content.Bitstream
