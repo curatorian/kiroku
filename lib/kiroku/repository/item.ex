@@ -262,6 +262,26 @@ defmodule Kiroku.Repository.Item do
     |> foreign_key_constraint(:submitter_id)
   end
 
+  # Workflow fields that must never be mass-assigned by non-workflow callers
+  # (public API updates, submitter edits). Publication, review and embargo
+  # transitions go through the dedicated changesets / context functions instead.
+  @workflow_fields ~w(
+    status discoverable published_at withdrawn
+    submitted_at date_submitted reviewed_at reviewed_by_id review_note
+    submitter_id
+    embargo_open_date embargo_close_date embargo_reason
+  )a
+
+  def restricted_changeset(item, attrs) do
+    item
+    |> cast(attrs, (@required_fields ++ @optional_fields) -- @workflow_fields)
+    |> validate_required(@required_fields)
+    |> validate_length(:title, min: 1, max: 500)
+    |> unique_constraint(:handle)
+    |> foreign_key_constraint(:collection_id)
+    |> foreign_key_constraint(:submitter_id)
+  end
+
   def status_changeset(item, attrs) do
     item
     |> cast(attrs, [:status, :discoverable, :submitted_at])

@@ -3,7 +3,7 @@ defmodule KirokuWeb.SubmissionLive.New do
 
   import KirokuWeb.ItemForm
 
-  alias Kiroku.{Repository, Content}
+  alias Kiroku.{Accounts, Repository, Content}
   alias Kiroku.Repository.Item
   alias Kiroku.Storage.Uploader
   alias Kiroku.Access.Authorization
@@ -59,13 +59,21 @@ defmodule KirokuWeb.SubmissionLive.New do
         max_file_size: 20_000_000
       )
 
-    if Authorization.can?(user, :create, %Item{}) and submission_open?(user) do
-      {:ok, socket}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, "Item submission is currently disabled.")
-       |> push_navigate(to: ~p"/my/items")}
+    cond do
+      not Authorization.can?(user, :create, %Item{}) or not submission_open?(user) ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Item submission is currently disabled.")
+         |> push_navigate(to: ~p"/my/items")}
+
+      not Accounts.can_add_content?(user) ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Please confirm your email address before submitting items.")
+         |> push_navigate(to: ~p"/my/items")}
+
+      true ->
+        {:ok, socket}
     end
   end
 

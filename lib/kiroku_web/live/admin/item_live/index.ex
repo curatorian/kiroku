@@ -4,6 +4,7 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   import KirokuWeb.ItemForm
   import KirokuWeb.KirokuComponents
 
+  alias Kiroku.Access.Authorization
   alias Kiroku.{Content, Repository}
   alias Kiroku.Repository.Item
   alias Kiroku.Storage.Uploader
@@ -396,12 +397,20 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
                   <option value="submitted" selected={to_string(@form[:status].value) == "submitted"}>
                     Submitted
                   </option>
-                  <option value="published" selected={to_string(@form[:status].value) == "published"}>
-                    Published
-                  </option>
-                  <option value="embargoed" selected={to_string(@form[:status].value) == "embargoed"}>
-                    Embargoed
-                  </option>
+                  <%= if can_publish?(@current_user) do %>
+                    <option
+                      value="published"
+                      selected={to_string(@form[:status].value) == "published"}
+                    >
+                      Published
+                    </option>
+                    <option
+                      value="embargoed"
+                      selected={to_string(@form[:status].value) == "embargoed"}
+                    >
+                      Embargoed
+                    </option>
+                  <% end %>
                 </select>
                 <p class="text-xs mt-1" style="color: var(--color-quill);">
                   Pilih <em>Published</em>
@@ -476,6 +485,24 @@ defmodule KirokuWeb.Admin.ItemLive.Index do
   # ── Lifecycle ──────────────────────────────────────────────────────────────
 
   def mount(_params, _session, socket) do
+    if staff?(socket) do
+      mount_staff(socket)
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "You do not have access to this page.")
+       |> redirect(to: ~p"/")}
+    end
+  end
+
+  defp staff?(socket) do
+    user = socket.assigns[:current_user]
+    user && user.user_type in [:admin, :superadmin]
+  end
+
+  defp can_publish?(user), do: Authorization.can?(user, :publish, %Item{})
+
+  defp mount_staff(socket) do
     collections = list_all_collections()
     item_type_counts = Repository.count_items_by_type()
 

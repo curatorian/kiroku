@@ -4,7 +4,7 @@ defmodule KirokuWeb.MyItemLive.Index do
   import KirokuWeb.ItemForm
   import KirokuWeb.KirokuComponents
 
-  alias Kiroku.{Content, Repository}
+  alias Kiroku.{Accounts, Content, Repository}
   alias Kiroku.Repository.Item
   alias Kiroku.Access.Authorization
   alias Kiroku.Storage.Uploader
@@ -275,7 +275,10 @@ defmodule KirokuWeb.MyItemLive.Index do
   def mount(_params, _session, socket) do
     user = socket.assigns.current_user
     collections = list_all_collections()
-    can_submit = Kiroku.Settings.allow_user_submit?() or staff?(user)
+
+    can_submit =
+      Accounts.can_add_content?(user) and
+        (Kiroku.Settings.allow_user_submit?() or staff?(user))
 
     {:ok,
      socket
@@ -359,21 +362,30 @@ defmodule KirokuWeb.MyItemLive.Index do
   end
 
   defp apply_action(socket, :new, _params) do
-    if socket.assigns.can_submit do
-      changeset = Item.changeset(%Item{}, %{item_type: :skripsi})
+    user = socket.assigns.current_user
 
-      socket
-      |> assign(:page_title, "Submit New Item")
-      |> assign(:current_item, nil)
-      |> assign(:selected_type, "skripsi")
-      |> assign(:keywords, "")
-      |> assign_relation_rows([])
-      |> assign(:form, to_form(changeset, as: :item))
-      |> cancel_unused_uploads([])
-    else
-      socket
-      |> put_flash(:error, "Item submission is currently disabled.")
-      |> push_patch(to: ~p"/my/items")
+    cond do
+      not Accounts.can_add_content?(user) ->
+        socket
+        |> put_flash(:error, "Please confirm your email address before adding items.")
+        |> push_patch(to: ~p"/my/items")
+
+      socket.assigns.can_submit ->
+        changeset = Item.changeset(%Item{}, %{item_type: :skripsi})
+
+        socket
+        |> assign(:page_title, "Submit New Item")
+        |> assign(:current_item, nil)
+        |> assign(:selected_type, "skripsi")
+        |> assign(:keywords, "")
+        |> assign_relation_rows([])
+        |> assign(:form, to_form(changeset, as: :item))
+        |> cancel_unused_uploads([])
+
+      true ->
+        socket
+        |> put_flash(:error, "Item submission is currently disabled.")
+        |> push_patch(to: ~p"/my/items")
     end
   end
 
@@ -439,64 +451,16 @@ defmodule KirokuWeb.MyItemLive.Index do
      ])}
   end
 
-  def handle_event("save", %{"item" => item_params} = params, socket) do
-    user = socket.assigns.current_user
-
-    case socket.assigns.live_action do
-      :new ->
-        attrs =
-          item_params
-          |> Map.put("submitter_id", user.id)
-          |> Map.put("status", "submitted")
-
-        case Repository.create_item(attrs) do
-          {:ok, item} ->
-            relations = %{
-              authors: parse_relation_rows(params["authors"], "author_name"),
-              advisors: parse_relation_rows(params["advisors"], "advisor_name"),
-              examiners: parse_relation_rows(params["examiners"], "examiner_name"),
-              team_members: parse_relation_rows(params["team_members"], "member_name"),
-              keywords: parse_keywords(params["keywords"])
-            }
-
-            Repository.create_item_relations(item, relations)
-            socket = consume_and_create_bitstreams(socket, item)
-
-            {:noreply,
-             socket
-             |> put_flash(:info, "Item berhasil dikirim untuk review.")
-             |> stream_insert(:items, item, at: 0)
-             |> push_patch(to: ~p"/my/items")}
-
-          {:error, changeset} ->
-            {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
-        end
-
-      :edit ->
-        item = socket.assigns.current_item
-
-        case Repository.update_item(item, item_params) do
-          {:ok, updated_item} ->
-            relations = %{
-              authors: parse_relation_rows(params["authors"], "author_name"),
-              advisors: parse_relation_rows(params["advisors"], "advisor_name"),
-              examiners: parse_relation_rows(params["examiners"], "examiner_name"),
-              team_members: parse_relation_rows(params["team_members"], "member_name"),
-              keywords: parse_keywords(params["keywords"])
-            }
-
-            Repository.replace_item_relations(updated_item, relations)
-            socket = consume_and_create_bitstreams(socket, updated_item)
-
-            {:noreply,
-             socket
-             |> put_flash(:info, "Item berhasil diperbarui.")
-             |> stream_insert(:items, updated_item)
-             |> push_patch(to: ~p"/my/items")}
-
-          {:error, changeset} ->
-            {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
-        end
+  def handle_event("save", params, socket) do
+    if Accounts.can_add_content?(socket.assigns.current_user) do
+      save_item(params, socket)
+    else
+      {:noreply,
+       socket
+       |> put_flash(
+         :error,
+         "Please confirm your email address before adding or editing items."
+       )}
     end
   end
 
@@ -504,8 +468,8 @@ defmodule KirokuWeb.MyItemLive.Index do
     user = socket.assigns.current_user
     item = Repository.get_item!(id)
 
-    if Authorization.can?(user, :update, item) do
-      case Repository.update_item(item, %{status: "submitted"}) do
+    if Accounts.can_add_content?(user) and Authorization.can?(user, :update, item) do
+      case Repository.submit_item(item) do
         {:ok, updated_item} ->
           {:noreply,
            socket
@@ -559,6 +523,74 @@ defmodule KirokuWeb.MyItemLive.Index do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  defp save_item(%{"item" => item_params} = params, socket) do
+    user = socket.assigns.current_user
+
+    case socket.assigns.live_action do
+      :new ->
+        unless socket.assigns.can_submit do
+          {:noreply,
+           socket
+           |> put_flash(:error, "Item submission is currently disabled.")
+           |> push_patch(to: ~p"/my/items")}
+        else
+          attrs =
+            item_params
+            |> Map.put("submitter_id", user.id)
+            |> Map.put("status", "submitted")
+
+          case Repository.create_item(attrs) do
+            {:ok, item} ->
+              relations = %{
+                authors: parse_relation_rows(params["authors"], "author_name"),
+                advisors: parse_relation_rows(params["advisors"], "advisor_name"),
+                examiners: parse_relation_rows(params["examiners"], "examiner_name"),
+                team_members: parse_relation_rows(params["team_members"], "member_name"),
+                keywords: parse_keywords(params["keywords"])
+              }
+
+              Repository.create_item_relations(item, relations)
+              socket = consume_and_create_bitstreams(socket, item)
+
+              {:noreply,
+               socket
+               |> put_flash(:info, "Item berhasil dikirim untuk review.")
+               |> stream_insert(:items, item, at: 0)
+               |> push_patch(to: ~p"/my/items")}
+
+            {:error, changeset} ->
+              {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
+          end
+        end
+
+      :edit ->
+        item = socket.assigns.current_item
+
+        case Repository.update_item_metadata(item, item_params) do
+          {:ok, updated_item} ->
+            relations = %{
+              authors: parse_relation_rows(params["authors"], "author_name"),
+              advisors: parse_relation_rows(params["advisors"], "advisor_name"),
+              examiners: parse_relation_rows(params["examiners"], "examiner_name"),
+              team_members: parse_relation_rows(params["team_members"], "member_name"),
+              keywords: parse_keywords(params["keywords"])
+            }
+
+            Repository.replace_item_relations(updated_item, relations)
+            socket = consume_and_create_bitstreams(socket, updated_item)
+
+            {:noreply,
+             socket
+             |> put_flash(:info, "Item berhasil diperbarui.")
+             |> stream_insert(:items, updated_item)
+             |> push_patch(to: ~p"/my/items")}
+
+          {:error, changeset} ->
+            {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
+        end
+    end
+  end
 
   defp list_all_collections do
     Repository.list_active_collections()

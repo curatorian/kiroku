@@ -75,6 +75,57 @@ defmodule KirokuWeb.Admin.SettingsLiveTest do
     end
   end
 
+  describe "submission settings" do
+    test "saves when both checkboxes are checked", %{conn: conn} do
+      Settings.put("allow_registration", "false")
+      Settings.put("allow_user_submit", "false")
+      conn = log_in(conn, create_admin_user())
+
+      {:ok, view, _html} = live(conn, ~p"/admin/settings")
+
+      html =
+        render_submit(view, "save_submission", %{
+          "submission" => %{"allow_registration" => "true", "allow_user_submit" => "true"}
+        })
+
+      assert Settings.allow_registration?()
+      assert Settings.allow_user_submit?()
+      assert html =~ "Self-registration enabled."
+    end
+
+    test "saves when both checkboxes are unchecked (empty payload)", %{conn: conn} do
+      Settings.put("allow_registration", "true")
+      Settings.put("allow_user_submit", "true")
+      conn = log_in(conn, create_admin_user())
+
+      {:ok, view, _html} = live(conn, ~p"/admin/settings")
+
+      # Unchecked checkboxes serialize to nothing → the event arrives with
+      # empty params. This used to crash the LiveView.
+      html = render_submit(view, "save_submission", %{})
+
+      refute Settings.allow_registration?()
+      refute Settings.allow_user_submit?()
+      assert html =~ "Self-registration disabled."
+      assert has_element?(view, "#submission-form")
+    end
+
+    test "mixed state saves each toggle independently", %{conn: conn} do
+      Settings.put("allow_registration", "false")
+      Settings.put("allow_user_submit", "false")
+      conn = log_in(conn, create_admin_user())
+
+      {:ok, view, _html} = live(conn, ~p"/admin/settings")
+
+      render_submit(view, "save_submission", %{
+        "submission" => %{"allow_registration" => "true"}
+      })
+
+      assert Settings.allow_registration?()
+      refute Settings.allow_user_submit?()
+    end
+  end
+
   describe "OAI-PMH settings" do
     test "renders the OAI form fields", %{conn: conn} do
       conn = log_in(conn, create_admin_user())

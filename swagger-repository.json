@@ -1724,7 +1724,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "API Token",
-        "description": "Kiroku API token. Format: kiroku_<base64>. Supply via Authorization: Bearer <token> header or ?token=<token> query parameter."
+        "description": "Kiroku API token. Format: kiroku_<base64>. Supply via the Authorization: Bearer <token> header."
       }
     },
     "parameters": {
@@ -1793,7 +1793,7 @@
             },
             "example": {
               "error": "unauthorized",
-              "message": "Missing or invalid API token. Supply it via the Authorization: Bearer <token> header or the ?token=<token> query parameter."
+              "message": "Missing or invalid API token. Supply it via the Authorization: Bearer <token> header."
             }
           }
         }

@@ -6,7 +6,7 @@ defmodule KirokuWeb.Api.V1.BitstreamDownloadApiTest do
 
   setup do
     user = create_user(:submitter)
-    {:ok, raw, _} = ApiTokens.create_token(user, "device-test-token", token_type: :device)
+    {:ok, raw, _} = ApiTokens.create_token(user, "download-test-token")
     {item, bitstream} = published_item_with_file()
 
     on_exit(fn ->

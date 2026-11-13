@@ -297,7 +297,17 @@ defmodule KirokuWeb.Api.V1.ItemController do
 
     with {:ok, item} <- fetch_item(id),
          true <- Authorization.can?(user, :update, item) do
-      case Repository.update_item(item, item_params) do
+      result =
+        if Authorization.can?(user, :publish, item) do
+          Repository.update_item(item, item_params)
+        else
+          # Submitters updating their own item may not touch lifecycle fields
+          # (status, discoverable, published_at, ...) — that would let them
+          # self-publish past review.
+          Repository.update_item_metadata(item, item_params)
+        end
+
+      case result do
         {:ok, _} ->
           json(conn, %{data: item_full_json(Repository.get_item_with_preloads!(id))})
 

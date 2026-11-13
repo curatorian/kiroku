@@ -66,6 +66,9 @@ defmodule Kiroku.MixProject do
       {:slugify, "~> 1.3"},
       {:tzdata, "~> 1.1"},
 
+      # ── Rate limiting ────────────────────────────────────────────────────
+      {:hammer, "~> 6.1"},
+
       # ── Email ─────────────────────────────────────────────────────────────
       {:swoosh, "~> 1.26.0"},
       # SMTP adapter for Swoosh (required by Swoosh.Adapters.SMTP)

@@ -21,6 +21,10 @@ defmodule KirokuWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :auth_rate_limit do
+    plug KirokuWeb.Plugs.RateLimit, bucket: "auth", limit: 30, period_ms: 60_000
+  end
+
   # OAI-PMH responses are XML, not JSON. Harvesters commonly send an explicit
   # `Accept: text/xml` header, so the `:api` pipeline (json only) would answer
   # them with 406 Not Acceptable.
@@ -91,6 +95,10 @@ defmodule KirokuWeb.Router do
 
     # Bitstream file access
     get "/items/:item_id/bitstreams/:id", BitstreamController, :show
+
+    # Locally stored uploads (STORAGE_ADAPTER=local) — access-controlled
+    # replacement for the old unconditional Plug.Static /uploads mount.
+    get "/uploads/*key", UploadsController, :show
 
     # Public repository browsing (LiveView, optional auth)
     live_session :public,
@@ -164,7 +172,7 @@ defmodule KirokuWeb.Router do
   # ── Auth routes (guest only) ───────────────────────────────────────────────────
 
   scope "/", KirokuWeb do
-    pipe_through [:browser, :redirect_if_user_is_authenticated]
+    pipe_through [:browser, :redirect_if_user_is_authenticated, :auth_rate_limit]
 
     post "/users/log_in", UserSessionController, :create
     get "/auth/paus", UserAuthPausController, :request
@@ -211,14 +219,14 @@ defmodule KirokuWeb.Router do
   # ── Staff / Admin routes ───────────────────────────────────────────────────────
 
   scope "/admin", KirokuWeb.Admin do
-    pipe_through [:browser, :require_authenticated_user]
+    pipe_through [:browser, :require_authenticated_user, :require_staff]
 
     # Logo upload — plain controller POST (no websocket dependency)
     post "/settings/logo", SettingsLogoController, :upload
     delete "/settings/logo", SettingsLogoController, :delete
 
     live_session :admin,
-      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      on_mount: [{KirokuWeb.UserAuth, :ensure_staff}] do
       # Dashboard
       live "/", DashboardLive, :index
 
@@ -234,11 +242,10 @@ defmodule KirokuWeb.Router do
       live "/collections/:id/edit", CollectionLive.Index, :edit
       live "/collections/:id", CollectionLive.Show, :show
 
-      # Item review
+      # Items
       live "/items", ItemLive.Index, :index
       live "/items/new", ItemLive.Index, :new
       live "/items/:id", ItemLive.Show, :show
-      live "/items/:id/review", ItemLive.Review, :review
 
       # User management
       live "/users", UserLive.Index, :index
@@ -258,13 +265,25 @@ defmodule KirokuWeb.Router do
     end
   end
 
+  # Item review — kept in its own live_session so non-admin `reviewer` users
+  # (and RBAC-policy reviewers) retain access while the rest of /admin is
+  # staff-only.
+  scope "/admin", KirokuWeb.Admin do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :admin_review,
+      on_mount: [{KirokuWeb.UserAuth, :ensure_reviewer_or_staff}] do
+      live "/items/:id/review", ItemLive.Review, :review
+    end
+  end
+
   # Kiosk fleet settings — superadmin only. Kept outside the KirokuWeb.Admin
   # scope like the API token management to avoid aliasing.
   scope "/admin", KirokuWeb do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :admin_kiosk,
-      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      on_mount: [{KirokuWeb.UserAuth, :ensure_superadmin}] do
       live "/kiosk", Admin.KioskSettingsLive, :index
     end
   end
@@ -275,7 +294,7 @@ defmodule KirokuWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :admin_api_tokens,
-      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      on_mount: [{KirokuWeb.UserAuth, :ensure_superadmin}] do
       live "/api-tokens", Admin.ApiTokenLive, :index
       live "/api-reference", Admin.ApiReferenceLive, :index
     end
@@ -292,12 +311,12 @@ defmodule KirokuWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :admin_sync,
-      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      on_mount: [{KirokuWeb.UserAuth, :ensure_staff}] do
       live "/sync", AdminSyncLive, :index
     end
 
     live_session :admin_saf,
-      on_mount: [{KirokuWeb.UserAuth, :ensure_authenticated}] do
+      on_mount: [{KirokuWeb.UserAuth, :ensure_staff}] do
       live "/saf", AdminSafLive, :index
     end
 

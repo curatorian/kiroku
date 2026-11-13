@@ -386,17 +386,24 @@ defmodule KirokuWeb.Admin.UserLive.Show do
   # ── Mount & params ─────────────────────────────────────────────────────────────
 
   def mount(%{"id" => id}, _session, socket) do
-    user = Accounts.get_user!(id)
-    policies = RbacPolicies.list_policies_for_user(user.id)
+    if staff?(socket) do
+      user = Accounts.get_user!(id)
+      policies = RbacPolicies.list_policies_for_user(user.id)
 
-    {:ok,
-     socket
-     |> assign(:user, user)
-     |> assign(:policies, policies)
-     |> assign(:form, nil)
-     |> assign(:pw_form, nil)
-     |> assign(:policy_form, nil)
-     |> assign(:editing_policy, nil)}
+      {:ok,
+       socket
+       |> assign(:user, user)
+       |> assign(:policies, policies)
+       |> assign(:form, nil)
+       |> assign(:pw_form, nil)
+       |> assign(:policy_form, nil)
+       |> assign(:editing_policy, nil)}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "You do not have access to this page.")
+       |> redirect(to: ~p"/")}
+    end
   end
 
   def handle_params(params, _uri, socket) do
@@ -507,40 +514,48 @@ defmodule KirokuWeb.Admin.UserLive.Show do
   end
 
   def handle_event("save_policy", %{"policy" => params}, socket) do
-    user = socket.assigns.user
-    params = Map.put(params, "user_id", user.id)
+    if socket.assigns.current_user.user_type == :superadmin do
+      user = socket.assigns.user
+      params = Map.put(params, "user_id", user.id)
 
-    case RbacPolicies.create_policy(params) do
-      {:ok, _policy} ->
-        policies = RbacPolicies.list_policies_for_user(user.id)
+      case RbacPolicies.create_policy(params) do
+        {:ok, _policy} ->
+          policies = RbacPolicies.list_policies_for_user(user.id)
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "Policy added.")
-         |> assign(:policies, policies)
-         |> push_patch(to: ~p"/admin/users/#{user.id}")}
+          {:noreply,
+           socket
+           |> put_flash(:info, "Policy added.")
+           |> assign(:policies, policies)
+           |> push_patch(to: ~p"/admin/users/#{user.id}")}
 
-      {:error, changeset} ->
-        {:noreply, assign(socket, :policy_form, to_form(changeset, as: :policy))}
+        {:error, changeset} ->
+          {:noreply, assign(socket, :policy_form, to_form(changeset, as: :policy))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
   def handle_event("update_policy", %{"policy" => params}, socket) do
-    policy = socket.assigns.editing_policy
+    if socket.assigns.current_user.user_type == :superadmin do
+      policy = socket.assigns.editing_policy
 
-    case RbacPolicies.update_policy(policy, params) do
-      {:ok, _policy} ->
-        user = socket.assigns.user
-        policies = RbacPolicies.list_policies_for_user(user.id)
+      case RbacPolicies.update_policy(policy, params) do
+        {:ok, _policy} ->
+          user = socket.assigns.user
+          policies = RbacPolicies.list_policies_for_user(user.id)
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "Policy updated.")
-         |> assign(:policies, policies)
-         |> push_patch(to: ~p"/admin/users/#{user.id}")}
+          {:noreply,
+           socket
+           |> put_flash(:info, "Policy updated.")
+           |> assign(:policies, policies)
+           |> push_patch(to: ~p"/admin/users/#{user.id}")}
 
-      {:error, changeset} ->
-        {:noreply, assign(socket, :policy_form, to_form(changeset, as: :policy))}
+        {:error, changeset} ->
+          {:noreply, assign(socket, :policy_form, to_form(changeset, as: :policy))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
@@ -569,6 +584,11 @@ defmodule KirokuWeb.Admin.UserLive.Show do
        do: true
 
   defp can_edit_user?(_actor, _target), do: false
+
+  defp staff?(socket) do
+    user = socket.assigns[:current_user]
+    user && user.user_type in [:admin, :superadmin]
+  end
 
   defp can_change_role?(%{user_type: :superadmin}, _target), do: true
 

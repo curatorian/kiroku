@@ -250,6 +250,19 @@ defmodule Kiroku.Accounts do
     get_user_by_email_and_password(email, password)
   end
 
+  @doc """
+  Returns true when the user may create or upload repository content:
+  confirmed users, plus admin-created staff roles that never go through
+  email confirmation (internal, reviewer, admin, superadmin).
+  """
+  def can_add_content?(%User{user_type: type})
+      when type in [:internal, :reviewer, :admin, :superadmin],
+      do: true
+
+  def can_add_content?(%User{confirmed_at: confirmed_at}) when confirmed_at != nil, do: true
+
+  def can_add_content?(%User{}), do: false
+
   def deliver_user_confirmation_instructions(%User{} = user, url_fun)
       when is_function(url_fun, 1) do
     if user.confirmed_at do

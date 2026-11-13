@@ -96,12 +96,12 @@ defmodule KirokuWeb.Api.V1.KioskStatusApiTest do
       assert json_response(conn, 401)["error"] == "unauthorized"
     end
 
-    test "device token also authorizes regular API routes" do
+    test "device token does NOT authorize regular API routes" do
       user = create_user()
       %{raw: raw} = token(user, :device)
 
       conn = authed_conn(raw) |> get(~p"/api/v1/communities")
-      assert conn.status == 200
+      assert conn.status == 401
     end
   end
 end

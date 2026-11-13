@@ -56,35 +56,17 @@
         <p class="font-body text-sm leading-relaxed" style="color: var(--color-wisteria);">
           All REST API requests must include a valid API token, supplied via
           the <code style="color: var(--color-ribbon-gold);">Authorization</code>
-          header or the <code style="color: var(--color-ribbon-gold);">?token=</code>
-          query parameter.
+          header.
           Requests without a token receive a
           <code style="color: var(--color-ribbon-red);">401 Unauthorized</code>
           response.
         </p>
         <div class="space-y-2">
-          <p
-            class="text-xs font-ui font-semibold uppercase tracking-wider"
-            style="color: var(--color-quill);"
-          >
-            Option A — Header (recommended for apps/scripts):
-          </p>
           <pre
             phx-no-curly-interpolation
             class="text-xs font-mono p-3 rounded-lg overflow-x-auto"
             style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.12);"
           ><code>Authorization: Bearer kiroku_your_token_here</code></pre>
-          <p
-            class="text-xs font-ui font-semibold uppercase tracking-wider pt-2"
-            style="color: var(--color-quill);"
-          >
-            Option B — Query parameter (quick testing in browser):
-          </p>
-          <pre
-            phx-no-curly-interpolation
-            class="text-xs font-mono p-3 rounded-lg overflow-x-auto"
-            style="background: var(--color-void); color: var(--color-lavender); border: 1px solid rgba(155,126,200,0.12);"
-          ><code>/api/v1/items?token=kiroku_your_token_here&amp;q=machine</code></pre>
         </div>
       </div>
 

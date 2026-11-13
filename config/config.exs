@@ -46,6 +46,16 @@ config :kiroku, KirokuWeb.Endpoint,
   pubsub_server: Kiroku.PubSub,
   live_view: [signing_salt: "mCUE+WqT"]
 
+# Rate limiting (auth endpoints, API token verification). ETS backend —
+# per-node counters, which is fine for the single-node deployment.
+config :hammer,
+  backend:
+    {Hammer.Backend.ETS,
+     [
+       expiry_ms: 60 * 60 * 4 * 1000,
+       cleanup_interval_ms: 60 * 10 * 1000
+     ]}
+
 # Configure the mailer
 #
 # By default it uses the "Local" adapter which stores the emails

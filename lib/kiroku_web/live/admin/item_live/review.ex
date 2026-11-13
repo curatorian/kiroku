@@ -1,21 +1,34 @@
 defmodule KirokuWeb.Admin.ItemLive.Review do
   use KirokuWeb, :live_view
 
+  alias Kiroku.Access.Authorization
   alias Kiroku.Repository
 
   def mount(%{"id" => id}, _session, socket) do
-    item =
-      Repository.get_item!(id)
-      |> Kiroku.Repo.preload([:submitter, :reviewed_by, :bitstreams])
+    if reviewer_or_staff?(socket) do
+      item =
+        Repository.get_item!(id)
+        |> Kiroku.Repo.preload([:submitter, :reviewed_by, :bitstreams])
 
-    review_form =
-      to_form(%{"review_action" => "approve", "review_note" => ""}, as: :review)
+      review_form =
+        to_form(%{"review_action" => "approve", "review_note" => ""}, as: :review)
 
-    {:ok,
-     socket
-     |> assign(:item, item)
-     |> assign(:review_form, review_form)
-     |> stream(:bitstreams, item.bitstreams)}
+      {:ok,
+       socket
+       |> assign(:item, item)
+       |> assign(:review_form, review_form)
+       |> stream(:bitstreams, item.bitstreams)}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "You do not have access to this page.")
+       |> redirect(to: ~p"/")}
+    end
+  end
+
+  defp reviewer_or_staff?(socket) do
+    user = socket.assigns[:current_user]
+    user && user.user_type in [:reviewer, :admin, :superadmin]
   end
 
   def render(assigns) do
@@ -82,9 +95,6 @@ defmodule KirokuWeb.Admin.ItemLive.Review do
         <div class="kiroku-card p-5 space-y-3">
           <h3 class="font-heading text-lg" style="color: var(--color-lilac);">Files</h3>
           <div id="bitstreams" phx-update="stream" class="space-y-2">
-            <div class="hidden only:block text-sm" style="color: var(--color-wisteria);">
-              No files attached.
-            </div>
             <div
               :for={{dom_id, bs} <- @streams.bitstreams}
               id={dom_id}
@@ -106,6 +116,13 @@ defmodule KirokuWeb.Admin.ItemLive.Review do
               </.link>
             </div>
           </div>
+          <p
+            :if={@item.bitstreams == []}
+            class="text-sm"
+            style="color: var(--color-wisteria);"
+          >
+            No files attached.
+          </p>
         </div>
 
         <%!-- Review action panel --%>
@@ -206,21 +223,25 @@ defmodule KirokuWeb.Admin.ItemLive.Review do
     item = socket.assigns.item
     reviewer = socket.assigns.current_user
 
-    case Repository.start_review(item, reviewer) do
-      {:ok, updated_item} ->
-        {:noreply,
-         socket
-         |> assign(
-           :item,
-           Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
-         )
-         |> put_flash(:info, "Review started.")}
+    if Authorization.can?(reviewer, :review, item) do
+      case Repository.start_review(item, reviewer) do
+        {:ok, updated_item} ->
+          {:noreply,
+           socket
+           |> assign(
+             :item,
+             Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
+           )
+           |> put_flash(:info, "Review started.")}
 
-      {:error, :invalid_transition} ->
-        {:noreply, put_flash(socket, :error, "Cannot start review from this status.")}
+        {:error, :invalid_transition} ->
+          {:noreply, put_flash(socket, :error, "Cannot start review from this status.")}
 
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
+        {:error, changeset} ->
+          {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
@@ -230,62 +251,72 @@ defmodule KirokuWeb.Admin.ItemLive.Review do
     action = params["review_action"]
     note = params["review_note"]
 
-    result =
-      case action do
-        "approve" ->
-          Repository.approve_item(item, reviewer)
+    if Authorization.can?(reviewer, :review, item) do
+      result =
+        case action do
+          "approve" ->
+            Repository.approve_item(item, reviewer)
 
-        "revision" ->
-          if String.trim(note || "") == "" do
-            {:validation_error, "A note is required when requesting revision."}
-          else
-            Repository.request_revision(item, reviewer, note)
-          end
+          "revision" ->
+            if String.trim(note || "") == "" do
+              {:validation_error, "A note is required when requesting revision."}
+            else
+              Repository.request_revision(item, reviewer, note)
+            end
 
-        "reject" ->
-          if String.trim(note || "") == "" do
-            {:validation_error, "A note is required when rejecting."}
-          else
-            Repository.reject_item(item, reviewer, note)
-          end
+          "reject" ->
+            if String.trim(note || "") == "" do
+              {:validation_error, "A note is required when rejecting."}
+            else
+              Repository.reject_item(item, reviewer, note)
+            end
 
-        _ ->
-          {:error, :unknown_action}
+          _ ->
+            {:error, :unknown_action}
+        end
+
+      case result do
+        {:ok, updated_item} ->
+          loaded = Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
+
+          {:noreply,
+           socket
+           |> assign(:item, loaded)
+           |> stream(:bitstreams, loaded.bitstreams, reset: true)
+           |> put_flash(:info, action_message(action))}
+
+        {:validation_error, msg} ->
+          {:noreply, put_flash(socket, :error, msg)}
+
+        {:error, :invalid_transition} ->
+          {:noreply,
+           put_flash(socket, :error, "This action is not allowed from the current status.")}
+
+        {:error, changeset} ->
+          {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
       end
-
-    case result do
-      {:ok, updated_item} ->
-        loaded = Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
-
-        {:noreply,
-         socket
-         |> assign(:item, loaded)
-         |> stream(:bitstreams, loaded.bitstreams, reset: true)
-         |> put_flash(:info, action_message(action))}
-
-      {:validation_error, msg} ->
-        {:noreply, put_flash(socket, :error, msg)}
-
-      {:error, :invalid_transition} ->
-        {:noreply,
-         put_flash(socket, :error, "This action is not allowed from the current status.")}
-
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
   def handle_event("withdraw", _params, socket) do
-    case Repository.withdraw_item_fsm(socket.assigns.item) do
-      {:ok, updated_item} ->
-        loaded = Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
-        {:noreply, socket |> assign(:item, loaded) |> put_flash(:info, "Item withdrawn.")}
+    item = socket.assigns.item
 
-      {:error, :invalid_transition} ->
-        {:noreply, put_flash(socket, :error, "Cannot withdraw from this status.")}
+    if Authorization.can?(socket.assigns.current_user, :withdraw, item) do
+      case Repository.withdraw_item_fsm(item) do
+        {:ok, updated_item} ->
+          loaded = Kiroku.Repo.preload(updated_item, [:submitter, :reviewed_by, :bitstreams])
+          {:noreply, socket |> assign(:item, loaded) |> put_flash(:info, "Item withdrawn.")}
 
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
+        {:error, :invalid_transition} ->
+          {:noreply, put_flash(socket, :error, "Cannot withdraw from this status.")}
+
+        {:error, changeset} ->
+          {:noreply, put_flash(socket, :error, "Error: #{inspect(changeset.errors)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 

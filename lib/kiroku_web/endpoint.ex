@@ -12,7 +12,7 @@ defmodule KirokuWeb.Endpoint do
   ]
 
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
+    websocket: [connect_info: [:peer_data, session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
@@ -27,11 +27,9 @@ defmodule KirokuWeb.Endpoint do
     only: KirokuWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
-  # Serve locally uploaded files (used when STORAGE_ADAPTER=local)
-  plug Plug.Static,
-    at: "/uploads",
-    from: {:kiroku, "priv/uploads"},
-    gzip: false
+  # Locally uploaded files (STORAGE_ADAPTER=local) are NOT served here.
+  # /uploads/* goes through the router to KirokuWeb.UploadsController so
+  # bitstream access control (item visibility, embargo, bundles) is enforced.
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

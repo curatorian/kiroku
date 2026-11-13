@@ -355,19 +355,26 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   # ── Mount & params ───────────────────────────────────────────────────────────
 
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:total_users, 0)
-     |> assign(:filter, "all")
-     |> assign(:search_query, "")
-     |> assign(:sort_by, :user_type)
-     |> assign(:sort_dir, :asc)
-     |> assign(:search_form, to_form(%{"q" => ""}))
-     |> assign(:sort_form, to_form(%{"sort" => "user_type", "dir" => "asc"}))
-     |> assign(:pagination, Pagination.build(0, 1, 20))
-     |> assign(:available_types, available_types_for(socket.assigns.current_user))
-     |> assign(:form, nil)
-     |> stream(:users, [])}
+    if staff?(socket) do
+      {:ok,
+       socket
+       |> assign(:total_users, 0)
+       |> assign(:filter, "all")
+       |> assign(:search_query, "")
+       |> assign(:sort_by, :user_type)
+       |> assign(:sort_dir, :asc)
+       |> assign(:search_form, to_form(%{"q" => ""}))
+       |> assign(:sort_form, to_form(%{"sort" => "user_type", "dir" => "asc"}))
+       |> assign(:pagination, Pagination.build(0, 1, 20))
+       |> assign(:available_types, available_types_for(socket.assigns.current_user))
+       |> assign(:form, nil)
+       |> stream(:users, [])}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "You do not have access to this page.")
+       |> redirect(to: ~p"/")}
+    end
   end
 
   def handle_params(params, _uri, socket) do
@@ -467,17 +474,25 @@ defmodule KirokuWeb.Admin.UserLive.Index do
   end
 
   def handle_event("create_user", %{"user" => params}, socket) do
-    case Accounts.admin_create_user(params) do
-      {:ok, user} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "User #{user.email} created.")
-         |> stream_insert(:users, user, at: 0)
-         |> assign(:total_users, socket.assigns.total_users + 1)
-         |> push_patch(to: ~p"/admin/users")}
+    current_user = socket.assigns.current_user
 
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: :user))}
+    if can_create_user?(current_user) do
+      params = maybe_restrict_role(params, current_user)
+
+      case Accounts.admin_create_user(params) do
+        {:ok, user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "User #{user.email} created.")
+           |> stream_insert(:users, user, at: 0)
+           |> assign(:total_users, socket.assigns.total_users + 1)
+           |> push_patch(to: ~p"/admin/users")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, :form, to_form(changeset, as: :user))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
@@ -555,6 +570,23 @@ defmodule KirokuWeb.Admin.UserLive.Index do
 
   defp can_create_user?(%{user_type: type}) when type in [:admin, :superadmin], do: true
   defp can_create_user?(_), do: false
+
+  defp staff?(socket) do
+    user = socket.assigns[:current_user]
+    user && user.user_type in [:admin, :superadmin]
+  end
+
+  defp maybe_restrict_role(params, %{user_type: :admin}) do
+    user_type = Map.get(params, "user_type", "submitter")
+
+    if user_type in @user_types_admin do
+      params
+    else
+      Map.put(params, "user_type", "submitter")
+    end
+  end
+
+  defp maybe_restrict_role(params, _current_user), do: params
 
   defp can_delete_user?(%{user_type: :superadmin}, _target), do: true
   defp can_delete_user?(_actor, _target), do: false

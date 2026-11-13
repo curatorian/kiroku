@@ -83,6 +83,8 @@ defmodule KirokuWeb.UserResetPasswordLive do
   end
 
   def mount(params, _session, socket) do
+    socket = assign(socket, :client_ip, KirokuWeb.Plugs.RateLimit.client_ip(socket))
+
     socket =
       case socket.assigns.live_action do
         :new ->
@@ -105,17 +107,28 @@ defmodule KirokuWeb.UserResetPasswordLive do
   end
 
   def handle_event("request_reset", %{"user" => %{"email" => email}}, socket) do
-    if user = Accounts.get_user_by_email(email) do
-      Accounts.deliver_user_reset_password_instructions(
-        user,
-        &url(~p"/users/reset_password/#{&1}")
-      )
-    end
+    rate_limit = KirokuWeb.Plugs.RateLimit.key("reset_request", socket.assigns.client_ip)
 
-    {:noreply,
-     socket
-     |> put_flash(:info, "Jika email terdaftar, instruksi reset kata sandi telah dikirimkan.")
-     |> redirect(to: ~p"/users/log_in")}
+    case KirokuWeb.Plugs.RateLimit.check(rate_limit, 3, 600_000) do
+      {:deny, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Terlalu banyak permintaan. Silakan coba lagi nanti.")
+         |> redirect(to: ~p"/users/log_in")}
+
+      :ok ->
+        if user = Accounts.get_user_by_email(email) do
+          Accounts.deliver_user_reset_password_instructions(
+            user,
+            &url(~p"/users/reset_password/#{&1}")
+          )
+        end
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Jika email terdaftar, instruksi reset kata sandi telah dikirimkan.")
+         |> redirect(to: ~p"/users/log_in")}
+    end
   end
 
   def handle_event("validate", %{"user" => params}, socket) do

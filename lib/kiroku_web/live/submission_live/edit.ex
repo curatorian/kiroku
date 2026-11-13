@@ -1,7 +1,7 @@
 defmodule KirokuWeb.SubmissionLive.Edit do
   use KirokuWeb, :live_view
 
-  alias Kiroku.{Repository, Content}
+  alias Kiroku.{Accounts, Repository, Content}
   alias Kiroku.Repository.Item
   alias Kiroku.Storage.Uploader
   alias Kiroku.Access.Authorization
@@ -14,6 +14,17 @@ defmodule KirokuWeb.SubmissionLive.Edit do
     user = socket.assigns.current_user
     item = Repository.get_item_with_preloads!(id)
 
+    if Accounts.can_add_content?(user) do
+      do_mount(socket, user, item)
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Please confirm your email address before uploading files.")
+       |> push_navigate(to: ~p"/my/items")}
+    end
+  end
+
+  defp do_mount(socket, user, item) do
     unless Authorization.can?(user, :update, item) do
       {:ok, push_navigate(socket, to: ~p"/my/items")}
     else
@@ -313,28 +324,42 @@ defmodule KirokuWeb.SubmissionLive.Edit do
   def handle_event("save", %{"item" => item_params} = params, socket) do
     item = socket.assigns.item
     submit_as = Map.get(params, "submit_as", "draft")
-    status = if submit_as == "submitted", do: "submitted", else: "draft"
 
-    attrs = Map.put(item_params, "status", status)
-
-    case Repository.update_item(item, attrs) do
+    case Repository.update_item_metadata(item, item_params) do
       {:ok, updated_item} ->
-        socket = consume_and_create_bitstreams(socket, updated_item)
-
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           if(status == "submitted",
-             do: "Resubmitted for review.",
-             else: "Draft saved."
-           )
-         )
-         |> push_navigate(to: ~p"/my/items")}
+        save_status(updated_item, submit_as, socket)
 
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset, as: :item))}
     end
+  end
+
+  # Resubmitting is a real FSM transition (draft → submitted) owned by the
+  # submitter; anything else keeps the item's current status.
+  defp save_status(%Item{status: :draft} = item, "submitted", socket) do
+    case Repository.submit_item(item) do
+      {:ok, submitted_item} ->
+        finish_save(submitted_item, socket, "Resubmitted for review.")
+
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "This item can no longer be resubmitted.")}
+    end
+  end
+
+  defp save_status(item, submit_as, socket) do
+    message =
+      if submit_as == "submitted", do: "Resubmitted for review.", else: "Draft saved."
+
+    finish_save(item, socket, message)
+  end
+
+  defp finish_save(item, socket, message) do
+    socket = consume_and_create_bitstreams(socket, item)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, message)
+     |> push_navigate(to: ~p"/my/items")}
   end
 
   # ── Reusable upload field component ─────────────────────────────────────────

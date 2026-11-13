@@ -65,6 +65,8 @@ defmodule KirokuWeb.UserRegistrationLive do
   end
 
   def mount(_params, _session, socket) do
+    socket = assign(socket, :client_ip, KirokuWeb.Plugs.RateLimit.client_ip(socket))
+
     if Kiroku.Settings.allow_registration?() do
       changeset = Accounts.change_user_registration(%User{})
       {:ok, assign(socket, form: to_form(changeset, as: :user))}
@@ -86,6 +88,18 @@ defmodule KirokuWeb.UserRegistrationLive do
   end
 
   def handle_event("save", %{"user" => params}, socket) do
+    rate_limit = KirokuWeb.Plugs.RateLimit.key("register", socket.assigns.client_ip)
+
+    case KirokuWeb.Plugs.RateLimit.check(rate_limit, 5, 60_000) do
+      :ok ->
+        save_user(params, socket)
+
+      {:deny, _} ->
+        {:noreply, put_flash(socket, :error, "Too many attempts. Please try again later.")}
+    end
+  end
+
+  defp save_user(params, socket) do
     if not Kiroku.Settings.allow_registration?() do
       {:noreply,
        socket

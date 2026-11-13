@@ -1052,26 +1052,13 @@ defmodule KirokuWeb.Admin.SettingsLive do
 
   @impl true
   def handle_event("save_submission", %{"submission" => params}, socket) do
-    allowed = params["allow_user_submit"] == "true"
-    reg = params["allow_registration"] == "true"
+    save_submission(params, socket)
+  end
 
-    Settings.put("allow_user_submit", if(allowed, do: "true", else: "false"))
-    Settings.put("allow_registration", if(reg, do: "true", else: "false"))
-
-    messages =
-      []
-      |> Kernel.++(
-        if reg, do: ["Self-registration enabled."], else: ["Self-registration disabled."]
-      )
-      |> Kernel.++(
-        if allowed, do: ["User submissions enabled."], else: ["User submissions disabled."]
-      )
-
-    {:noreply,
-     socket
-     |> assign(:allow_submit, allowed)
-     |> assign(:allow_registration, reg)
-     |> put_flash(:info, Enum.join(messages, " "))}
+  # Unchecked checkboxes serialize to nothing: submitting the form with both
+  # toggles unchecked sends an empty payload, which must still save.
+  def handle_event("save_submission", _params, socket) do
+    save_submission(%{}, socket)
   end
 
   @impl true
@@ -1143,6 +1130,29 @@ defmodule KirokuWeb.Admin.SettingsLive do
      socket
      |> assign(:oai_form, to_form(oai_form_params(oai), as: :oai))
      |> put_flash(:info, "OAI settings saved.")}
+  end
+
+  defp save_submission(params, socket) do
+    allowed = params["allow_user_submit"] == "true"
+    reg = params["allow_registration"] == "true"
+
+    Settings.put("allow_user_submit", if(allowed, do: "true", else: "false"))
+    Settings.put("allow_registration", if(reg, do: "true", else: "false"))
+
+    messages =
+      []
+      |> Kernel.++(
+        if reg, do: ["Self-registration enabled."], else: ["Self-registration disabled."]
+      )
+      |> Kernel.++(
+        if allowed, do: ["User submissions enabled."], else: ["User submissions disabled."]
+      )
+
+    {:noreply,
+     socket
+     |> assign(:allow_submit, allowed)
+     |> assign(:allow_registration, reg)
+     |> put_flash(:info, Enum.join(messages, " "))}
   end
 
   defp put_if_present(_key, val) when val in [nil, ""], do: :ignore

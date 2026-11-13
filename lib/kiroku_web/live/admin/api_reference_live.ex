@@ -64,10 +64,9 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
           <p class="text-sm" style="color: var(--color-wisteria);">
             All API endpoints require authentication. Pass your API token via the
             <code style="color: var(--color-ribbon-gold);">Authorization</code>
-            header or <code style="color: var(--color-ribbon-gold);">?token=</code>
-            query parameter.
+            header.
           </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 gap-4">
             <div
               class="rounded-lg p-4"
               style="background: var(--color-void); border: 1px solid rgba(155,126,200,0.08);"
@@ -76,29 +75,13 @@ defmodule KirokuWeb.Admin.ApiReferenceLive do
                 class="text-xs font-ui font-semibold uppercase tracking-wider mb-2"
                 style="color: var(--color-quill);"
               >
-                Header (Recommended)
+                Authorization Header
               </p>
               <pre
                 phx-no-curly-interpolation
                 class="text-xs font-mono p-3 rounded-lg"
                 style="background: var(--color-grimoire); color: var(--color-lavender);"
               ><code>Authorization: Bearer kiroku_abc123...</code></pre>
-            </div>
-            <div
-              class="rounded-lg p-4"
-              style="background: var(--color-void); border: 1px solid rgba(155,126,200,0.08);"
-            >
-              <p
-                class="text-xs font-ui font-semibold uppercase tracking-wider mb-2"
-                style="color: var(--color-quill);"
-              >
-                Query Parameter
-              </p>
-              <pre
-                phx-no-curly-interpolation
-                class="text-xs font-mono p-3 rounded-lg"
-                style="background: var(--color-grimoire); color: var(--color-lavender);"
-              ><code>/api/v1/items?token=kiroku_abc123...</code></pre>
             </div>
           </div>
           <p class="text-xs" style="color: var(--color-dust);">

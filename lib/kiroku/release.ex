@@ -88,6 +88,29 @@ defmodule Kiroku.Release do
     Kiroku.Sync.Importer.run_import(args)
   end
 
+  @doc """
+  Deletes matched items together with their bitstream rows and — unlike the
+  app's own delete paths — the actual storage objects in MinIO/local disk.
+
+  Dry run by default:
+
+      bin/kiroku eval 'Kiroku.Release.purge_content(["--title-prefix", "tmp_"])'
+
+  With deletion:
+
+      bin/kiroku eval 'Kiroku.Release.purge_content(["--title-prefix", "tmp_", "--execute"])'
+
+  Orphan scan (storage objects with no DB row):
+
+      bin/kiroku eval 'Kiroku.Release.purge_content(["--title-prefix", "tmp_", "--orphans"])'
+  """
+  def purge_content(args \\ []) do
+    load_app()
+    Application.ensure_all_started(:kiroku)
+
+    Kiroku.ContentPurge.run(args)
+  end
+
   defp repos, do: Application.fetch_env!(@app, :ecto_repos)
   defp load_app, do: Application.load(@app)
 end

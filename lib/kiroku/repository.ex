@@ -1960,6 +1960,27 @@ defmodule Kiroku.Repository do
     result
   end
 
+  @doc """
+  Updates item metadata using a restricted changeset that ignores workflow /
+  lifecycle fields (status, publication, review, embargo, submitter). Use this
+  for callers that are not authorized to change an item's lifecycle — e.g. a
+  submitter editing their own item. Lifecycle changes must go through the
+  dedicated FSM functions (`submit_item`, `publish_item`, `approve_item`, ...).
+  """
+  def update_item_metadata(%Item{} = item, attrs) do
+    result =
+      item
+      |> Item.restricted_changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated} -> record_version(updated, action: "updated")
+      _ -> :ok
+    end
+
+    result
+  end
+
   def publish_item(%Item{} = item) do
     result =
       item

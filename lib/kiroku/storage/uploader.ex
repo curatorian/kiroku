@@ -199,6 +199,12 @@ defmodule Kiroku.Storage.Uploader do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @doc "Root directory for local-adapter storage (relative to the app)."
+  def local_upload_dir, do: @local_upload_dir
+
+  @doc "Builds an ExAws request config from the runtime storage settings."
+  def s3_config, do: ex_aws_config()
+
   defp upload_s3(key, content, mime_type) do
     bucket = Kiroku.Settings.storage_bucket()
 

@@ -46,6 +46,44 @@ defmodule KirokuWeb.UserAuth do
     end
   end
 
+  def on_mount(:ensure_staff, _params, session, socket) do
+    ensure_role(socket, session, [:admin, :superadmin])
+  end
+
+  def on_mount(:ensure_reviewer_or_staff, _params, session, socket) do
+    ensure_role(socket, session, [:reviewer, :admin, :superadmin])
+  end
+
+  def on_mount(:ensure_superadmin, _params, session, socket) do
+    ensure_role(socket, session, [:superadmin])
+  end
+
+  defp ensure_role(socket, session, allowed_roles) do
+    socket = mount_current_user(socket, session)
+
+    case socket.assigns.current_user do
+      nil ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+
+        {:halt, socket}
+
+      user ->
+        if user.user_type in allowed_roles do
+          {:cont, socket}
+        else
+          socket =
+            socket
+            |> Phoenix.LiveView.put_flash(:error, "You do not have access to this page.")
+            |> Phoenix.LiveView.redirect(to: ~p"/")
+
+          {:halt, socket}
+        end
+    end
+  end
+
   defp mount_current_user(socket, session) do
     Phoenix.Component.assign_new(socket, :current_user, fn ->
       if user_token = session[@session_token_key] do
@@ -123,6 +161,38 @@ defmodule KirokuWeb.UserAuth do
       |> maybe_store_return_to()
       |> redirect(to: ~p"/users/log_in")
       |> halt()
+    end
+  end
+
+  @doc "Used for routes that require an admin or superadmin session."
+  def require_staff(conn, _opts) do
+    require_role(conn, [:admin, :superadmin])
+  end
+
+  @doc "Used for routes that require a superadmin session."
+  def require_superadmin(conn, _opts) do
+    require_role(conn, [:superadmin])
+  end
+
+  defp require_role(conn, allowed_roles) do
+    user = conn.assigns[:current_user]
+
+    cond do
+      is_nil(user) ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      user.user_type in allowed_roles ->
+        conn
+
+      true ->
+        conn
+        |> put_flash(:error, "You do not have access to this page.")
+        |> redirect(to: ~p"/")
+        |> halt()
     end
   end
 

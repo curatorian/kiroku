@@ -21,6 +21,10 @@ defmodule Kiroku.Content do
 
   def get_bitstream(id), do: Repo.get(Bitstream, id)
 
+  def get_bitstream_by_storage_path(storage_path) do
+    Repo.get_by(Bitstream, storage_path: storage_path)
+  end
+
   def create_bitstream(attrs) do
     %Bitstream{}
     |> Bitstream.changeset(attrs)

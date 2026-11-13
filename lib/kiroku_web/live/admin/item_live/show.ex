@@ -1,6 +1,7 @@
 defmodule KirokuWeb.Admin.ItemLive.Show do
   use KirokuWeb, :live_view
 
+  alias Kiroku.Access.Authorization
   alias Kiroku.{Repository, Content}
   alias Kiroku.Repository.Item
 
@@ -1008,18 +1009,30 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
   # ── Mount / Params ───────────────────────────────────────────────────────────
 
   def mount(%{"id" => id}, _session, socket) do
-    item = Repository.get_item_with_preloads!(id)
-    versions = Repository.list_item_versions(item.id)
-    collections = Repository.list_collections()
+    if staff?(socket) do
+      item = Repository.get_item_with_preloads!(id)
+      versions = Repository.list_item_versions(item.id)
+      collections = Repository.list_collections()
 
-    {:ok,
-     socket
-     |> assign(:item, item)
-     |> assign(:versions, versions)
-     |> assign(:collections, collections)
-     |> assign(:tab, :status)
-     |> assign(:editing_bs_id, nil)
-     |> assign(:metadata_form, to_form(item_changeset(item)))}
+      {:ok,
+       socket
+       |> assign(:item, item)
+       |> assign(:versions, versions)
+       |> assign(:collections, collections)
+       |> assign(:tab, :status)
+       |> assign(:editing_bs_id, nil)
+       |> assign(:metadata_form, to_form(item_changeset(item)))}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "You do not have access to this page.")
+       |> redirect(to: ~p"/")}
+    end
+  end
+
+  defp staff?(socket) do
+    user = socket.assigns[:current_user]
+    user && user.user_type in [:admin, :superadmin]
   end
 
   def handle_params(%{"tab" => tab_str}, _uri, socket) do
@@ -1038,41 +1051,59 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
   # ── Lifecycle events ─────────────────────────────────────────────────────────
 
   def handle_event("publish", _params, socket) do
-    case Repository.publish_item(socket.assigns.item) do
-      {:ok, item} ->
-        {:noreply, socket |> put_flash(:info, "Item published.") |> reload_item(item)}
+    if Authorization.can?(socket.assigns.current_user, :publish, socket.assigns.item) do
+      case Repository.publish_item(socket.assigns.item) do
+        {:ok, item} ->
+          {:noreply, socket |> put_flash(:info, "Item published.") |> reload_item(item)}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to publish item.")}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to publish item.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
   def handle_event("withdraw", _params, socket) do
-    case Repository.withdraw_item_fsm(socket.assigns.item) do
-      {:ok, item} ->
-        {:noreply, socket |> put_flash(:info, "Item withdrawn.") |> reload_item(item)}
+    if Authorization.can?(socket.assigns.current_user, :withdraw, socket.assigns.item) do
+      case Repository.withdraw_item_fsm(socket.assigns.item) do
+        {:ok, item} ->
+          {:noreply, socket |> put_flash(:info, "Item withdrawn.") |> reload_item(item)}
 
-      {:error, :invalid_transition} ->
-        {:noreply, put_flash(socket, :error, "Cannot withdraw from current status.")}
+        {:error, :invalid_transition} ->
+          {:noreply, put_flash(socket, :error, "Cannot withdraw from current status.")}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to withdraw item.")}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to withdraw item.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
   def handle_event("lift_embargo", _params, socket) do
-    case Repository.lift_embargo(socket.assigns.item) do
-      {:ok, item} ->
-        {:noreply, socket |> put_flash(:info, "Embargo lifted.") |> reload_item(item)}
+    if Authorization.can?(socket.assigns.current_user, :lift_embargo, socket.assigns.item) do
+      case Repository.lift_embargo(socket.assigns.item) do
+        {:ok, item} ->
+          {:noreply, socket |> put_flash(:info, "Embargo lifted.") |> reload_item(item)}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to lift embargo.")}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to lift embargo.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
   def handle_event("delete", _params, socket) do
-    {:ok, _} = Repository.delete_item(socket.assigns.item)
-    {:noreply, socket |> put_flash(:info, "Item deleted.") |> push_navigate(to: ~p"/admin/items")}
+    if Authorization.can?(socket.assigns.current_user, :delete, socket.assigns.item) do
+      {:ok, _} = Repository.delete_item(socket.assigns.item)
+
+      {:noreply,
+       socket |> put_flash(:info, "Item deleted.") |> push_navigate(to: ~p"/admin/items")}
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
+    end
   end
 
   # ── Metadata editing ─────────────────────────────────────────────────────────
@@ -1087,18 +1118,22 @@ defmodule KirokuWeb.Admin.ItemLive.Show do
   end
 
   def handle_event("save_metadata", %{"item" => params}, socket) do
-    case Repository.update_item(socket.assigns.item, params) do
-      {:ok, item} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Metadata saved.")
-         |> reload_item(item)}
+    if Authorization.can?(socket.assigns.current_user, :update, socket.assigns.item) do
+      case Repository.update_item(socket.assigns.item, params) do
+        {:ok, item} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Metadata saved.")
+           |> reload_item(item)}
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Validation failed.")
-         |> assign(:metadata_form, to_form(changeset))}
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Validation failed.")
+           |> assign(:metadata_form, to_form(changeset))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Permission denied.")}
     end
   end
 
