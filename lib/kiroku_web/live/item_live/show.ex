@@ -752,10 +752,7 @@ defmodule KirokuWeb.ItemLive.Show do
                                 class="text-xs font-medium truncate"
                                 style="color: var(--color-quill);"
                               >
-                                {bs.description || bs.filename}
-                              </p>
-                              <p class="text-[10px] truncate" style="color: var(--color-dust);">
-                                {bs.filename}
+                                {bs.description || "Document"}
                               </p>
                             </div>
                             <span
