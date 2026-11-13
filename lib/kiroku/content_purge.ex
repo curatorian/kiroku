@@ -331,7 +331,10 @@ defmodule Kiroku.ContentPurge do
   defp s3_orphans(bucket, known) do
     bucket
     |> ExAws.S3.list_objects_v2(prefix: "items/")
-    |> ExAws.stream!()
+    # Explicit config — otherwise ExAws falls back through its default chain
+    # (AWS_* env vars, then the EC2 instance metadata endpoint) and crashes
+    # on non-EC2 hosts like a podman server.
+    |> ExAws.stream!(Uploader.s3_config())
     |> Enum.reject(&(&1.key in known))
     |> Enum.map(& &1.key)
   rescue
